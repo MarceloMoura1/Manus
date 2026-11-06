@@ -3287,4 +3287,72 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
     });
   });
 
+  describe("Hermes Dynamic Temporal Context and Error/Success Separation", () => {
+    it("injects current date, month and year dynamically into the system instruction", () => {
+      const allowedTools = getAllowedHermesTools(["ai-assistant", "sales", "tickets"]);
+      const instruction = buildSystemInstruction(allowedTools);
+
+      const hoje = new Date();
+      const anoCorrente = hoje.getFullYear();
+
+      expect(instruction).toContain("CONTEXTO TEMPORAL DINÂMICO E PRECISÃO DE CALENDÁRIO");
+      expect(instruction).toContain("Hoje é ");
+      expect(instruction).toContain(String(anoCorrente));
+      expect(instruction).toContain("Tenha total precisão temporal");
+      expect(instruction).toContain("nunca suponha anos passados como 2024");
+    });
+
+    it("does not concatenate error message when tool execution is successful", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("megadesk_domain_clients")) {
+          return [[{ integrations_json: JSON.stringify({ geminiKey: "test-key", geminiQuotaMensal: 50000 }) }]];
+        }
+        if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+          return [[{ total: 0 }]];
+        }
+        if (sql.includes("FROM megadesk_domain_chamados")) {
+          return [[
+            { chamadoId: "c-1", chamadoNumber: 42, title: "Erro na nota", customerName: "Empresa XPTO", status: "open", priority: "high" },
+          ]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    functionCall: {
+                      name: "get_tickets_overview",
+                      args: {},
+                    },
+                  },
+                ],
+                role: "model",
+              },
+              finishReason: "STOP",
+            },
+          ],
+          usageMetadata: { totalTokenCount: 50 },
+        }),
+      })) as typeof fetch;
+
+      try {
+        const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "quais chamados estão abertos?", [], ["tickets"]);
+        expect(result.ok).toBe(true);
+        expect(result.response).not.toContain("Não foi possível consultar os dados solicitados no momento.");
+        expect(result.response).toContain("chamado");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
 });

@@ -2715,7 +2715,17 @@ export function buildSystemInstruction(
     ? preferences.customRules.map(r => `  • ${r}`).join("\n")
     : "  • Nenhuma diretriz customizada adicional definida.";
 
+  const hoje = new Date();
+  const dataExtenso = hoje.toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const anoAtual = hoje.getFullYear();
+
   return `Você é o Hermes, a central de inteligência executiva e o braço direito dos sócios fundadores da MegaDesk. Atue como um COO experiente: ágil no diagnóstico, parceiro na decisão, seguro na comunicação e focado em manter a operação funcionando. Não soe como um chatbot de SAC, um terminal de comandos ou um consultor prolixo.
+
+=======================================================
+CONTEXTO TEMPORAL DINÂMICO E PRECISÃO DE CALENDÁRIO:
+Hoje é ${dataExtenso}. Tenha total precisão temporal: se o usuário pedir dados de "outubro", "este mês", "mês passado" ou "ontem", calcule o período correto com base no ano atual (${anoAtual}) e nunca suponha anos passados como 2024.
+Ao invocar ferramentas que aceitem filtros temporais (como consultar_vendas ou get_sales_overview), informe os parâmetros de mês e ano explicitamente (ex: para "outubro", informe mes: 10, ano: ${anoAtual}).
+=======================================================
 
 =======================================================
 PREFERÊNCIAS VIGENTES DE TRATAMENTO E PERFIL DO USUÁRIO:
@@ -3276,6 +3286,24 @@ function synthesizeDeterministicSingle(
     return `Entendido, ${target}. A partir de agora nos comunicaremos desta forma. Como posso ajudar com as operações hoje?`;
   }
 
+  if (name === "consultar_vendas" || name === "get_sales_overview") {
+    if (output?.success) {
+      const pedidos = output.quantidadePedidos ?? 0;
+      const faturamento = output.faturamentoTotal ?? "R$ 0,00";
+      const periodo = output.periodoConsultado || "período consultado";
+      return `Vendas (${periodo}): ${pedidos} pedido(s), faturamento de ${faturamento}.`;
+    }
+  }
+
+  if (name === "consultar_chamados") {
+    if (output?.success) {
+      const total = output.totalAbertos ?? output.chamados?.length ?? 0;
+      if (total === 0) return "Não há chamados abertos no momento.";
+      const list = (output.chamados || []).slice(0, 3).map((c: any) => `${c.codigo}: "${c.assunto}"`).join("; ");
+      return `Há ${total} chamado(s) aberto(s)${list ? `: ${list}` : ""}.`;
+    }
+  }
+
   if (name === "get_tickets_overview") {
     const rawTotal = output?.total ?? output?.resumo?.total ?? output?.tickets?.length ?? output?.chamados?.length ?? 0;
     const total = Number(rawTotal) || 0;
@@ -3686,8 +3714,9 @@ async function chatWithClientGeminiInternal(
     }
   }
 
-  // Suporte a tags textuais de contingência se o modelo responder em texto com <functionCall>
-  const rawModelText = aiResult.text?.trim() ?? "";
+  // Extrai o texto limpo da última etapa executada, sem acúmulo de rascunhos preliminares de etapas intermediárias
+  const lastStep = aiResult.steps && aiResult.steps.length > 0 ? aiResult.steps[aiResult.steps.length - 1] : undefined;
+  const rawModelText = (lastStep?.text && lastStep.text.trim()) ? lastStep.text.trim() : (aiResult.text?.trim() ?? "");
   let modelText = sanitizeModelResponseText(rawModelText);
   let sawTextFunctionCall = false;
   if (/<functionCall\b/i.test(rawModelText)) {
@@ -3762,7 +3791,7 @@ async function chatWithClientGeminiInternal(
 
   let finalResponse = modelText;
 
-  // Se houver chamadas READ, prioriza sintetização determinística
+  // Se houver chamadas READ executadas, prioriza sintetização determinística
   if (executedReadResults.length > 0) {
     const whatsappResult = executedReadResults.find(r => r.name === "get_whatsapp_status");
     if (whatsappResult && whatsappResult.output) {
@@ -3830,8 +3859,16 @@ async function chatWithClientGeminiInternal(
       } else {
         finalResponse = "Preparei a ação solicitada para sua aprovação:";
       }
-    } else if (asksForBusinessData(userMessage)) {
+    } else if (executedReadResults.length === 0 && asksForBusinessData(userMessage)) {
       finalResponse = "Não foi possível consultar os dados solicitados no momento.";
+    } else if (executedReadResults.length > 0) {
+      const successfulRead = executedReadResults.find(r => r.output && r.output.success !== false);
+      if (successfulRead) {
+        finalResponse = synthesizeDeterministicSingle(successfulRead, userMessage, executedReadResults)
+          || "Consultei os dados solicitados no sistema.";
+      } else {
+        finalResponse = "Não foi possível consultar os dados solicitados no momento.";
+      }
     } else {
       finalResponse = "Não consegui processar a resposta neste momento. Pode repetir ou detalhar sua solicitação?";
     }
@@ -3844,21 +3881,29 @@ async function chatWithClientGeminiInternal(
         || "Não foi possível confirmar os dados solicitados."
       : "Você não possui permissão para consultar dados deste módulo.";
   } else if (!pendingActionRequest && asksForBusinessData(userMessage)) {
-    const readResults = executedReadResults.filter(result => result.name !== "set_user_preference");
-    const summaries = readResults.map(result => result.output?.success === false
-      ? "Não foi possível consultar os dados solicitados no momento."
-      : synthesizeDeterministicSingle(result, userMessage, readResults))
-      .filter(Boolean);
-    finalResponse = summaries.length > 1 && /\b(panorama|resumo|vis[aã]o geral)\b/i.test(userMessage)
-      ? `Panorama operacional:\n${summaries.map(summary => `• ${summary}`).join("\n")}`
-      : summaries.join("\n\n") || "Não foi possível consultar os dados solicitados no momento.";
+    if (executedReadResults.length === 0) {
+      finalResponse = "Não foi possível consultar os dados solicitados no momento.";
+    } else {
+      const readResults = executedReadResults.filter(result => result.name !== "set_user_preference");
+      const successful = readResults.filter(r => r.output && r.output.success !== false);
+      if (successful.length > 0) {
+        const summaries = successful.map(r => synthesizeDeterministicSingle(r, userMessage, readResults)).filter(Boolean);
+        if (summaries.length > 1 && /\b(panorama|resumo|vis[aã]o geral)\b/i.test(userMessage)) {
+          finalResponse = `Panorama operacional:\n${summaries.map(summary => `• ${summary}`).join("\n")}`;
+        } else if (!finalResponse || isPreliminaryWaitingText(finalResponse)) {
+          finalResponse = summaries.join("\n\n") || "Consultei os dados solicitados com sucesso.";
+        }
+      } else {
+        finalResponse = "Não foi possível consultar os dados solicitados no momento.";
+      }
+    }
   }
 
   if (sawTextFunctionCall && !pendingActionRequest) {
-    finalResponse = executedReadResults.map(result => result.output?.success === false
-      ? "Não foi possível consultar os dados solicitados no momento."
-      : synthesizeDeterministicSingle(result, userMessage, executedReadResults))
-      .filter(Boolean).join("\n\n") || "Não foi possível executar a consulta solicitada.";
+    const successful = executedReadResults.filter(r => r.output && r.output.success !== false);
+    const targetResults = successful.length > 0 ? successful : executedReadResults;
+    const summaries = targetResults.map(result => synthesizeDeterministicSingle(result, userMessage, executedReadResults)).filter(Boolean);
+    finalResponse = summaries.join("\n\n") || (successful.length === 0 ? "Não foi possível consultar os dados solicitados no momento." : "Consulta executada com sucesso.");
   }
 
   const tokensUsed = aiResult.usage?.totalTokens ?? 0;

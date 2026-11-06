@@ -179,5 +179,104 @@ describe("Hermes Tools (Vercel AI SDK - hermes-tools.ts)", () => {
       expect(result.message).toContain("Nenhum cliente ou lead encontrado");
     });
   });
+
+  describe("consultar_vendas tool", () => {
+    it("filters sales by specific month and year with structured JSON output", async () => {
+      let executedSql = "";
+      let executedParams: unknown[] = [];
+      const pool = {
+        execute: vi.fn(async (sql: string, params?: unknown[]) => {
+          executedSql = sql;
+          executedParams = params ?? [];
+          if (sql.includes("COUNT(*) AS total")) {
+            return [[{ total: 5, totalCents: 150000 }]];
+          }
+          if (sql.includes("SELECT id, order_number")) {
+            return [[
+              { id: 1, orderNumber: "PED-001", customerName: "Empresa XPTO", totalCents: 30000, createdAt: new Date("2026-10-15T10:00:00Z") },
+            ]];
+          }
+          return [[]];
+        }),
+      };
+
+      const tools = createHermesTools({ clientId: "tenant-test", pool });
+      const result = await tools.consultar_vendas.execute({ mes: 10, ano: 2026 });
+
+      expect(result.success).toBe(true);
+      expect(result.periodoConsultado).toBe("outubro/2026");
+      expect(result.quantidadePedidos).toBe(5);
+      expect(result.faturamentoTotal).toContain("1.500,00");
+      expect(result.ticketMedio).toContain("300,00");
+      expect(result.pedidosRecentes).toHaveLength(1);
+      expect(result.pedidosRecentes[0].cliente).toBe("Empresa XPTO");
+
+      // Verifica se os parâmetros de data do SQL foram calculados corretamente para outubro/2026
+      expect(executedParams).toContain("2026-10-01 00:00:00");
+      expect(executedParams).toContain("2026-10-31 23:59:59");
+    });
+
+    it("falls back to current year when only month is specified", async () => {
+      let executedParams: unknown[] = [];
+      const pool = {
+        execute: vi.fn(async (_sql: string, params?: unknown[]) => {
+          executedParams = params ?? [];
+          return [[{ total: 0, totalCents: 0 }]];
+        }),
+      };
+
+      const anoCorrente = new Date().getFullYear();
+      const tools = createHermesTools({ clientId: "tenant-test", pool });
+      const result = await tools.consultar_vendas.execute({ mes: 5 });
+
+      expect(result.success).toBe(true);
+      expect(result.periodoConsultado).toBe(`maio/${anoCorrente}`);
+      expect(executedParams).toContain(`${anoCorrente}-05-01 00:00:00`);
+      expect(executedParams).toContain(`${anoCorrente}-05-31 23:59:59`);
+    });
+  });
+
+  describe("consultar_chamados / get_tickets_overview tool", () => {
+    it("returns open tickets in standardized structured JSON format", async () => {
+      const mockChamados = [
+        {
+          id: "chk-1",
+          numero: 101,
+          assunto: "Falha de login no app",
+          cliente: "Cliente Alpha",
+          status: "open",
+          prioridade: "high",
+        },
+        {
+          id: "chk-2",
+          numero: 102,
+          assunto: "Dúvida tributária",
+          cliente: "Cliente Beta",
+          status: "closed",
+          prioridade: "low",
+        },
+      ];
+
+      const pool = {
+        execute: vi.fn(async () => [mockChamados]),
+      };
+
+      const tools = createHermesTools({ clientId: "tenant-test", pool });
+      const result = await tools.consultar_chamados.execute({});
+
+      expect(result.success).toBe(true);
+      // Apenas o chamado aberto deve entrar em totalAbertos
+      expect(result.totalAbertos).toBe(1);
+      expect(result.chamados).toHaveLength(1);
+      expect(result.chamados[0]).toEqual({
+        id: "chk-1",
+        codigo: "#0101",
+        assunto: "Falha de login no app",
+        cliente: "Cliente Alpha",
+        status: "open",
+        prioridade: "high",
+      });
+    });
+  });
 });
 
