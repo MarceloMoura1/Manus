@@ -25,8 +25,11 @@ export type MegaDeskStructuredState = {
   auditLogs: any[];
 };
 
-let cachedDb: Database | null = null;
-let cachedPool: mysql.Pool | null = null;
+interface GlobalMegaDeskPool {
+  __megadesk_mysql_pool?: mysql.Pool;
+  __megadesk_drizzle_db?: Database;
+}
+const globalPoolState = globalThis as unknown as GlobalMegaDeskPool;
 export let inMemoryState: MegaDeskStructuredState | null = null;
 
 /**
@@ -128,20 +131,40 @@ function assertStorageConfigured(): void {
 }
 
 export function getDb(): Database {
-  if (!cachedDb) {
-    cachedDb = drizzle(getPool() as any);
+  if (!globalPoolState.__megadesk_drizzle_db) {
+    globalPoolState.__megadesk_drizzle_db = drizzle(getPool() as any);
   }
-  return cachedDb;
+  return globalPoolState.__megadesk_drizzle_db;
 }
 
-export function getPool() {
-  if (!cachedPool) {
+export function getPool(): mysql.Pool {
+  if (!globalPoolState.__megadesk_mysql_pool) {
     // MySQL stores the application's TIMESTAMP values as UTC.  The driver must
     // therefore parse and serialize JavaScript Dates in UTC as well, regardless
     // of the Windows/Node host timezone.
-    cachedPool = mysql.createPool({ uri: getConfiguredDatabaseUrl(), timezone: "Z" });
+    globalPoolState.__megadesk_mysql_pool = mysql.createPool({
+      uri: getConfiguredDatabaseUrl(),
+      timezone: "Z",
+      waitForConnections: true,
+      connectionLimit: 20,
+      maxIdle: 10,
+      idleTimeout: 30000,
+      queueLimit: 0,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000,
+      connectTimeout: 10000,
+    });
   }
-  return cachedPool;
+  return globalPoolState.__megadesk_mysql_pool;
+}
+
+export async function closePool(): Promise<void> {
+  const pool = globalPoolState.__megadesk_mysql_pool;
+  if (pool) {
+    globalPoolState.__megadesk_mysql_pool = undefined;
+    globalPoolState.__megadesk_drizzle_db = undefined;
+    await pool.end();
+  }
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -857,40 +880,32 @@ export async function createMegaDeskBackup(state: MegaDeskStructuredState) {
     const backupId = `backup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const backupDate = new Date().toISOString().split('T')[0];
     
-    const connection = await pool.getConnection();
-    try {
-      await connection.execute(
-        `INSERT INTO megadesk_domain_backups (
-          backup_id, backup_date, clients_json, conversations_json, tickets_json, 
-          bot_scripts_json, operational_records_json, audit_logs_json, 
-          total_clients, total_conversations, total_tickets, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          backupId,
-          backupDate,
-          JSON.stringify(state.clients),
-          JSON.stringify(state.conversations.map(conversation => ({
-            ...conversation,
-            messages: sanitizeConversationMessagesForPersistence(conversation.messages),
-          }))),
-          JSON.stringify(state.tickets),
-          JSON.stringify(state.botScripts),
-          JSON.stringify(state.operationalRecords),
-          JSON.stringify(state.auditLogs),
-          state.clients.length,
-          state.conversations.length,
-          state.tickets.length,
-          'success'
-        ]
-      );
-      connection.release();
-      console.log(`[MegaDesk Backup] Backup criado com sucesso: ${backupId}`);
-      return backupId;
-    } catch (error) {
-      connection.release();
-      console.error(`[MegaDesk Backup] Erro ao criar backup:`, error);
-      throw error;
-    }
+    await pool.execute(
+      `INSERT INTO megadesk_domain_backups (
+        backup_id, backup_date, clients_json, conversations_json, tickets_json, 
+        bot_scripts_json, operational_records_json, audit_logs_json, 
+        total_clients, total_conversations, total_tickets, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        backupId,
+        backupDate,
+        JSON.stringify(state.clients),
+        JSON.stringify(state.conversations.map(conversation => ({
+          ...conversation,
+          messages: sanitizeConversationMessagesForPersistence(conversation.messages),
+        }))),
+        JSON.stringify(state.tickets),
+        JSON.stringify(state.botScripts),
+        JSON.stringify(state.operationalRecords),
+        JSON.stringify(state.auditLogs),
+        state.clients.length,
+        state.conversations.length,
+        state.tickets.length,
+        'success'
+      ]
+    );
+    console.log(`[MegaDesk Backup] Backup criado com sucesso: ${backupId}`);
+    return backupId;
   } catch (error) {
     console.warn("[MegaDesk Backup] Falha ao criar backup estruturado.", error);
     return null;

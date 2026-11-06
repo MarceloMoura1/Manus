@@ -72,82 +72,76 @@ export async function handleIncomingMessage(payload: EvolutionWebhookPayload): P
 
     // Buscar ou criar conversa
     const pool = getPool();
-    const connection = await pool.getConnection();
+    // TODO: Buscar clientId da instância (Evolution API)
+    // Por enquanto, usar um clientId padrão para teste
+    const clientId = "cliente-001"; // FIXME: Obter do mapeamento de instância
 
-    try {
-      // TODO: Buscar clientId da instância (Evolution API)
-      // Por enquanto, usar um clientId padrão para teste
-      const clientId = "cliente-001"; // FIXME: Obter do mapeamento de instância
+    // Buscar conversa existente
+    const [conversations] = await pool.execute(
+      `SELECT conversation_id, client_id FROM megadesk_domain_conversations 
+       WHERE phone = ? AND client_id = ? AND status != 'closed'
+       LIMIT 1`,
+      [phoneNumber, clientId]
+    );
 
-      // Buscar conversa existente
-      const [conversations] = await connection.execute(
-        `SELECT conversation_id, client_id FROM megadesk_domain_conversations 
-         WHERE phone = ? AND client_id = ? AND status != 'closed'
-         LIMIT 1`,
-        [phoneNumber, clientId]
-      );
+    let conversationId: string;
 
-      let conversationId: string;
+    if (Array.isArray(conversations) && conversations.length > 0) {
+      // Conversa existente
+      conversationId = (conversations[0] as any).conversation_id;
+      console.log(`[Evolution Webhook] Conversa existente: ${conversationId}`);
+    } else {
+      // Criar nova conversa
+      conversationId = `conv-${randomUUID()}`;
 
-      if (Array.isArray(conversations) && conversations.length > 0) {
-        // Conversa existente
-        conversationId = (conversations[0] as any).conversation_id;
-        console.log(`[Evolution Webhook] Conversa existente: ${conversationId}`);
-      } else {
-        // Criar nova conversa
-        conversationId = `conv-${randomUUID()}`;
-
-        await connection.execute(
-          `INSERT INTO megadesk_domain_conversations 
-           (conversation_id, client_id, customer_name, phone, company, status, assigned_user_id, assigned_user_name, last_message, last_message_from, time_label, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-          [
-            conversationId,
-            clientId,
-            `Contato ${phoneNumber}`,
-            phoneNumber,
-            "N/A",
-            "open",
-            null,
-            "Bot",
-            messageText.substring(0, 100),
-            "customer",
-            new Date().toLocaleTimeString("pt-BR"),
-          ]
-        );
-
-        console.log(`[Evolution Webhook] Nova conversa criada: ${conversationId}`);
-      }
-
-      // Salvar mensagem
-      const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-
-      await connection.execute(
-        `INSERT INTO megadesk_domain_conversations_messages 
-         (message_id, conversation_id, sender, message, timestamp, status)
-         VALUES (?, ?, ?, ?, NOW(), ?)`,
-        [messageId, conversationId, "customer", messageText, "received"]
-      );
-
-      console.log(`[Evolution Webhook] Mensagem salva: ${messageId}`);
-
-      // Atualizar última mensagem da conversa
-      await connection.execute(
-        `UPDATE megadesk_domain_conversations 
-         SET last_message = ?, last_message_from = ?, time_label = ?, updated_at = NOW()
-         WHERE conversation_id = ?`,
+      await pool.execute(
+        `INSERT INTO megadesk_domain_conversations 
+         (conversation_id, client_id, customer_name, phone, company, status, assigned_user_id, assigned_user_name, last_message, last_message_from, time_label, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
+          conversationId,
+          clientId,
+          `Contato ${phoneNumber}`,
+          phoneNumber,
+          "N/A",
+          "open",
+          null,
+          "Bot",
           messageText.substring(0, 100),
           "customer",
           new Date().toLocaleTimeString("pt-BR"),
-          conversationId,
         ]
       );
 
-      console.log(`[Evolution Webhook] Conversa atualizada: ${conversationId}`);
-    } finally {
-      connection.release();
+      console.log(`[Evolution Webhook] Nova conversa criada: ${conversationId}`);
     }
+
+    // Salvar mensagem
+    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+    await pool.execute(
+      `INSERT INTO megadesk_domain_conversations_messages 
+       (message_id, conversation_id, sender, message, timestamp, status)
+       VALUES (?, ?, ?, ?, NOW(), ?)`,
+      [messageId, conversationId, "customer", messageText, "received"]
+    );
+
+    console.log(`[Evolution Webhook] Mensagem salva: ${messageId}`);
+
+    // Atualizar última mensagem da conversa
+    await pool.execute(
+      `UPDATE megadesk_domain_conversations 
+       SET last_message = ?, last_message_from = ?, time_label = ?, updated_at = NOW()
+       WHERE conversation_id = ?`,
+      [
+        messageText.substring(0, 100),
+        "customer",
+        new Date().toLocaleTimeString("pt-BR"),
+        conversationId,
+      ]
+    );
+
+    console.log(`[Evolution Webhook] Conversa atualizada: ${conversationId}`);
   } catch (err: any) {
     console.error(`[Evolution Webhook] Erro ao processar mensagem:`, err);
   }
@@ -165,36 +159,30 @@ export async function handleConnectionStatus(payload: EvolutionWebhookPayload): 
     });
 
     const pool = getPool();
-    const connection = await pool.getConnection();
+    // Atualizar status da instância no banco
+    // TODO: Mapear instance para clientId
+    const clientId = "cliente-001"; // FIXME: Obter do mapeamento
 
-    try {
-      // Atualizar status da instância no banco
-      // TODO: Mapear instance para clientId
-      const clientId = "cliente-001"; // FIXME: Obter do mapeamento
+    if (payload.data.connectionStatus === "open" && payload.data.phoneNumber) {
+      // Conexão estabelecida
+      await pool.execute(
+        `UPDATE megadesk_whatsapp_config 
+         SET connectionStatus = 1, phoneNumber = ?, updatedAt = NOW()
+         WHERE phoneNumberId = ?`,
+        [payload.data.phoneNumber, payload.instance]
+      );
 
-      if (payload.data.connectionStatus === "open" && payload.data.phoneNumber) {
-        // Conexão estabelecida
-        await connection.execute(
-          `UPDATE megadesk_whatsapp_config 
-           SET connectionStatus = 1, phoneNumber = ?, updatedAt = NOW()
-           WHERE phoneNumberId = ?`,
-          [payload.data.phoneNumber, payload.instance]
-        );
+      console.log(`[Evolution Webhook] Conexão estabelecida: ${payload.data.phoneNumber}`);
+    } else if (payload.data.connectionStatus === "closed") {
+      // Conexão fechada
+      await pool.execute(
+        `UPDATE megadesk_whatsapp_config 
+         SET connectionStatus = 0, updatedAt = NOW()
+         WHERE phoneNumberId = ?`,
+        [payload.instance]
+      );
 
-        console.log(`[Evolution Webhook] Conexão estabelecida: ${payload.data.phoneNumber}`);
-      } else if (payload.data.connectionStatus === "closed") {
-        // Conexão fechada
-        await connection.execute(
-          `UPDATE megadesk_whatsapp_config 
-           SET connectionStatus = 0, updatedAt = NOW()
-           WHERE phoneNumberId = ?`,
-          [payload.instance]
-        );
-
-        console.log(`[Evolution Webhook] Conexão fechada`);
-      }
-    } finally {
-      connection.release();
+      console.log(`[Evolution Webhook] Conexão fechada`);
     }
   } catch (err: any) {
     console.error(`[Evolution Webhook] Erro ao processar status:`, err);
@@ -212,34 +200,28 @@ export async function handleMessageStatus(payload: EvolutionWebhookPayload): Pro
     });
 
     const pool = getPool();
-    const connection = await pool.getConnection();
+    // Atualizar status da mensagem
+    const messageId = payload.data.key?.id;
+    if (!messageId) return;
 
-    try {
-      // Atualizar status da mensagem
-      const messageId = payload.data.key?.id;
-      if (!messageId) return;
-
-      // Mapear status da Evolution para status do MegaDesk
-      let status = "sent";
-      if (payload.data.status === "DELIVERY_ACK") {
-        status = "delivered";
-      } else if (payload.data.status === "READ") {
-        status = "read";
-      } else if (payload.data.status === "ERROR") {
-        status = "failed";
-      }
-
-      await connection.execute(
-        `UPDATE megadesk_domain_conversations_messages 
-         SET status = ?, updated_at = NOW()
-         WHERE message_id = ?`,
-        [status, messageId]
-      );
-
-      console.log(`[Evolution Webhook] Status da mensagem atualizado: ${messageId} -> ${status}`);
-    } finally {
-      connection.release();
+    // Mapear status da Evolution para status do MegaDesk
+    let status = "sent";
+    if (payload.data.status === "DELIVERY_ACK") {
+      status = "delivered";
+    } else if (payload.data.status === "READ") {
+      status = "read";
+    } else if (payload.data.status === "ERROR") {
+      status = "failed";
     }
+
+    await pool.execute(
+      `UPDATE megadesk_domain_conversations_messages 
+       SET status = ?, updated_at = NOW()
+       WHERE message_id = ?`,
+      [status, messageId]
+    );
+
+    console.log(`[Evolution Webhook] Status da mensagem atualizado: ${messageId} -> ${status}`);
   } catch (err: any) {
     console.error(`[Evolution Webhook] Erro ao processar status de mensagem:`, err);
   }

@@ -272,16 +272,13 @@ export async function listTenantDatabases(): Promise<string[]> {
       queueLimit: 0,
     });
 
-    const connection = await adminPool.getConnection();
-
     try {
-      const [rows] = await connection.query(
+      const [rows] = await adminPool.query(
         "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME LIKE 'mdsk_%'"
       );
       const databases = (rows as any[]).map((row) => row.SCHEMA_NAME);
       return databases;
     } finally {
-      await connection.release();
       await adminPool.end();
     }
   } catch (error) {

@@ -70,16 +70,10 @@ export async function restoreExistingSessions(): Promise<void> {
 
     // Buscar configurações de WhatsApp do banco
     const pool = getPool();
-    const connection = await pool.getConnection();
-    let whatsappConfigs: any[] = [];
-    try {
-      const [rows] = await connection.execute(
-        `SELECT clientId, phoneNumberId, accessToken, phoneNumber FROM megadesk_whatsapp_config WHERE connectionStatus = 1`
-      );
-      whatsappConfigs = rows as any[];
-    } finally {
-      connection.release();
-    }
+    const [rows] = await pool.execute(
+      `SELECT clientId, phoneNumberId, accessToken, phoneNumber FROM megadesk_whatsapp_config WHERE connectionStatus = 1`
+    );
+    const whatsappConfigs: any[] = rows as any[];
 
     for (const config of whatsappConfigs) {
       try {
@@ -132,18 +126,13 @@ export async function createWhatsAppSession(clientId: string): Promise<{
 
     // Salvar configuração no banco
     const pool = getPool();
-    const connection = await pool.getConnection();
-    try {
-      await connection.execute(
-        `INSERT INTO megadesk_whatsapp_config
-           (configId, clientId, phoneNumberId, accessToken, connectionStatus, createdAt)
-         VALUES (?, ?, ?, ?, 1, NOW())
-         ON DUPLICATE KEY UPDATE phoneNumberId = VALUES(phoneNumberId), accessToken = VALUES(accessToken), connectionStatus = 1`,
-        [`whatsapp-${clientId}`, clientId, session.instanceId, session.token]
-      );
-    } finally {
-      connection.release();
-    }
+    await pool.execute(
+      `INSERT INTO megadesk_whatsapp_config
+         (configId, clientId, phoneNumberId, accessToken, connectionStatus, createdAt)
+       VALUES (?, ?, ?, ?, 1, NOW())
+       ON DUPLICATE KEY UPDATE phoneNumberId = VALUES(phoneNumberId), accessToken = VALUES(accessToken), connectionStatus = 1`,
+      [`whatsapp-${clientId}`, clientId, session.instanceId, session.token]
+    );
 
     console.log(`[Evolution Manager] Sessão criada: ${session.instanceId}`);
 
@@ -252,22 +241,15 @@ export async function sendWhatsAppMessage(
     // Salvar mensagem no banco
     try {
       const pool = getPool();
-      const connection = await pool.getConnection();
-      try {
-        const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        await connection.execute(
-          `INSERT INTO megadesk_domain_conversations_messages 
-           (message_id, conversation_id, sender, message, timestamp, status)
-           VALUES (?, ?, ?, ?, NOW(), ?)`,
-          [messageId, conversationId, agentName, text, "sent"]
-        );
-      } catch (dbErr: any) {
-        console.warn(`[Evolution Manager] Erro ao salvar mensagem no banco:`, dbErr);
-      } finally {
-        connection.release();
-      }
+      const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      await pool.execute(
+        `INSERT INTO megadesk_domain_conversations_messages 
+         (message_id, conversation_id, sender, message, timestamp, status)
+         VALUES (?, ?, ?, ?, NOW(), ?)`,
+        [messageId, conversationId, agentName, text, "sent"]
+      );
     } catch (dbErr: any) {
-      console.warn(`[Evolution Manager] Erro ao conectar ao banco:`, dbErr);
+      console.warn(`[Evolution Manager] Erro ao salvar mensagem no banco:`, dbErr);
     }
 
     return {
@@ -323,15 +305,10 @@ export async function disconnectWhatsApp(clientId: string): Promise<{
 
     // Atualizar status no banco
     const pool = getPool();
-    const connection = await pool.getConnection();
-    try {
-      await connection.execute(
-        `UPDATE megadesk_whatsapp_config SET status = 'disconnected' WHERE client_id = ?`,
-        [clientId]
-      );
-    } finally {
-      connection.release();
-    }
+    await pool.execute(
+      `UPDATE megadesk_whatsapp_config SET status = 'disconnected' WHERE client_id = ?`,
+      [clientId]
+    );
 
     return { ok: true };
   } catch (err: any) {

@@ -123,7 +123,8 @@ export const reportsRouter = router({
        LEFT JOIN megadesk_crm_opportunities o ON o.client_id = c.client_id AND o.crm_client_id = c.crm_client_id
        WHERE c.client_id = ?
        GROUP BY c.origin
-       ORDER BY total_leads DESC`,
+       ORDER BY total_leads DESC
+       LIMIT 50`,
       [tenantId]
     );
 
@@ -178,7 +179,8 @@ export const reportsRouter = router({
        FROM megadesk_crm_opportunities
        WHERE client_id = ? AND internal_responsible IS NOT NULL AND TRIM(internal_responsible) != ''
        GROUP BY internal_responsible
-       ORDER BY won_cents DESC`,
+       ORDER BY won_cents DESC
+       LIMIT 100`,
       [tenantId]
     );
 

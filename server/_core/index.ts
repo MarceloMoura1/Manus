@@ -41,6 +41,8 @@ import {
   getWriteFreezeCoordinator,
   registerWriteFreezeControlRoutes,
 } from "../write-freeze";
+import { closePool } from "../db";
+import { clearTenantConnections } from "./tenant-db-manager";
 
 // ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -212,6 +214,40 @@ async function startServer() {
   if (!disposableRuntime && port !== preferredPort) {
     console.log(`Port ${preferredPort} busy, using ${port}`);
   }
+
+  let isShuttingDown = false;
+  const gracefulShutdown = (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`\n[Server] Recebido sinal ${signal}. Encerrando ordenadamente (graceful shutdown)...\n`);
+
+    const forceTimer = setTimeout(() => {
+      console.error("[Server] Timeout no graceful shutdown (10s excedidos). Forçando encerramento.");
+      process.exit(1);
+    }, 10000);
+    forceTimer.unref();
+
+    server.close(async (err) => {
+      if (err) {
+        console.error("[Server] Erro ao fechar servidor HTTP:", err);
+      } else {
+        console.log("[Server] Servidor HTTP fechado.");
+      }
+
+      try {
+        clearTenantConnections();
+        await closePool();
+        console.log("[Server] Pool de conexões MySQL encerrado com sucesso.");
+        process.exit(0);
+      } catch (poolErr) {
+        console.error("[Server] Erro ao encerrar pool MySQL:", poolErr);
+        process.exit(1);
+      }
+    });
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
   const listenHost = process.env.HOST?.trim();
   const onListening = () => {

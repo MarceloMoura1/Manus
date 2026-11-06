@@ -2004,11 +2004,12 @@ export async function executeClientFunction(
          FROM megadesk_domain_chamados WHERE ${where.join(" AND ")}`,
       values,
     ) as any[];
+    const safeLimit = Math.min(Math.max(Number(filters.limit ?? 10) || 10, 1), 50);
     const [recentRows] = await pool.execute(
       `SELECT chamadoId, chamadoNumber, title, customerName, company, status, priority, assignedTo, createdAt, updatedAt
          FROM megadesk_domain_chamados WHERE ${where.join(" AND ")}
         ORDER BY updatedAt DESC, chamadoNumber DESC LIMIT ?`,
-      [...values, filters.limit ?? 10],
+      [...values, safeLimit],
     ) as any[];
     const totals = totalsRows[0] ?? { total: 0, open: 0, in_progress: 0, waiting: 0, closed: 0 };
     const tickets = (Array.isArray(recentRows) ? recentRows : []).map(r => ({
@@ -2294,7 +2295,7 @@ export async function executeClientFunction(
     const [itemRows] = await pool.execute(
       `SELECT public_id AS publicId, product_name_snapshot AS productName, sku_snapshot AS sku, quantity,
               unit_price_cents AS unitPriceCents, discount_cents AS discountCents, line_total_cents AS lineTotalCents
-         FROM erp_sale_order_items WHERE sale_order_id = ? ORDER BY id ASC`,
+         FROM erp_sale_order_items WHERE sale_order_id = ? ORDER BY id ASC LIMIT 100`,
       [proposal.id],
     ) as any[];
     const items = (Array.isArray(itemRows) ? itemRows : []).map(i => ({
@@ -3432,12 +3433,69 @@ function normalizeTicketIntent(value: string): string {
 
 function isTicketCreationRequest(value: string): boolean {
   const text = normalizeTicketIntent(value);
-  return /\b(?:abrir|abra|abre|criar|crie|cria|cadastrar|registrar|fazer|novo)\s+(?:(?:um|uma|o|a)\s+)?(?:chamado|ticket)\b/.test(text)
-    || /\babertura\s+de\s+(?:um\s+)?(?:chamado|ticket)\b/.test(text);
+  return /\b(?:abrir|abra|abre|criar|crie|cria|cadastrar|registrar|fazer|novo)\s+(?:(?:um|uma|o|a)\s+)?(?:chamado|ticket|suporte|atendimento)\b/.test(text)
+    || /\b(?:chamado|ticket|suporte)\s+(?:urgente\b|para\b|pra\b|pro\b)/.test(text)
+    || /\b(?:chamado|ticket|suporte)\s+[^:,\n]+?\s*[:,-]/.test(text)
+    || /\babertura\s+de\s+(?:um\s+)?(?:chamado|ticket|suporte)\b/.test(text)
+    || /(?:abre|abrir|abra|cria|criar|crie|fazer)\s+(?:um\s+)?(?:chamado|ticket|suporte)\s+(?:pra|para|pro)\s+(?:eles|ela|ele|elas)\b/.test(text);
+}
+
+interface InlineTicketParsed {
+  customer: string | null;
+  title: string | null;
+  description: string | null;
+  priority: "low" | "medium" | "high" | "urgent" | null;
+}
+
+function parseInlineTicket(value: string): InlineTicketParsed | null {
+  if (/\b(?:assunto|t[ií]tulo|descri[cç][aã]o)\s*(?::|é|eh|=)/i.test(value)) {
+    return null;
+  }
+
+  // 1. Frase com anáfora / ordem invertida:
+  // "O sistema caiu na Empresa Alpha, abre um chamado pra eles"
+  const invertedMatch = value.match(/(.+?)\s+(?:em|na|no)\s+(?:a\s+|o\s+)?([^,.;?!]+?)(?:,\s*|\s+)(?:pode\s+)?(?:abrir|abra|abre|criar|crie|cria|fazer)\s+(?:um\s+)?(?:chamado|ticket|suporte)\s+(?:pra|para|pro)\s+(?:eles|ela|ele|elas)\b/i);
+  if (invertedMatch) {
+    const problem = invertedMatch[1].trim();
+    const customer = invertedMatch[2].trim();
+    return {
+      customer,
+      title: problem,
+      description: problem,
+      priority: null,
+    };
+  }
+
+  // 2. Padrões com ":" ou ",":
+  // "Ticket pro [Cliente]: [Problema]"
+  // "Cria um suporte pro [Cliente], [Problema]"
+  // "Chamado [Cliente] urgente: [Problema]"
+  const inlineColonMatch = value.match(/^\s*(?:(?:cria|criar|crie|abre|abrir|abra|fazer|novo)\s+(?:um\s+)?)?(?:ticket|chamado|suporte)\s+(?:(?:para|pra|pro)\s+)?(?:(?:o|a)?\s*cliente\s+)?([^:,?!;\n]+?)(?:\s+(baixa|media|alta|urgente|low|medium|high|urgent))?\s*[:,-]\s*(.+)$/i);
+  if (inlineColonMatch) {
+    const customer = inlineColonMatch[1].trim();
+    const rawPriority = inlineColonMatch[2]?.toLowerCase();
+    const problem = inlineColonMatch[3].trim();
+    const priorityMap: Record<string, "low" | "medium" | "high" | "urgent"> = {
+      baixa: "low", media: "medium", alta: "high", urgente: "urgent",
+      low: "low", medium: "medium", high: "high", urgent: "urgent",
+    };
+    return {
+      customer,
+      title: problem,
+      description: problem,
+      priority: rawPriority ? priorityMap[rawPriority] ?? null : null,
+    };
+  }
+
+  return null;
 }
 
 function ticketCustomerIn(value: string): string | null {
+  const inline = parseInlineTicket(value);
+  if (inline?.customer) return inline.customer;
+
   const match = value.match(/\b(?:para|pra|pro)\s+(?:o|a)?\s*cliente\s+([^?!.,;\n]+?)(?=\s+(?:com\s+)?(?:assunto|t[ií]tulo|descri[cç][aã]o|problema|prioridade)\b|$|[?!.,;\n])/i)
+    ?? value.match(/\b(?:chamado|ticket|suporte)\s+(?:para|pra|pro)\s+(?:(?:o|a)?\s*cliente\s+)?([^?!.,;\n]+?)(?=\s+(?:com\s+)?(?:assunto|t[ií]tulo|descri[cç][aã]o|problema|prioridade)\b|$|[?!.,;\n])/i)
     ?? value.match(/^\s*cliente\s*:?\s*([^?!.,;\n]+?)(?=$|[?!.,;\n])/i);
   return match?.[1]?.trim() || null;
 }
@@ -3460,12 +3518,13 @@ function ticketCreationDraft(message: string, history: readonly IAMessage[]): { 
   const previousTicketIndex = recent.findLastIndex(item => item.role === "user" && isTicketCreationRequest(item.content));
   const normalizedMessage = normalizeTicketIntent(message.trim());
   const correction = /^(?:nao\b|e\s+(?:pra|para|um)\b|era\b|errou\b)/.test(normalizedMessage)
-    && /\b(?:chamado|ticket)\b/.test(normalizedMessage);
+    && /\b(?:chamado|ticket|suporte)\b/.test(normalizedMessage);
   const currentIntent = isTicketCreationRequest(message) || correction;
   const awaitingSlots = previousTicketIndex >= 0 && recent.slice(previousTicketIndex + 1).some(item =>
     item.role === "assistant" && /(Para preparar o chamado|Qual é o assunto e a descrição do chamado|informe .* para eu preparar o registro)/i.test(item.content));
   const awaitingCustomerChoice = previousTicketIndex >= 0 && recent.slice(previousTicketIndex + 1).some(item =>
     item.role === "assistant" && /(Localizei mais de um cliente|Para qual deles deseja abrir o chamado|Não localizei nenhum cliente)/i.test(item.content));
+  const inlineParsed = parseInlineTicket(message);
   const currentCustomer = ticketCustomerIn(message)
     ?? (awaitingCustomerChoice && message.trim().length > 0 ? message.trim().replace(/[?!.,;]+$/, "") : null);
   if (!currentIntent && !(awaitingSlots && (ticketSlotIn(message, "title") || ticketSlotIn(message, "description") || currentCustomer)) && !awaitingCustomerChoice) return null;
@@ -3473,9 +3532,9 @@ function ticketCreationDraft(message: string, history: readonly IAMessage[]): { 
   const relevant = previousTicketIndex >= 0 && (!currentIntent || correction) ? recent.slice(previousTicketIndex) : [];
   const userMessages = relevant.filter(item => item.role === "user").map(item => item.content);
   const customer = currentCustomer ?? [...userMessages].reverse().map(ticketCustomerIn).find(Boolean) ?? null;
-  const title = ticketSlotIn(message, "title") ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "title")).find(Boolean) ?? null;
-  const description = ticketSlotIn(message, "description") ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "description")).find(Boolean) ?? null;
-  const priority = ticketPriorityIn(message) ?? [...userMessages].reverse().map(ticketPriorityIn).find(Boolean) ?? null;
+  const title = ticketSlotIn(message, "title") ?? inlineParsed?.title ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "title")).find(Boolean) ?? null;
+  const description = ticketSlotIn(message, "description") ?? inlineParsed?.description ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "description")).find(Boolean) ?? null;
+  const priority = ticketPriorityIn(message) ?? inlineParsed?.priority ?? [...userMessages].reverse().map(ticketPriorityIn).find(Boolean) ?? null;
   return { customer, title, description, priority, correction };
 }
 
@@ -3488,37 +3547,54 @@ type TicketCustomerResolution =
 function ticketCustomerDisplayName(candidate: Record<string, unknown>, fallback: string): string {
   const companyName = typeof candidate.companyName === "string" ? candidate.companyName.trim() : "";
   const responsibleName = typeof candidate.responsibleName === "string" ? candidate.responsibleName.trim() : "";
+  const normalizedFallback = normalizeTicketIntent(fallback);
+  if (responsibleName && normalizeTicketIntent(responsibleName) === normalizedFallback) {
+    return responsibleName;
+  }
+  if (companyName && normalizeTicketIntent(companyName) === normalizedFallback) {
+    return companyName;
+  }
   return companyName || responsibleName || fallback;
 }
 
 async function resolveTicketCustomer(pool: any, clientId: string, customer: string): Promise<TicketCustomerResolution> {
   if (!pool) return { status: "unavailable" };
   try {
+    const trimmed = customer.trim();
+    const searchTerm = `%${trimmed}%`;
     const [rows] = await pool.execute(
-      `SELECT crm_client_id AS crmClientId, company_name AS companyName, responsible_name AS responsibleName
+      `SELECT crm_client_id AS crmClientId, company_name AS companyName, responsible_name AS responsibleName, phone, status
          FROM megadesk_crm_clients
-        WHERE client_id = ? AND lifecycle_state = 'active'
-          AND (crm_client_id = ?
-            OR LOCATE(LOWER(?), LOWER(company_name)) > 0
-            OR LOCATE(LOWER(?), LOWER(responsible_name)) > 0)
+        WHERE client_id = ?
+          AND status IN ('ativo', 'lead')
+          AND (lifecycle_state IS NULL OR lifecycle_state <> 'archived')
+          AND (
+            crm_client_id = ?
+            OR company_name LIKE ?
+            OR responsible_name LIKE ?
+            OR phone LIKE ?
+          )
         ORDER BY company_name, crm_client_id LIMIT 10`,
-      [clientId, customer, customer, customer],
+      [clientId, trimmed, searchTerm, searchTerm, searchTerm],
     ) as any[];
     if (!Array.isArray(rows)) return { status: "unavailable" };
     const candidates = rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"));
     if (candidates.length === 0) return { status: "missing" };
 
-    const normalizedCustomer = normalizeTicketIntent(customer);
+    const normalizedCustomer = normalizeTicketIntent(trimmed);
+    const digitsOnly = trimmed.replace(/\D/g, "");
     const exactCandidates = candidates.filter(candidate =>
-      candidate.crmClientId === customer
-      || normalizeTicketIntent(ticketCustomerDisplayName(candidate, customer)) === normalizedCustomer
-      || (typeof candidate.responsibleName === "string" && normalizeTicketIntent(candidate.responsibleName) === normalizedCustomer),
+      candidate.crmClientId === trimmed
+      || normalizeTicketIntent(ticketCustomerDisplayName(candidate, trimmed)) === normalizedCustomer
+      || (typeof candidate.responsibleName === "string" && normalizeTicketIntent(candidate.responsibleName) === normalizedCustomer)
+      || (typeof candidate.companyName === "string" && normalizeTicketIntent(candidate.companyName) === normalizedCustomer)
+      || (digitsOnly.length >= 8 && typeof candidate.phone === "string" && candidate.phone.replace(/\D/g, "") === digitsOnly),
     );
     const selected = exactCandidates.length === 1 ? exactCandidates[0] : candidates.length === 1 ? candidates[0] : null;
-    if (selected) return { status: "found", customerName: ticketCustomerDisplayName(selected, customer) };
+    if (selected) return { status: "found", customerName: ticketCustomerDisplayName(selected, trimmed) };
 
     const options = Array.from(new Set(candidates
-      .map(candidate => ticketCustomerDisplayName(candidate, customer))
+      .map(candidate => ticketCustomerDisplayName(candidate, trimmed))
       .filter(Boolean)))
       .slice(0, 5);
     return { status: "ambiguous", options };
