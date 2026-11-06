@@ -112,8 +112,21 @@ describe("Hermes Tools (Vercel AI SDK - hermes-tools.ts)", () => {
 
       expect(result.success).toBe(false);
       expect(result.status).toBe("cliente_nao_encontrado");
-      expect(result.message).toContain("Não localizei nenhum cliente com o nome 'Empresa Fantasma'");
-      expect(result.message).toContain("Deseja cadastrá-lo primeiro");
+      expect(result.message).toContain("Não encontrei nenhum cliente ou lead chamado 'Empresa Fantasma' no CRM. Deseja cadastrá-lo?");
+      expect(result.pendingActionRequest).toBeUndefined();
+    });
+
+    it("handles 'Abre um chamado para o Luiz com o assunto Falha na emissão de nota' gracefully when Luiz is missing", async () => {
+      const pool = createMockPool([]);
+      const tools = createHermesTools({ clientId: "tenant-test", pool });
+      const result = await tools.solicitar_abertura_chamado.execute({
+        termoCliente: "Luiz",
+        assunto: "Falha na emissão de nota",
+        prioridade: "media",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe("Não encontrei nenhum cliente ou lead chamado 'Luiz' no CRM. Deseja cadastrá-lo?");
       expect(result.pendingActionRequest).toBeUndefined();
     });
 

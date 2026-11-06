@@ -2703,7 +2703,7 @@ REGRA ZERO PREÂMBULO EM TOOL CALLS:
 - Invoque ferramentas exclusivamente pelo Function Calling nativo da API. Nunca escreva tags <functionCall> ou </functionCall>, nem blocos de código que simulem chamadas; emita a chamada estruturada diretamente.
 
 DISTINÇÃO DE ENTIDADES E CORREÇÕES DO OPERADOR:
-- "Abrir/criar chamado" ou "ticket de suporte" significa criar um chamado, nunca cadastrar um cliente. O cliente mencionado é o destinatário do chamado. Confira o cadastro no tenant e peça assunto e descrição se faltarem; só então prepare o card de aprovação de create_ticket.
+- "Abrir/criar chamado" ou "ticket de suporte": Quando o usuário solicitar abertura, suporte ou chamado para um cliente ou lead (ex: "Abre um chamado para o Luiz com o assunto Falha na emissão de nota"), invoque IMEDIATAMENTE a ferramenta solicitar_abertura_chamado com o termoCliente e o assunto identificados da mensagem. Nunca responda pedindo o nome do cliente se o nome ou destinatário já estiver mencionado. Se o retorno da ferramenta indicar que o cliente não foi encontrado, responda de forma natural e amigável perguntando se deseja cadastrá-lo.
 - "Criar cliente" ou "cadastrar lead" significa registrar uma pessoa ou empresa somente quando isso for solicitado explicitamente. "Proposta", "orçamento" e "venda" pertencem ao fluxo comercial; peça itens e valores ausentes antes de preparar uma proposta.
 - Após "não, é um chamado", "é pra abrir um chamado" ou correção semelhante, retome os dados fornecidos pelo usuário, reconheça o equívoco brevemente e faça somente a próxima pergunta necessária. Não consulte resumos de CRM ou chamados sem pedido de consulta.
 
@@ -3113,9 +3113,10 @@ function extractEntityCreationFromMessage(
     }
   }
 
-  // 3. Cliente: "criar/cadastrar cliente chamado X" (se não for proposta)
+  // 3. Cliente: "criar/cadastrar cliente chamado X" (se não for proposta nem chamado)
   const isProposal = /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
-  if (!isProposal && !isTicketCreationRequest(userMessage)) {
+  const isTicket = !/\b(?:cliente|lead)\s+chamado\b/i.test(userMessage) && /\b(?:abrir|abra|abre|novo)\s+(?:um\s+)?(?:chamado|ticket|suporte)\b/i.test(userMessage);
+  if (!isProposal && !isTicket) {
     const clientMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?cliente\s+(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
     if (clientMatch && clientMatch[1]) {
       const tool = allowedTools.find(t => t.name === "create_client");
@@ -3450,27 +3451,6 @@ function synthesizeDeterministicResponse(
   return synthesizeDeterministicSingle(lastResult, userMessage, executedReadResults);
 }
 
-function normalizeTicketIntent(value: string): string {
-  return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
-function isTicketCreationRequest(value: string): boolean {
-  const text = normalizeTicketIntent(value);
-  return /\b(?:abrir|abra|abre|criar|crie|cria|cadastrar|registrar|fazer|novo)\s+(?:(?:um|uma|o|a)\s+)?(?:chamado|ticket|suporte|atendimento)\b/.test(text)
-    || /\b(?:chamado|ticket|suporte)\s+(?:urgente\b|para\b|pra\b|pro\b)/.test(text)
-    || /\b(?:chamado|ticket|suporte)\s+[^:,\n]+?\s*[:,-]/.test(text)
-    || /\babertura\s+de\s+(?:um\s+)?(?:chamado|ticket|suporte)\b/.test(text)
-    || /(?:abre|abrir|abra|cria|criar|crie|fazer)\s+(?:um\s+)?(?:chamado|ticket|suporte)\s+(?:pra|para|pro)\s+(?:eles|ela|ele|elas)\b/.test(text);
-}
-
-export async function resolveTicketCustomer(pool: any, clientId: string, customer: string) {
-  const res = await resolveClientInCRM(pool, clientId, customer);
-  if (res.status === "found") return { status: "found" as const, customerName: res.customerName };
-  if (res.status === "ambiguous") return { status: "ambiguous" as const, options: res.options };
-  if (res.status === "missing") return { status: "missing" as const };
-  return { status: "unavailable" as const };
-}
-
 async function chatWithClientGeminiInternal(
   clientId: string,
   userId: string,
@@ -3572,12 +3552,17 @@ async function chatWithClientGeminiInternal(
     isStepCount(5),
     ({ steps }: any) => {
       const lastStep = steps[steps.length - 1];
-      return (
-        lastStep?.toolCalls?.some((tc: any) => {
-          const toolDef = allowedTools.find((t) => t.name === tc.toolName);
-          return toolDef?.type === "MUTATION" || tc.toolName === "solicitar_abertura_chamado";
-        }) ?? false
-      );
+      const hasStandardMutation = lastStep?.toolCalls?.some((tc: any) => {
+        const toolDef = allowedTools.find((t) => t.name === tc.toolName);
+        return toolDef?.type === "MUTATION" && tc.toolName !== "solicitar_abertura_chamado";
+      });
+      if (hasStandardMutation) return true;
+
+      // Para solicitar_abertura_chamado, só encerra o loop de passos se o card de aprovação (HITL) foi gerado
+      const ticketResult = lastStep?.toolResults?.find((tr: any) => tr.toolName === "solicitar_abertura_chamado");
+      if (ticketResult?.output?.pendingActionRequest) return true;
+
+      return false;
     },
   ];
 
@@ -3801,8 +3786,6 @@ async function chatWithClientGeminiInternal(
       } else {
         finalResponse = "Preparei a ação solicitada para sua aprovação:";
       }
-    } else if (executedReadResults.length > 0) {
-      finalResponse = "A consulta não trouxe detalhes suficientes para responder ao pedido. Pode especificar o dado que precisa?";
     } else if (asksForBusinessData(userMessage)) {
       finalResponse = "Não foi possível consultar os dados solicitados no momento.";
     } else {

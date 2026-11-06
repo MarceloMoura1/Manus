@@ -129,7 +129,7 @@ export function createHermesTools(context: HermesToolContext) {
             success: false,
             status: "cliente_nao_encontrado",
             termoCliente,
-            message: `Não localizei nenhum cliente com o nome '${termoCliente}' na nossa base do CRM. Deseja cadastrá-lo primeiro ou verificar o nome completo?`,
+            message: `Não encontrei nenhum cliente ou lead chamado '${termoCliente}' no CRM. Deseja cadastrá-lo?`,
           };
         }
 

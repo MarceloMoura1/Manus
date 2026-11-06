@@ -349,7 +349,7 @@ describe("Hermes ticket creation intent and guided slots", () => {
     const noCustomer = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
       "criar chamado para o cliente Antonio. Assunto: Falha. Descrição: Não abre", [], ["tickets"]);
     expect(noCustomer.pendingActionRequest).toBeUndefined();
-    expect(noCustomer.response).toContain("Não localizei nenhum cliente com o nome 'Antonio'");
+    expect(noCustomer.response).toContain("Não encontrei nenhum cliente ou lead chamado 'Antonio'");
     expect(missing.mock.calls.some(([sql]) => sql.includes("megadesk_crm_clients"))).toBe(true);
     fetchMissing.mockRestore();
 
@@ -507,8 +507,8 @@ describe("Hermes ticket creation intent and guided slots", () => {
     try {
       const result = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
         "Abre chamado para Empresa Fantasma XYZ", [], ["tickets"]);
-      expect(result.response).toContain("Não localizei nenhum cliente com o nome 'Empresa Fantasma XYZ' na nossa base do CRM");
-      expect(result.response).toContain("Deseja cadastrá-lo primeiro");
+      expect(result.response).toContain("Não encontrei nenhum cliente ou lead chamado 'Empresa Fantasma XYZ'");
+      expect(result.response).toContain("Deseja cadastrá-lo");
       expect(result.pendingActionRequest).toBeUndefined();
       expect(fetchSpy).toHaveBeenCalled();
     } finally { fetchSpy.mockRestore(); }
@@ -523,7 +523,7 @@ describe("Hermes ticket creation intent and guided slots", () => {
     try {
       const resultA = await chatWithClientGemini("tenant-a", "operator@example.invalid",
         "Abre um chamado para Empresa Beta", [], ["tickets"]);
-      expect(resultA.response).toContain("Não localizei nenhum cliente com o nome 'Empresa Beta'");
+      expect(resultA.response).toContain("Não encontrei nenhum cliente ou lead chamado 'Empresa Beta'");
       expect(executeA).toHaveBeenCalled();
       fetchSpyA.mockRestore();
 
@@ -539,6 +539,31 @@ describe("Hermes ticket creation intent and guided slots", () => {
       fetchSpyB.mockRestore();
     } finally {
       fetchSpyA.mockRestore();
+    }
+  });
+
+  it("invokes solicitar_abertura_chamado directly for natural phrase 'Abre um chamado para o Luiz com o assunto Falha na emissão de nota'", async () => {
+    const execute = mockTicketDatabase([
+      { crmClientId: "crm-luiz", companyName: "Luiz Transportes", responsibleName: "Luiz", status: "ativo" },
+    ], "Luiz");
+    const fetchSpy = mockGeminiTicketTool({
+      termoCliente: "Luiz",
+      assunto: "Falha na emissão de nota",
+    });
+    try {
+      const result = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "Abre um chamado para o Luiz com o assunto Falha na emissão de nota", [], ["tickets"]);
+      expect(result.functionCallsMade).toEqual(["solicitar_abertura_chamado"]);
+      expect(result.pendingActionRequest?.actionType).toBe("CREATE_TICKET");
+      expect(result.pendingActionRequest?.args).toMatchObject({
+        customer: "Luiz",
+        title: "Falha na emissão de nota",
+      });
+      expect(result.response).toContain('Preparei o chamado "Falha na emissão de nota" para Luiz');
+      expect(execute).toHaveBeenCalled();
+      expect(fetchSpy).toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
     }
   });
 });
