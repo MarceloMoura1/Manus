@@ -495,6 +495,10 @@ export function SalesPage({
     pageSize,
   });
   const options = trpc.erp.sales.options.useQuery();
+  const rawSellers = options.data?.sellers ?? [];
+  const sellers = React.useMemo(() => {
+    return Array.from(new Map(rawSellers.map(s => [s.publicId || s.name, s])).values());
+  }, [rawSellers]);
   const detail = trpc.erp.sales.detail.useQuery(
     { publicId: selectedId! },
     { enabled: Boolean(selectedId) }
@@ -781,7 +785,7 @@ export function SalesPage({
   const entityLabelPlural = kind === "quotes" ? "orçamentos" : kind === "orders" ? "vendas" : "documentos";
   const emptyStateTitle = mode === "quotes" ? "Nenhuma proposta comercial encontrada neste período." : kind === "orders" ? "Nenhuma venda encontrada neste período." : `Nenhum ${entityLabel} encontrado neste período.`;
   const periodFilterLabel = salesFilterPeriodLabel(from, to, month.from, month.to);
-  const selectedSellerName = options.data?.sellers.find(seller => seller.publicId === sellerUserId)?.name ?? "Todos";
+  const selectedSellerName = sellers.find(seller => seller.publicId === sellerUserId)?.name ?? "Todos";
   const setSort = (key: SalesSortKey) => {
     setListSort(current => nextSalesSort(current, key));
     setPage(1);
@@ -935,7 +939,7 @@ export function SalesPage({
                 <MultiSelectFilter
                   label="Vendedor"
                   icon={UserRound}
-                  options={options.data?.sellers.map(s => ({ value: s.publicId, label: s.name })) ?? []}
+                  options={sellers.map(s => ({ value: s.publicId, label: s.name }))}
                   selected={selectedSellerIds}
                   onChange={vals => {
                     setSelectedSellerIds(vals);
@@ -1049,7 +1053,7 @@ export function SalesPage({
                 )}
                 {selectedSellerIds.length > 0 && (
                   <span className="rounded-full bg-violet-50 px-2.5 py-1 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300">
-                    Vendedor: {selectedSellerIds.map(id => options.data?.sellers.find(s => s.publicId === id)?.name || id).join(", ")}
+                    Vendedor: {selectedSellerIds.map(id => sellers.find(s => s.publicId === id)?.name || id).join(", ")}
                   </span>
                 )}
                 {selectedPaymentStatuses.length > 0 && (
@@ -1354,7 +1358,7 @@ export function SalesPage({
         servicesCatalog={servicesCatalog}
         customerLookupEnabled={customerLookupEnabled}
         catalogLookupEnabled={catalogLookupEnabled}
-        sellers={options.data?.sellers ?? []}
+        sellers={sellers}
         paymentMethods={options.data?.paymentMethods ?? []}
         separateBillingAddress={separateBillingAddress}
         setSeparateBillingAddress={setSeparateBillingAddress}
@@ -2339,6 +2343,9 @@ function SaleFormDialog({
   onSubmit: (event: React.FormEvent) => void;
 }) {
   if (!form) return null;
+  const dedupedSellers = React.useMemo(() => {
+    return Array.from(new Map(sellers.map(s => [s.publicId || s.name, s])).values());
+  }, [sellers]);
   const resolveServiceMutation = trpc.erp.services.resolveForSale.useMutation();
   const [resolvingServiceId, setResolvingServiceId] = React.useState<number | null>(null);
   const totals = calculateSalesFormTotals(form);
@@ -2666,7 +2673,7 @@ function SaleFormDialog({
                   <div><p className="text-xs font-semibold text-blue-700 dark:text-blue-400">4. Valores e prazo</p><h3 id="sale-values-heading" className="mt-1 font-bold text-slate-950 dark:text-slate-100">Condições comerciais</h3></div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Data comercial<Input className="mt-1 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" type="date" value={form.commercialDate} onChange={event => setForm(current => current ? { ...current, commercialDate: event.target.value } : current)} /></label>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Vendedor(a)<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" value={form.sellerUserId} onChange={event => setForm(current => current ? { ...current, sellerUserId: event.target.value } : current)}><option value="">{form.publicId ? "Preservar vendedor atual" : "Responsável atual"}</option>{sellers.map(seller => <option key={seller.publicId} value={seller.publicId}>{seller.name}</option>)}</select></label>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Vendedor(a)<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" value={form.sellerUserId} onChange={event => setForm(current => current ? { ...current, sellerUserId: event.target.value } : current)}><option value="">{form.publicId ? "Preservar vendedor atual" : "Responsável atual"}</option>{dedupedSellers.map(seller => <option key={seller.publicId} value={seller.publicId}>{seller.name}</option>)}</select></label>
                     <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Previsão de entrega<Input className="mt-1 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" type="date" value={form.expectedDate} onChange={event => setForm(current => current ? { ...current, expectedDate: event.target.value } : current)} /></label>
                     <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Forma de pagamento<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" value={form.paymentMethod} onChange={event => setForm(current => current ? { ...current, paymentMethod: event.target.value } : current)}><option value="">Definir na confirmação</option>{paymentMethods.map(method => <option key={method} value={method}>{method}</option>)}</select></label>
                     <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Condições de pagamento<Input className="mt-1 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" maxLength={255} placeholder="Ex.: 30/60 dias" value={form.paymentTerms ?? ""} onChange={event => setForm(current => current ? { ...current, paymentTerms: event.target.value } : current)} /></label>

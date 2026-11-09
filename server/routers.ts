@@ -297,7 +297,12 @@ async function ensureClientUser(client: MegaClient, userId: string): Promise<Meg
         permissions: JSON.parse(row.permissions_json || "[]"),
         passwordHash: row.password_hash || undefined,
       };
-      client.users.push(user);
+      const existingIdx = client.users.findIndex((u) => u.id === user!.id);
+      if (existingIdx !== -1) {
+        client.users[existingIdx] = user;
+      } else {
+        client.users.push(user);
+      }
       return user;
     }
   } catch (err) {
@@ -327,10 +332,12 @@ export async function syncMegaDeskUserToMemory(
     client.users = client.users.filter((u) => u.id !== user.id);
   } else {
     const existingIndex = client.users.findIndex((u) => u.id === user.id);
+    let oldName = "";
     if (existingIndex >= 0) {
       const existing = client.users[existingIndex];
+      oldName = existing.name;
       client.users[existingIndex] = {
-        id: existing.id,
+        id: user.id,
         name: user.name ?? existing.name,
         email: user.email ?? existing.email,
         role: user.role ?? existing.role,
@@ -338,6 +345,8 @@ export async function syncMegaDeskUserToMemory(
         permissions: user.permissions ?? existing.permissions,
         passwordHash: user.passwordHash !== undefined ? (user.passwordHash || undefined) : existing.passwordHash,
       };
+      // Garantir deduplicação in-place
+      client.users = client.users.filter((u, i) => i === existingIndex || u.id !== user.id);
     } else {
       client.users.push({
         id: user.id,
@@ -348,6 +357,18 @@ export async function syncMegaDeskUserToMemory(
         permissions: user.permissions ?? [],
         passwordHash: user.passwordHash || undefined,
       });
+    }
+
+    // Sincronizar nome histórico em lote com erp_sale_orders
+    if (user.name && user.name.trim()) {
+      try {
+        await getPool().execute(
+          "UPDATE erp_sale_orders SET seller_name_snapshot = ? WHERE client_id = ? AND (seller_user_id = ? OR seller_name_snapshot = ?)",
+          [user.name.trim(), clientId, user.id, oldName || user.name.trim()]
+        );
+      } catch (err) {
+        console.warn("[syncMegaDeskUserToMemory] Falha ao sincronizar seller_name_snapshot em erp_sale_orders:", err);
+      }
     }
   }
   await persistSyncState();
@@ -875,11 +896,20 @@ export const appRouter = router({
       const client = getClientOrThrow(input.clientId);
       const user = await ensureClientUser(client, input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado para este cliente." });
+      const oldName = user.name;
       const updatedUser = { ...user, name: input.name, email: input.email };
       const auditEntry = makeAudit("MegaAdmin", `Informações do usuário atualizadas: ${input.email}`, client.clientId);
       await persistExistingClientUser(client, user.id, { name: input.name, email: input.email }, auditEntry);
       Object.assign(user, updatedUser);
       appendAudit(auditEntry);
+      try {
+        await getPool().execute(
+          "UPDATE erp_sale_orders SET seller_name_snapshot = ? WHERE client_id = ? AND (seller_user_id = ? OR seller_name_snapshot = ?)",
+          [input.name.trim(), client.clientId, user.id, oldName || input.name.trim()]
+        );
+      } catch (err) {
+        console.warn("[updateUserInfo] Erro ao sincronizar seller_name_snapshot:", err);
+      }
       return { ok: true, user: sanitizeMegaAdminUser(updatedUser) };
     }),
     removeClientUser: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string() })).mutation(async ({ input }) => {

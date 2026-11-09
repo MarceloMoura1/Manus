@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados, megadeskDomainChamadoSequence, megadeskDomainClientUsers, megadeskDomainAuditLogs, megadeskDomainClients } from "../drizzle/schema";
 import { getTestDatabaseUrl } from "./test-integration-gates";
 import { sanitizeConversationMessagesForPersistence } from "./conversation-message-store";
@@ -497,8 +497,21 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
     const usersByClient = new Map<string, any[]>();
     for (const row of userRows as any[]) {
       const list = usersByClient.get(row.client_id) ?? [];
-      // IMPORTANTE: incluir passwordHash para que persistSyncState não sobrescreva com null
-      list.push({ id: row.user_id, name: row.name, email: row.email, role: row.role, status: row.status, permissions: JSON.parse(row.permissions_json || "[]"), passwordHash: row.password_hash ?? null });
+      const existingIdx = list.findIndex(u => u.id === row.user_id);
+      const userObj = {
+        id: row.user_id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        status: row.status,
+        permissions: JSON.parse(row.permissions_json || "[]"),
+        passwordHash: row.password_hash ?? null
+      };
+      if (existingIdx !== -1) {
+        list[existingIdx] = userObj;
+      } else {
+        list.push(userObj);
+      }
       usersByClient.set(row.client_id, list);
     }
 
@@ -732,7 +745,7 @@ export async function persistMegaDeskClientUser(
     if (!client) throw new MegaDeskClientUserPersistenceError("CLIENT_NOT_FOUND");
 
     const [existingUser] = await tx
-      .select({ userId: megadeskDomainClientUsers.userId })
+      .select({ userId: megadeskDomainClientUsers.userId, name: megadeskDomainClientUsers.name })
       .from(megadeskDomainClientUsers)
       .where(and(eq(megadeskDomainClientUsers.userId, input.userId), eq(megadeskDomainClientUsers.clientId, input.clientId)))
       .for("update")
@@ -771,6 +784,16 @@ export async function persistMegaDeskClientUser(
         await tx.update(megadeskDomainClientUsers)
           .set(databaseChanges)
           .where(and(eq(megadeskDomainClientUsers.userId, input.userId), eq(megadeskDomainClientUsers.clientId, input.clientId)));
+      }
+      if ("name" in input.changes && typeof input.changes.name === "string" && input.changes.name.trim()) {
+        const nextName = input.changes.name.trim();
+        try {
+          await tx.execute(
+            sql`UPDATE erp_sale_orders SET seller_name_snapshot = ${nextName} WHERE client_id = ${input.clientId} AND (seller_user_id = ${input.userId} OR seller_name_snapshot = ${existingUser?.name || nextName})`
+          );
+        } catch {
+          // erp_sale_orders pode não existir em esquemas isolados ou sem migração
+        }
       }
     }
 

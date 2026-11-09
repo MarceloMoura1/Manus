@@ -564,7 +564,7 @@ export const megadeskSettingsRouter = router({
 
       // Verificar existência do usuário na empresa
       const [existing] = (await pool.execute(
-        "SELECT user_id, email, role, status FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
+        "SELECT user_id, name, email, role, status FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
         [input.targetUserId, input.clientId]
       )) as any[];
       if ((existing as any[]).length === 0) {
@@ -636,6 +636,17 @@ export const megadeskSettingsRouter = router({
           `UPDATE megadesk_domain_client_users SET ${updates.join(", ")} WHERE user_id = ? AND client_id = ?`,
           values
         );
+      }
+
+      if (input.name !== undefined && input.name.trim()) {
+        try {
+          await pool.execute(
+            "UPDATE erp_sale_orders SET seller_name_snapshot = ? WHERE client_id = ? AND (seller_user_id = ? OR seller_name_snapshot = ?)",
+            [input.name.trim(), input.clientId, input.targetUserId, existing[0].name || input.name.trim()]
+          );
+        } catch (err) {
+          console.warn("[updateTeamUser] Falha ao sincronizar seller_name_snapshot em erp_sale_orders:", err);
+        }
       }
 
       const { syncMegaDeskUserToMemory } = await import("./routers");

@@ -337,16 +337,11 @@ export class SaleRepository {
       [clientId]
     );
     const [sellers] = await this.db().execute<RowDataPacket[]>(
-      `SELECT DISTINCT u.user_id publicId,COALESCE(NULLIF(u.name,''),u.user_id) name
+      `SELECT DISTINCT u.user_id AS publicId, COALESCE(NULLIF(u.name, ''), u.user_id) AS name
        FROM megadesk_domain_client_users u
-       WHERE u.client_id=?
-       UNION
-       SELECT DISTINCT COALESCE(o.seller_user_id,o.created_by) publicId,
-              COALESCE(o.seller_name_snapshot,o.seller_user_id,o.created_by) name
-       FROM erp_sale_orders o
-       WHERE o.client_id=?
+       WHERE u.client_id = ? AND (u.status != 'deleted' OR u.status IS NULL)
        ORDER BY name`,
-      [clientId, clientId]
+      [clientId]
     );
     return {
       categories: categories.map(row => ({
@@ -674,7 +669,9 @@ export class SaleRepository {
         ON first_media.client_id=first_product.client_id
        AND first_media.product_id=first_product.id
        AND first_media.id=first_product.primary_media_id
-       AND first_media.state='active'`;
+       AND first_media.state='active'
+      LEFT JOIN megadesk_domain_client_users seller_u
+        ON seller_u.client_id=o.client_id AND seller_u.user_id=o.seller_user_id`;
     const sqlWhere = where.join(" AND ");
     const orderBy = salesListOrderBy(options.sort, options.direction);
     const [count] = await this.db().execute<RowDataPacket[]>(
@@ -682,7 +679,8 @@ export class SaleRepository {
       values
     );
     const [rows] = await this.db().execute<OrderRow[]>(
-      `SELECT o.*,COALESCE(fin.paid_cents,0) paid_cents,COALESCE(fin.title_count,0) title_count,
+      `SELECT o.*, COALESCE(NULLIF(seller_u.name,''), o.seller_name_snapshot) AS seller_name_snapshot,
+              COALESCE(fin.paid_cents,0) paid_cents,COALESCE(fin.title_count,0) title_count,
               COALESCE(summary.item_count,0) item_count,COALESCE(summary.total_quantity,'0.000') total_quantity,
               summary.first_product_name,first_product.public_id first_product_public_id,
               first_media.media_id first_product_media_id
@@ -702,8 +700,11 @@ export class SaleRepository {
     lock = false
   ) {
     const [orders] = await connection.execute<OrderRow[]>(
-      `SELECT o.*, c.phone AS customer_phone, c.whatsapp AS customer_whatsapp
+      `SELECT o.*, COALESCE(NULLIF(seller_u.name,''), o.seller_name_snapshot) AS seller_name_snapshot,
+              c.phone AS customer_phone, c.whatsapp AS customer_whatsapp
        FROM erp_sale_orders o
+       LEFT JOIN megadesk_domain_client_users seller_u
+         ON seller_u.client_id = o.client_id AND seller_u.user_id = o.seller_user_id
        LEFT JOIN megadesk_crm_clients c
          ON c.client_id = o.client_id AND c.crm_client_id = o.crm_client_id
        WHERE o.client_id=? AND o.public_id=? LIMIT 1${lock ? " FOR UPDATE" : ""}`,
