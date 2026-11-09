@@ -134,3 +134,16 @@ client/public/__manus__/version.json
 
 /test-results/
 /playwright-report/
+
+# Antigravity & Agent workspace artifacts
+.system_generated/
+.antigravity/
+.gemini/
+
+# Vitest and test runner caches
+.vitest/
+
+# Media & Uploads (runtime)
+media/
+uploads/
+
