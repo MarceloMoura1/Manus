@@ -274,6 +274,7 @@ export const megadeskSettingsRouter = router({
 
   /**
    * Listar usuários do cliente (com permissões detalhadas)
+   * Consulta direta à tabela canônica megadesk_domain_client_users para sincronização instantânea
    */
   listTeamUsers: megadeskProcedure
     .input(
@@ -284,13 +285,30 @@ export const megadeskSettingsRouter = router({
     )
     .query(async ({ input, ctx }) => {
       requireClientAdmin(ctx.operationalUserRole);
-      const { getSyncedClientData, validateSyncIntegrity } = await import('./sync-megadesk');
-      const integrity = await validateSyncIntegrity(input.clientId);
-      if (!integrity.isSynced) {
-        console.warn(`[SYNC WARNING] Integridade comprometida para ${input.clientId}:`, integrity.issues);
-      }
-      const syncedData = await getSyncedClientData(input.clientId);
-      return syncedData.users;
+      const pool = getPool();
+      const [rows] = (await pool.execute(
+        "SELECT user_id AS userId, name, email, role, status, permissions_json AS permissionsJson FROM megadesk_domain_client_users WHERE client_id = ? ORDER BY created_at ASC, user_id ASC",
+        [input.clientId]
+      )) as any[];
+
+      return (rows as any[]).map((u) => {
+        let permissions: string[] = [];
+        if (u.permissionsJson) {
+          try {
+            permissions = typeof u.permissionsJson === "string" ? JSON.parse(u.permissionsJson) : u.permissionsJson;
+          } catch {
+            permissions = [];
+          }
+        }
+        return {
+          userId: String(u.userId),
+          name: String(u.name),
+          email: String(u.email),
+          role: u.role as "admin" | "manager" | "agent" | "viewer",
+          status: u.status as "active" | "blocked",
+          permissions,
+        };
+      });
     }),
 
   /**
@@ -474,6 +492,151 @@ export const megadeskSettingsRouter = router({
       );
 
       return { success: true };
+    }),
+
+  /**
+   * Atualizar dados completos do usuário da equipe (nome, e-mail com validação, cargo, status, senha e permissões)
+   */
+  updateTeamUser: megadeskProcedure
+    .input(
+      z.object({
+        clientId: z.string().min(1),
+        userRole: z.string(),
+        targetUserId: z.string().min(1),
+        name: z.string().min(2, "O nome deve ter no mínimo 2 caracteres").max(180).optional(),
+        email: z.string().email("E-mail inválido").optional(),
+        role: z.enum(["admin", "manager", "agent", "viewer"]).optional(),
+        status: z.enum(["active", "blocked"]).optional(),
+        password: z.string().min(6, "A nova senha deve ter no mínimo 6 caracteres").optional().or(z.literal("")),
+        permissions: z.array(z.string()).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
+      const pool = getPool();
+
+      // Verificar existência do usuário na empresa
+      const [existing] = (await pool.execute(
+        "SELECT user_id, email, role, status FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
+        [input.targetUserId, input.clientId]
+      )) as any[];
+      if ((existing as any[]).length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado." });
+      }
+
+      // Validação de unicidade do e-mail
+      if (input.email) {
+        const cleanEmail = input.email.trim().toLowerCase();
+        const [dupRows] = (await pool.execute(
+          "SELECT user_id FROM megadesk_domain_client_users WHERE email = ? AND client_id = ? AND user_id <> ?",
+          [cleanEmail, input.clientId, input.targetUserId]
+        )) as any[];
+        if ((dupRows as any[]).length > 0) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Este e-mail já está sendo utilizado por outro usuário nesta empresa.",
+          });
+        }
+      }
+
+      // Impedir desativação do único admin ativo
+      if (input.status === "blocked" && existing[0].role === "admin") {
+        const [adminRows] = (await pool.execute(
+          "SELECT COUNT(*) AS total FROM megadesk_domain_client_users WHERE client_id = ? AND role = 'admin' AND status = 'active' AND user_id <> ?",
+          [input.clientId, input.targetUserId]
+        )) as any[];
+        const remainingAdmins = Number((adminRows as any[])[0]?.total ?? 0);
+        if (remainingAdmins === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A empresa precisa manter pelo menos um administrador ativo.",
+          });
+        }
+      }
+
+      const updates: string[] = [];
+      const values: any[] = [];
+
+      if (input.name !== undefined) {
+        updates.push("name = ?");
+        values.push(input.name.trim());
+      }
+      if (input.email !== undefined) {
+        updates.push("email = ?");
+        values.push(input.email.trim().toLowerCase());
+      }
+      if (input.role !== undefined) {
+        updates.push("role = ?");
+        values.push(input.role);
+      }
+      if (input.status !== undefined) {
+        updates.push("status = ?");
+        values.push(input.status);
+      }
+      if (input.permissions !== undefined) {
+        updates.push("permissions_json = ?");
+        values.push(JSON.stringify(input.permissions));
+      }
+      if (input.password && input.password.trim().length >= 6) {
+        const passwordHash = await bcrypt.hash(input.password.trim(), 10);
+        updates.push("password_hash = ?");
+        values.push(passwordHash);
+      }
+
+      if (updates.length > 0) {
+        values.push(input.targetUserId, input.clientId);
+        await pool.execute(
+          `UPDATE megadesk_domain_client_users SET ${updates.join(", ")} WHERE user_id = ? AND client_id = ?`,
+          values
+        );
+      }
+
+      return { success: true };
+    }),
+
+  /**
+   * Excluir definitivamente o usuário da equipe
+   */
+  deleteTeamUser: megadeskProcedure
+    .input(
+      z.object({
+        clientId: z.string().min(1),
+        userRole: z.string(),
+        targetUserId: z.string().min(1),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
+      const pool = getPool();
+
+      const [rows] = (await pool.execute(
+        "SELECT user_id, role, name, email FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
+        [input.targetUserId, input.clientId]
+      )) as any[];
+      if ((rows as any[]).length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado." });
+      }
+
+      if (rows[0].role === "admin") {
+        const [adminRows] = (await pool.execute(
+          "SELECT COUNT(*) AS total FROM megadesk_domain_client_users WHERE client_id = ? AND role = 'admin' AND user_id <> ?",
+          [input.clientId, input.targetUserId]
+        )) as any[];
+        const remainingAdmins = Number((adminRows as any[])[0]?.total ?? 0);
+        if (remainingAdmins === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Não é possível excluir o único administrador da empresa.",
+          });
+        }
+      }
+
+      await pool.execute(
+        "DELETE FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
+        [input.targetUserId, input.clientId]
+      );
+
+      return { success: true, removedUserId: input.targetUserId };
     }),
 
   /**

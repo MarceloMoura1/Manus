@@ -4572,11 +4572,10 @@ function Shell() {
     { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
     { id: "crm-summary" as RouteId, label: "CRM", icon: Users },
     { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
+    { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
     { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
     { id: "admin-settings" as RouteId, label: "Configurações Admin", icon: Cog },
-    { id: "bot-config" as RouteId, label: "Configurar Bot", icon: Bot },
-    { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
     { id: "help" as RouteId, label: "Ajuda", icon: AlertCircle },
     { id: "notifications" as RouteId, label: "Notificações", icon: Bell },
   ];
@@ -4587,14 +4586,14 @@ function Shell() {
   const filteredNavItems = navItems.filter(item => {
     // Itens sempre visíveis
     if (alwaysVisibleItems.includes(item.id)) return true;
-    // Itens que dependem de permissões: active-attendance, conversations, tickets, tracking, erp, bot-config, ai-assistant
+    // Itens que dependem de permissões: active-attendance, conversations, tickets, tracking, erp, ai-assistant
     if (item.id.startsWith("crm-")) return session.permissions.includes("crm");
     return item.id.startsWith("erp-") ? session.permissions.includes("erp") : session.permissions.includes(item.id);
   });
 
-  // Separar itens em seções
-  const mainNavItems = filteredNavItems.filter(item => !["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
-  const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
+  // Separar itens em seções (Assistente IA permanece no bloco superior de módulos, logo abaixo de ERP; Configurar Bot removido da sidebar)
+  const mainNavItems = filteredNavItems.filter(item => !["settings", "admin-settings", "help", "notifications"].includes(item.id));
+  const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "help", "notifications", "whatsapp-config"].includes(item.id));
   const canAccessClients = canAccessErpClients(session);
   const canAccessSales = session.permissions.includes("erp");
   const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-services" ? "services" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;

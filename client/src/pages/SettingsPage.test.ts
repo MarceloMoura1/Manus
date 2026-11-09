@@ -12,7 +12,9 @@ describe("SettingsPage access and layout", () => {
 
   it("does not grant administrative settings to normal users", () => {
     expect(source).toContain("{ value: 'whatsapp', label: 'WhatsApp', adminOnly: true }");
-    expect(source).toContain("{ value: 'backup', label: '💾 Backup', adminOnly: true }");
+    expect(source).toContain("{ value: 'backup', label: 'Backup', adminOnly: true }");
+    expect(source).toContain("{ value: 'bot-config', label: 'Configurar Bot', adminOnly: true }");
+    expect(source).toContain("{ value: 'equipe', label: 'Equipe', adminOnly: true }");
   });
 
   it("uses the wider responsive settings shell when it is rendered standalone", () => {

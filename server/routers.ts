@@ -26,6 +26,7 @@ import { ticketStatusesRouter } from "./routers-ticket-statuses";
 import { botScriptsRouter } from "./routers-bot-scripts";
 import { notificationsRouter } from "./routers-notifications";
 import { megadeskSettingsRouter } from "./routers-megadesk-settings";
+import { teamRouter } from "./modules/team/team.router";
 import { userPersonalizationRouter } from "./routers-user-personalization";
 import { evolutionRouter } from "./routers-evolution";
 import { conversasRouter } from "./routers-conversas";
@@ -429,6 +430,7 @@ export const appRouter = router({
   company: companyRouter,
   ticketStatuses: ticketStatusesRouter,
   megadeskSettings: megadeskSettingsRouter,
+  team: teamRouter,
   userPersonalization: userPersonalizationRouter,
   botScripts: botScriptsRouter,
   notifications: notificationsRouter,
@@ -813,6 +815,14 @@ export const appRouter = router({
       if (client.users.length === 1) throw new TRPCError({ code: "BAD_REQUEST", message: "O cliente precisa manter pelo menos um usuário administrativo." });
       client.users = client.users.filter((item) => item.id !== input.userId);
       audit("MegaAdmin", `Usuário removido: ${user.email}`, client.clientId);
+      try {
+        await getPool().execute(
+          "DELETE FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
+          [input.userId, input.clientId]
+        );
+      } catch (err) {
+        console.warn("[MegaAdmin] Falha ao remover da tabela megadesk_domain_client_users:", err);
+      }
       await persistSyncState();
       return { ok: true, removedUserId: input.userId };
     }),

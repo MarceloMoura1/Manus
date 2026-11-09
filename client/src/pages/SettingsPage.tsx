@@ -16,10 +16,12 @@ import {
   Trash2, Plus, Edit2, Lock, Bell, MessageSquare, Wifi, Check, AlertCircle, Loader2,
   Building2, Phone, Mail, MapPin, Clock, Image, Users, Shield, Key, UserPlus,
   UserX, Download, Upload, Database, RefreshCw, Settings2, Tag, Palette, ChevronRight,
-  Eye, EyeOff, Save, X, AlertTriangle, CheckCircle2, Info
+  Eye, EyeOff, Save, X, AlertTriangle, CheckCircle2, Info, Bot
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserPersonalizationTab } from '@/components/UserPersonalizationTab';
+import { BotConfigPage } from './BotConfigPage';
+import { TeamTab } from './settings/TeamTab';
 
 // ─── Session helper ──────────────────────────────────────────────────────────
 const MEGADESK_SESSION_KEY = 'megadesk_session_v1';
@@ -679,483 +681,7 @@ function TabChamados({ clientId, userRole }: { clientId: string; userRole: strin
 // ABA EQUIPE
 // ════════════════════════════════════════════════════════════════════════════
 function TabEquipe({ clientId, userRole }: { clientId: string; userRole: string }) {
-  const isAdmin = userRole === 'admin';
-  const [showAddUser, setShowAddUser] = useState(false);
-  const [editingUser, setEditingUser] = useState<any | null>(null);
-  const [resetPasswordUser, setResetPasswordUser] = useState<any | null>(null);
-  const [newPassword, setNewPassword] = useState('');
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [newUser, setNewUser] = useState({
-    name: '', email: '', password: '',
-    role: 'agent' as 'admin' | 'manager' | 'agent' | 'viewer',
-    permissions: [] as string[],
-  });
-  const [showPassword, setShowPassword] = useState(false);
-  const utils = trpc.useUtils();
-
-  const { data: clientInfo } = trpc.megadeskSettings.getClientInfo.useQuery(
-    { clientId, userRole },
-    { enabled: isAdmin, retry: false }
-  );
-
-  const { data: users = [], isLoading } = trpc.megadeskSettings.listTeamUsers.useQuery(
-    { clientId, userRole },
-    { enabled: isAdmin, retry: false }
-  );
-
-  const addMutation = trpc.megadeskSettings.addTeamUser.useMutation({
-    onSuccess: () => {
-      toast.success('Usuário adicionado com sucesso!');
-      utils.megadeskSettings.listTeamUsers.invalidate();
-      setShowAddUser(false);
-      setNewUser({ name: '', email: '', password: '', role: 'agent', permissions: [] });
-    },
-    onError: (err) => toast.error(err.message),
-  });
-
-  const removeMutation = trpc.megadeskSettings.removeTeamUser.useMutation({
-    onSuccess: () => {
-      toast.success('Usuário removido!');
-      utils.megadeskSettings.listTeamUsers.invalidate();
-    },
-    onError: (err) => toast.error(err.message),
-  });
-
-  const updatePermsMutation = trpc.megadeskSettings.updateTeamUserPermissions.useMutation({
-    onSuccess: () => {
-      toast.success('Permissões atualizadas!');
-      utils.megadeskSettings.listTeamUsers.invalidate();
-      setEditingUser(null);
-    },
-    onError: (err) => toast.error(err.message),
-  });
-
-  const resetPasswordMutation = trpc.megadeskSettings.resetTeamUserPassword.useMutation({
-    onSuccess: () => {
-      toast.success('Senha redefinida com sucesso!');
-      setResetPasswordUser(null);
-      setNewPassword('');
-    },
-    onError: (err) => toast.error(err.message),
-  });
-
-  // Permissões padrão por role
-  const defaultPermsByRole: Record<string, string[]> = {
-    admin: AVAILABLE_PERMISSIONS.map(p => p.key),
-    manager: AVAILABLE_PERMISSIONS.map(p => p.key),
-    agent: ['active-attendance', 'conversations', 'tickets'],
-    viewer: ['tickets'],
-  };
-
-  const handleRoleChange = (role: 'admin' | 'manager' | 'agent' | 'viewer') => {
-    setNewUser(p => ({ ...p, role, permissions: defaultPermsByRole[role] }));
-  };
-
-  if (!isAdmin) return (
-    <div className="space-y-4">
-      <AdminOnlyBanner />
-      <Card className="border-slate-200"><CardContent className="pt-6 text-center text-slate-500 py-12">
-        <Lock className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-        <p className="font-medium">Sem permissão de acesso</p>
-      </CardContent></Card>
-    </div>
-  );
-
-  const activeUsers = users.filter(u => u.status === 'active');
-  const maxUsers = clientInfo?.maxUsers ?? 5;
-
-  return (
-    <div className="space-y-6">
-      {/* Header com limite */}
-      <div className="flex items-center justify-between p-4 bg-purple-50 border border-purple-200 rounded-xl">
-        <div className="flex items-center gap-3">
-          <Users className="w-5 h-5 text-purple-600" />
-          <div>
-            <p className="text-sm font-semibold text-purple-800">Gerenciamento de Equipe</p>
-            <p className="text-xs text-purple-600">
-              {activeUsers.length} de {maxUsers} usuários ativos
-              {activeUsers.length >= maxUsers && (
-                <span className="ml-2 text-red-600 font-medium">— Limite atingido</span>
-              )}
-            </p>
-          </div>
-        </div>
-        <Button
-          onClick={() => setShowAddUser(true)}
-          disabled={activeUsers.length >= maxUsers}
-          className="bg-purple-600 hover:bg-purple-700 text-white gap-2"
-        >
-          <UserPlus className="w-4 h-4" /> Adicionar Usuário
-        </Button>
-      </div>
-
-      {/* Barra de progresso de usuários */}
-      <div className="space-y-1">
-        <div className="flex justify-between text-xs text-slate-500">
-          <span>Usuários ativos</span>
-          <span>{activeUsers.length}/{maxUsers}</span>
-        </div>
-        <div className="w-full bg-slate-200 rounded-full h-2">
-          <div
-            className={`h-2 rounded-full transition-all ${
-              activeUsers.length >= maxUsers ? 'bg-red-500' : 'bg-purple-500'
-            }`}
-            style={{ width: `${Math.min((activeUsers.length / maxUsers) * 100, 100)}%` }}
-          />
-        </div>
-      </div>
-
-      {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
-        </div>
-      ) : users.length === 0 ? (
-        <Card className="border-dashed border-2 border-slate-200">
-          <CardContent className="pt-6 text-center py-12">
-            <Users className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-            <p className="font-medium text-slate-600">Nenhum usuário cadastrado</p>
-            <Button onClick={() => setShowAddUser(true)} className="mt-4 gap-2" variant="outline">
-              <UserPlus className="w-4 h-4" /> Adicionar primeiro usuário
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {users.map((user) => (
-            <Card key={user.userId} className={`bg-white border shadow-sm ${user.status === 'blocked' ? 'opacity-60 border-red-200' : 'border-slate-200'}`}>
-              <CardContent className="pt-4 pb-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${
-                      user.status === 'blocked' ? 'bg-slate-400' : 'bg-gradient-to-br from-purple-500 to-indigo-600'
-                    }`}>
-                      {user.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-semibold text-slate-800 text-sm truncate">{user.name}</p>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ROLE_COLORS[user.role] ?? ROLE_COLORS.viewer}`}>
-                          {ROLE_LABELS[user.role] ?? user.role}
-                        </span>
-                        {user.status === 'blocked' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 border border-red-200">
-                            Bloqueado
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-500 truncate">{user.email}</p>
-                      {/* Permissões */}
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {user.permissions.slice(0, 4).map((perm: string) => {
-                          const p = AVAILABLE_PERMISSIONS.find(ap => ap.key === perm);
-                          return p ? (
-                            <span key={perm} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">
-                              {p.label}
-                            </span>
-                          ) : null;
-                        })}
-                        {user.permissions.length > 4 && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-500">
-                            +{user.permissions.length - 4}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 hover:bg-blue-50"
-                      title="Editar permissões"
-                      onClick={() => setEditingUser({ ...user })}
-                    >
-                      <Shield className="w-3.5 h-3.5 text-blue-500" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 hover:bg-amber-50"
-                      title="Redefinir senha"
-                      onClick={() => setResetPasswordUser(user)}
-                    >
-                      <Key className="w-3.5 h-3.5 text-amber-500" />
-                    </Button>
-                    {user.status === 'active' ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 hover:bg-red-50"
-                        title="Remover usuário"
-                        onClick={() => {
-                          if (confirm(`Remover "${user.name}" da equipe?`)) {
-                            removeMutation.mutate({ clientId, userRole, targetUserId: user.userId });
-                          }
-                        }}
-                      >
-                        <UserX className="w-3.5 h-3.5 text-red-500" />
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 hover:bg-green-50"
-                        title="Reativar usuário"
-                        onClick={() => {
-                          updatePermsMutation.mutate({ clientId, userRole, targetUserId: user.userId, status: 'active' });
-                        }}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Dialog: Adicionar usuário */}
-      <Dialog open={showAddUser} onOpenChange={setShowAddUser}>
-        <DialogContent className="sm:max-w-lg bg-white border-2 border-black">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <UserPlus className="w-5 h-5 text-purple-500" /> Adicionar Usuário
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Nome *</label>
-                <Input
-                  placeholder="Nome completo"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser(p => ({ ...p, name: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Cargo</label>
-                <Select value={newUser.role} onValueChange={(v) => handleRoleChange(v as any)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(ROLE_LABELS).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">E-mail *</label>
-              <Input
-                type="email"
-                placeholder="usuario@empresa.com"
-                value={newUser.email}
-                onChange={(e) => setNewUser(p => ({ ...p, email: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Senha *</label>
-              <div className="relative">
-                <Input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Mínimo 6 caracteres"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser(p => ({ ...p, password: e.target.value }))}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  onClick={() => setShowPassword(p => !p)}
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Permissões</label>
-              <div className="grid grid-cols-2 gap-2">
-                {AVAILABLE_PERMISSIONS.map((perm) => {
-                  const checked = newUser.permissions.includes(perm.key);
-                  return (
-                    <label
-                      key={perm.key}
-                      className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
-                        checked ? 'bg-purple-50 border-purple-200' : 'bg-white border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={(v) => {
-                          setNewUser(p => ({
-                            ...p,
-                            permissions: v
-                              ? [...p.permissions, perm.key]
-                              : p.permissions.filter(x => x !== perm.key),
-                          }));
-                        }}
-                      />
-                      <span className="text-xs font-medium text-slate-700">{perm.label}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddUser(false)}>Cancelar</Button>
-            <Button
-              onClick={() => {
-                if (!newUser.name.trim()) { toast.error('Informe o nome.'); return; }
-                if (!newUser.email.trim()) { toast.error('Informe o e-mail.'); return; }
-                if (newUser.password.length < 6) { toast.error('Senha deve ter no mínimo 6 caracteres.'); return; }
-                addMutation.mutate({ clientId, userRole, ...newUser });
-              }}
-              disabled={addMutation.isPending}
-              className="bg-purple-600 hover:bg-purple-700 text-white"
-            >
-              {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-              Adicionar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog: Editar permissões */}
-      <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
-        <DialogContent className="sm:max-w-lg bg-white border-2 border-black">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Shield className="w-5 h-5 text-blue-500" /> Editar Permissões — {editingUser?.name}
-            </DialogTitle>
-          </DialogHeader>
-          {editingUser && (
-            <div className="space-y-4 py-2">
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Cargo</label>
-                <Select
-                  value={editingUser.role}
-                  onValueChange={(v) => {
-                    setEditingUser((p: any) => ({ ...p, role: v, permissions: defaultPermsByRole[v] }));
-                  }}
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(ROLE_LABELS).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Permissões</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {AVAILABLE_PERMISSIONS.map((perm) => {
-                    const checked = editingUser.permissions.includes(perm.key);
-                    return (
-                      <label
-                        key={perm.key}
-                        className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
-                          checked ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={(v) => {
-                            setEditingUser((p: any) => ({
-                              ...p,
-                              permissions: v
-                                ? [...p.permissions, perm.key]
-                                : p.permissions.filter((x: string) => x !== perm.key),
-                            }));
-                          }}
-                        />
-                        <span className="text-xs font-medium text-slate-700">{perm.label}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingUser(null)}>Cancelar</Button>
-            <Button
-              onClick={() => {
-                if (!editingUser) return;
-                updatePermsMutation.mutate({
-                  clientId, userRole,
-                  targetUserId: editingUser.userId,
-                  role: editingUser.role,
-                  permissions: editingUser.permissions,
-                });
-              }}
-              disabled={updatePermsMutation.isPending}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              {updatePermsMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Salvar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog: Redefinir senha */}
-      <Dialog open={!!resetPasswordUser} onOpenChange={() => { setResetPasswordUser(null); setNewPassword(''); }}>
-        <DialogContent className="sm:max-w-md bg-white border-2 border-black">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Key className="w-5 h-5 text-amber-500" /> Redefinir Senha — {resetPasswordUser?.name}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <p className="text-xs text-amber-700">A senha atual será substituída pela nova senha definida abaixo.</p>
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Nova Senha *</label>
-              <div className="relative">
-                <Input
-                  type={showNewPassword ? 'text' : 'password'}
-                  placeholder="Mínimo 6 caracteres"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  onClick={() => setShowNewPassword(p => !p)}
-                >
-                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setResetPasswordUser(null); setNewPassword(''); }}>Cancelar</Button>
-            <Button
-              onClick={() => {
-                if (newPassword.length < 6) { toast.error('Senha deve ter no mínimo 6 caracteres.'); return; }
-                resetPasswordMutation.mutate({
-                  clientId, userRole,
-                  targetUserId: resetPasswordUser.userId,
-                  newPassword,
-                });
-              }}
-              disabled={resetPasswordMutation.isPending}
-              className="bg-amber-500 hover:bg-amber-600 text-white"
-            >
-              {resetPasswordMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
-              Redefinir Senha
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+  return <TeamTab clientId={clientId} userRole={userRole} />;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1342,7 +868,81 @@ export function SettingsPage({ layout = "standalone" }: SettingsPageProps) {
   const isAdmin = userRole === 'admin';
   const isWorkspace = layout === "workspace";
 
-  const [activeTab, setActiveTab] = useState(isAdmin ? 'whatsapp' : 'account');
+  // ─── Normalização e Lista Estrita de Abas com RBAC ─────────────────────────
+  const resolveTabAlias = (rawTab: string | null): string | null => {
+    if (!rawTab) return null;
+    const t = rawTab.toLowerCase().trim();
+    if (t === 'bot' || t === 'bot-config' || t === 'configurar-bot') return 'bot-config';
+    if (t === 'users' || t === 'equipe' || t === 'team') return 'equipe';
+    if (t === 'whats' || t === 'whatsapp') return 'whatsapp';
+    if (t === 'notificacoes' || t === 'notifications') return 'notifications';
+    if (t === 'atendimento' || t === 'attendance') return 'attendance';
+    if (t === 'personalizacao' || t === 'personalization') return 'personalization';
+    if (t === 'geral' || t === 'empresa') return 'geral';
+    if (t === 'chamados' || t === 'tickets') return 'chamados';
+    if (t === 'backup') return 'backup';
+    return t;
+  };
+
+  const getInitialTab = (): string => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = resolveTabAlias(params.get('tab'));
+      if (tabParam) {
+        const adminValues = ['whatsapp', 'geral', 'chamados', 'equipe', 'backup', 'bot-config'];
+        if (adminValues.includes(tabParam) && !isAdmin) {
+          return 'notifications';
+        }
+        return tabParam;
+      }
+    }
+    return isAdmin ? 'whatsapp' : 'notifications';
+  };
+
+  const [activeTab, setActiveTab] = useState(getInitialTab);
+
+  // Proteção contra acesso indevido por URL ou alteração externa
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = resolveTabAlias(params.get('tab'));
+    const adminTabsList = ['whatsapp', 'geral', 'chamados', 'equipe', 'backup', 'bot-config'];
+
+    if (tabParam) {
+      if (adminTabsList.includes(tabParam) && !isAdmin) {
+        setActiveTab('notifications');
+        params.set('tab', 'notifications');
+        window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+        toast.error('Acesso restrito a administradores. Redirecionado para Notificações.');
+        return;
+      }
+      if (tabParam !== activeTab) {
+        setActiveTab(tabParam);
+      }
+      return;
+    }
+
+    if (adminTabsList.includes(activeTab) && !isAdmin) {
+      setActiveTab('notifications');
+      params.set('tab', 'notifications');
+      window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+    }
+  }, [isAdmin, activeTab]);
+
+  const handleSelectTab = (tabValue: string) => {
+    const adminTabsList = ['whatsapp', 'geral', 'chamados', 'equipe', 'backup', 'bot-config'];
+    if (adminTabsList.includes(tabValue) && !isAdmin) {
+      setActiveTab('notifications');
+      toast.error('Acesso restrito a administradores.');
+      return;
+    }
+    setActiveTab(tabValue);
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      params.set('tab', tabValue);
+      window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+    }
+  };
 
   // ─── Aba: WhatsApp ────────────────────────────────────────────────────────
   const [phoneNumberId, setPhoneNumberId] = useState('');
@@ -1597,17 +1197,20 @@ export function SettingsPage({ layout = "standalone" }: SettingsPageProps) {
   };
 
   // ─── Tabs disponíveis ─────────────────────────────────────────────────────
-  // Abas adminOnly são completamente ocultadas para não-admin (sem cadeado)
+  // Ordem estrita: Bloco 1 (Administradores) e Bloco 2 (Todos os usuários)
   const allTabs = [
+    // [BLOCO 1: SOMENTE ADMINISTRADORES (role === 'admin')]
     { value: 'whatsapp', label: 'WhatsApp', adminOnly: true },
-    { value: 'account', label: 'Conta', adminOnly: false },
+    { value: 'geral', label: 'Geral', adminOnly: true },
+    { value: 'chamados', label: 'Chamados', adminOnly: true },
+    { value: 'equipe', label: 'Equipe', adminOnly: true },
+    { value: 'backup', label: 'Backup', adminOnly: true },
+    { value: 'bot-config', label: 'Configurar Bot', adminOnly: true },
+
+    // [BLOCO 2: TODOS OS USUÁRIOS]
     { value: 'notifications', label: 'Notificações', adminOnly: false },
     { value: 'attendance', label: 'Atendimento', adminOnly: false },
     { value: 'personalization', label: 'Personalização', adminOnly: false },
-    { value: 'geral', label: '🏢 Geral', adminOnly: true },
-    { value: 'chamados', label: '🎫 Chamados', adminOnly: true },
-    { value: 'equipe', label: '👥 Equipe', adminOnly: true },
-    { value: 'backup', label: '💾 Backup', adminOnly: true },
   ];
   // Filtrar: admin vê tudo, não-admin não vê abas adminOnly
   const tabs = allTabs.filter(tab => isAdmin || !tab.adminOnly);
@@ -1615,26 +1218,26 @@ export function SettingsPage({ layout = "standalone" }: SettingsPageProps) {
   // ─── Ícones por aba ────────────────────────────────────────────────────────
   const tabIcons: Record<string, React.ElementType> = {
     whatsapp: MessageSquare,
-    account: Users,
+    geral: Building2,
+    chamados: Tag,
+    equipe: Users,
+    backup: Database,
+    'bot-config': Bot,
     notifications: Bell,
     attendance: Phone,
     personalization: Palette,
-    geral: Building2,
-    chamados: Tag,
-    equipe: Shield,
-    backup: Database,
   };
 
   const tabDescriptions: Record<string, string> = {
-    whatsapp: 'Integração WhatsApp API',
-    account: 'Dados pessoais e senha',
-    notifications: 'Alertas e sons',
-    attendance: 'Respostas e atalhos',
-    personalization: 'Fundo da conversa',
+    whatsapp: 'Integração WhatsApp API / Instâncias',
     geral: 'Dados da empresa',
-    chamados: 'Status personalizados',
-    equipe: 'Usuários e permissões',
+    chamados: 'Status personalizados / Regras',
+    equipe: 'Usuários, papéis e permissões',
     backup: 'Exportação e restauração',
+    'bot-config': 'Configuração do fluxo/regras do Bot de atendimento',
+    notifications: 'Alertas e sons',
+    attendance: 'Respostas rápidas e atalhos',
+    personalization: 'Fundo de tela e preferências visuais',
   };
 
   return (
@@ -1668,7 +1271,7 @@ export function SettingsPage({ layout = "standalone" }: SettingsPageProps) {
                       {showSeparator && <li className="mx-4 my-2 border-t border-slate-100" />}
                       <li>
                         <button
-                          onClick={() => setActiveTab(tab.value)}
+                          onClick={() => handleSelectTab(tab.value)}
                           className={`group flex w-full items-center gap-3 px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
                             isActive
                               ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-500'
@@ -2031,6 +1634,9 @@ export function SettingsPage({ layout = "standalone" }: SettingsPageProps) {
 
           {/* ─── Aba: Backup (ADMIN) ───────────────────────────────────────────── */}
           {activeTab === 'backup' && <TabBackup clientId={clientId} userRole={userRole} />}
+
+          {/* ─── Aba: Configurar Bot (ADMIN) ──────────────────────────────────── */}
+          {activeTab === 'bot-config' && <BotConfigPage />}
 
           </div>{/* fim conteúdo */}
         </div>{/* fim flex layout */}
