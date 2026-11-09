@@ -430,6 +430,9 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
                 <div className="relative">
                   <Input
                     type={showEditPassword ? 'text' : 'password'}
+                    name="edit_user_password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
                     placeholder="Digite nova senha (mínimo 6 caracteres)"
                     value={editPassword}
                     onChange={(e) => setEditPassword(e.target.value)}
@@ -550,148 +553,168 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
       {/* ─── MODAL DE ADICIONAR USUÁRIO ───────────────────────────────────────── */}
       <Dialog open={showAddUser} onOpenChange={setShowAddUser}>
         <DialogContent className="sm:max-w-lg bg-white border border-slate-200 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-900">
-              <UserPlus className="w-5 h-5 text-purple-600" />
-              Adicionar Novo Usuário
-            </DialogTitle>
-          </DialogHeader>
+          <form
+            autoComplete="off"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!newUser.name.trim()) { toast.error('Informe o nome do usuário.'); return; }
+              if (!newUser.email.trim()) { toast.error('Informe o e-mail do usuário.'); return; }
+              if (newUser.password.length < 6) { toast.error('A senha deve ter no mínimo 6 caracteres.'); return; }
 
-          <div className="space-y-4 py-2 text-slate-800">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Nome Completo *
-                </label>
-                <Input
-                  placeholder="Nome do usuário"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser((p) => ({ ...p, name: e.target.value }))}
-                />
+              addMutation.mutate({
+                clientId,
+                userRole,
+                name: newUser.name.trim(),
+                email: newUser.email.trim().toLowerCase(),
+                password: newUser.password,
+                role: newUser.role,
+                permissions: newUser.permissions,
+              });
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-slate-900">
+                <UserPlus className="w-5 h-5 text-purple-600" />
+                Adicionar Novo Usuário
+              </DialogTitle>
+            </DialogHeader>
+
+            {/* Injeção de Dummy Inputs de Armadilha (Engodo anti-autofill do Chrome/Chromium) */}
+            <input type="text" name="chrome_fake_user" style={{ display: "none" }} tabIndex={-1} aria-hidden="true" autoComplete="off" />
+            <input type="password" name="chrome_fake_pass" style={{ display: "none" }} tabIndex={-1} aria-hidden="true" autoComplete="off" />
+
+            <div className="space-y-4 py-2 text-slate-800">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                    Nome Completo *
+                  </label>
+                  <Input
+                    name="new_user_name"
+                    autoComplete="off"
+                    placeholder="Nome do usuário"
+                    value={newUser.name}
+                    onChange={(e) => setNewUser((p) => ({ ...p, name: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    Cargo
+                  </label>
+                  <Select
+                    value={newUser.role}
+                    onValueChange={(v) => handleRoleChangeForNew(v as any)}
+                  >
+                    <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl z-50 text-slate-900 dark:text-slate-100">
+                      {Object.entries(ROLE_LABELS).map(([k, v]) => (
+                        <SelectItem key={k} value={k} className="hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-900 dark:text-slate-100">{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Cargo
+                  E-mail *
                 </label>
-                <Select
-                  value={newUser.role}
-                  onValueChange={(v) => handleRoleChangeForNew(v as any)}
-                >
-                  <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl z-50 text-slate-900 dark:text-slate-100">
-                    {Object.entries(ROLE_LABELS).map(([k, v]) => (
-                      <SelectItem key={k} value={k} className="hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-900 dark:text-slate-100">{v}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                E-mail *
-              </label>
-              <Input
-                type="email"
-                placeholder="usuario@empresa.com"
-                value={newUser.email}
-                onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                Senha de Acesso *
-              </label>
-              <div className="relative">
                 <Input
-                  type={showNewPassword ? 'text' : 'password'}
-                  placeholder="Mínimo 6 caracteres"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
-                  className="pr-10 bg-white"
+                  type="email"
+                  name="new_user_email"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  placeholder="usuario@empresa.com"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
                 />
-                <button
-                  type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                >
-                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Senha de Acesso *
+                </label>
+                <div className="relative">
+                  <Input
+                    type={showNewPassword ? 'text' : 'password'}
+                    name="new_user_password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    placeholder="Mínimo 6 caracteres"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
+                    className="pr-10 bg-white"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Permissões de Acesso
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-1">
+                  {AVAILABLE_PERMISSIONS.map((perm) => {
+                    const checked = isPermChecked(newUser.permissions, perm.key);
+                    return (
+                      <label
+                        key={perm.key}
+                        className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                          checked
+                            ? 'bg-purple-50 border-purple-200 text-purple-900 dark:bg-purple-950/40 dark:border-purple-800 dark:text-purple-200'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(val) => {
+                            setNewUser((p) => ({
+                              ...p,
+                              permissions: togglePermission(p.permissions, perm.key, !!val),
+                            }));
+                          }}
+                        />
+                        <span className="truncate font-medium">{perm.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  Home, Configurações, Ajuda, Notificações e Preferências Visuais são ativas por padrão para todos os usuários.
+                </p>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                Permissões de Acesso
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-1">
-                {AVAILABLE_PERMISSIONS.map((perm) => {
-                  const checked = isPermChecked(newUser.permissions, perm.key);
-                  return (
-                    <label
-                      key={perm.key}
-                      className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
-                        checked
-                          ? 'bg-purple-50 border-purple-200 text-purple-900 dark:bg-purple-950/40 dark:border-purple-800 dark:text-purple-200'
-                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={(val) => {
-                          setNewUser((p) => ({
-                            ...p,
-                            permissions: togglePermission(p.permissions, perm.key, !!val),
-                          }));
-                        }}
-                      />
-                      <span className="truncate font-medium">{perm.label}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                Home, Configurações, Ajuda, Notificações e Preferências Visuais são ativas por padrão para todos os usuários.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowAddUser(false)}
-              disabled={addMutation.isPending}
-            >
-              Cancelar
-            </Button>
-            <Button
-              size="sm"
-              className="bg-purple-600 hover:bg-purple-700 text-white gap-1.5"
-              disabled={addMutation.isPending}
-              onClick={() => {
-                if (!newUser.name.trim()) { toast.error('Informe o nome do usuário.'); return; }
-                if (!newUser.email.trim()) { toast.error('Informe o e-mail do usuário.'); return; }
-                if (newUser.password.length < 6) { toast.error('A senha deve ter no mínimo 6 caracteres.'); return; }
-
-                addMutation.mutate({
-                  clientId,
-                  userRole,
-                  name: newUser.name.trim(),
-                  email: newUser.email.trim().toLowerCase(),
-                  password: newUser.password,
-                  role: newUser.role,
-                  permissions: newUser.permissions,
-                });
-              }}
-            >
-              {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-              Adicionar à Equipe
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAddUser(false)}
+                disabled={addMutation.isPending}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                className="bg-purple-600 hover:bg-purple-700 text-white gap-1.5"
+                disabled={addMutation.isPending}
+              >
+                {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                Adicionar à Equipe
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
