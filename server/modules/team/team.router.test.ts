@@ -8,6 +8,16 @@ vi.mock("../../db", () => ({
   getPool: () => ({
     execute: mocks.execute,
   }),
+  getDb: () => ({
+    execute: mocks.execute,
+  }),
+  getLazyDb: () => ({
+    execute: mocks.execute,
+  }),
+}));
+
+vi.mock("../../routers", () => ({
+  syncMegaDeskUserToMemory: vi.fn(),
 }));
 
 import { teamRouter } from "./team.router";

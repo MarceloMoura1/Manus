@@ -381,6 +381,21 @@ export const megadeskSettingsRouter = router({
         [userId, input.clientId, input.name, input.email.toLowerCase(), input.role, JSON.stringify(permissions), passwordHash]
       );
 
+      const { syncMegaDeskUserToMemory } = await import("./routers");
+      await syncMegaDeskUserToMemory(
+        input.clientId,
+        {
+          id: userId,
+          name: input.name,
+          email: input.email.toLowerCase(),
+          role: input.role,
+          status: "active",
+          permissions,
+          passwordHash,
+        },
+        "upsert"
+      );
+
       return { success: true, userId };
     }),
 
@@ -412,6 +427,16 @@ export const megadeskSettingsRouter = router({
       await pool.execute(
         "UPDATE megadesk_domain_client_users SET status = 'blocked' WHERE user_id = ? AND client_id = ?",
         [input.targetUserId, input.clientId]
+      );
+
+      const { syncMegaDeskUserToMemory } = await import("./routers");
+      await syncMegaDeskUserToMemory(
+        input.clientId,
+        {
+          id: input.targetUserId,
+          status: "blocked",
+        },
+        "upsert"
       );
 
       return { success: true };
@@ -457,6 +482,18 @@ export const megadeskSettingsRouter = router({
         values
       );
 
+      const { syncMegaDeskUserToMemory } = await import("./routers");
+      await syncMegaDeskUserToMemory(
+        input.clientId,
+        {
+          id: input.targetUserId,
+          ...(input.role !== undefined ? { role: input.role } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.permissions !== undefined ? { permissions: input.permissions } : {}),
+        },
+        "upsert"
+      );
+
       return { success: true };
     }),
 
@@ -489,6 +526,16 @@ export const megadeskSettingsRouter = router({
       await pool.execute(
         "UPDATE megadesk_domain_client_users SET password_hash = ? WHERE user_id = ? AND client_id = ?",
         [passwordHash, input.targetUserId, input.clientId]
+      );
+
+      const { syncMegaDeskUserToMemory } = await import("./routers");
+      await syncMegaDeskUserToMemory(
+        input.clientId,
+        {
+          id: input.targetUserId,
+          passwordHash,
+        },
+        "upsert"
       );
 
       return { success: true };
@@ -591,6 +638,25 @@ export const megadeskSettingsRouter = router({
         );
       }
 
+      const { syncMegaDeskUserToMemory } = await import("./routers");
+      let passwordHash: string | undefined = undefined;
+      if (input.password && input.password.trim().length >= 6) {
+        passwordHash = await bcrypt.hash(input.password.trim(), 10);
+      }
+      await syncMegaDeskUserToMemory(
+        input.clientId,
+        {
+          id: input.targetUserId,
+          ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+          ...(input.email !== undefined ? { email: input.email.trim().toLowerCase() } : {}),
+          ...(input.role !== undefined ? { role: input.role } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.permissions !== undefined ? { permissions: input.permissions } : {}),
+          ...(passwordHash !== undefined ? { passwordHash } : {}),
+        },
+        "upsert"
+      );
+
       return { success: true };
     }),
 
@@ -635,6 +701,9 @@ export const megadeskSettingsRouter = router({
         "DELETE FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
         [input.targetUserId, input.clientId]
       );
+
+      const { syncMegaDeskUserToMemory } = await import("./routers");
+      await syncMegaDeskUserToMemory(input.clientId, { id: input.targetUserId }, "delete");
 
       return { success: true, removedUserId: input.targetUserId };
     }),

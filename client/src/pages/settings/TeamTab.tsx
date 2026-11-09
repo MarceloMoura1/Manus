@@ -13,13 +13,11 @@ import {
 import { toast } from 'sonner';
 
 export const AVAILABLE_PERMISSIONS = [
-  { key: 'active-attendance', label: 'Atendimento Ativo' },
-  { key: 'conversations', label: 'Conversas' },
+  { key: 'conversations', label: 'Atendimento' },
   { key: 'tickets', label: 'Chamados' },
   { key: 'tracking', label: 'Rastreamento' },
+  { key: 'crm', label: 'CRM' },
   { key: 'erp', label: 'ERP' },
-  { key: 'clients', label: 'Clientes' },
-  { key: 'bot-config', label: 'Configurar Bot' },
   { key: 'ai-assistant', label: 'Assistente IA' },
 ];
 
@@ -38,10 +36,31 @@ export const ROLE_COLORS: Record<string, string> = {
 };
 
 const defaultPermsByRole: Record<string, string[]> = {
-  admin: AVAILABLE_PERMISSIONS.map(p => p.key),
-  manager: AVAILABLE_PERMISSIONS.map(p => p.key),
-  agent: ['active-attendance', 'conversations', 'tickets'],
+  admin: ['conversations', 'active-attendance', 'tickets', 'tracking', 'crm', 'erp', 'ai-assistant'],
+  manager: ['conversations', 'active-attendance', 'tickets', 'tracking', 'crm', 'erp', 'ai-assistant'],
+  agent: ['conversations', 'active-attendance', 'tickets'],
   viewer: ['tickets'],
+};
+
+const isPermChecked = (perms: string[], key: string) => {
+  if (key === 'conversations') {
+    return perms.includes('conversations') || perms.includes('active-attendance');
+  }
+  return perms.includes(key);
+};
+
+const togglePermission = (currentPerms: string[], key: string, enabled: boolean): string[] => {
+  let updated = currentPerms.filter(k => k !== key);
+  if (key === 'conversations') {
+    updated = updated.filter(k => k !== 'active-attendance');
+  }
+  if (enabled) {
+    updated.push(key);
+    if (key === 'conversations') {
+      updated.push('active-attendance');
+    }
+  }
+  return updated;
 };
 
 interface TeamUser {
@@ -147,6 +166,18 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
     setNewUser((p) => ({ ...p, role, permissions: defaultPermsByRole[role] ?? [] }));
   };
 
+  const handleOpenAddUser = () => {
+    setNewUser({
+      name: '',
+      email: '',
+      password: '',
+      role: 'agent',
+      permissions: defaultPermsByRole['agent'],
+    });
+    setShowNewPassword(false);
+    setShowAddUser(true);
+  };
+
   const handleRoleChangeForEdit = (role: 'admin' | 'manager' | 'agent' | 'viewer') => {
     if (!editingUser) return;
     setEditingUser((p) => (p ? { ...p, role, permissions: defaultPermsByRole[role] ?? [] } : null));
@@ -177,7 +208,7 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
           </div>
         </div>
         <Button
-          onClick={() => setShowAddUser(true)}
+          onClick={handleOpenAddUser}
           disabled={activeUsers.length >= maxUsers}
           className="bg-purple-600 hover:bg-purple-700 text-white gap-2"
         >
@@ -212,7 +243,7 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
             <Users className="w-12 h-12 mx-auto mb-3 text-slate-300" />
             <p className="font-medium text-slate-700">Nenhum usuário cadastrado</p>
             <p className="text-xs text-slate-400 mt-1">Adicione o primeiro membro da sua equipe para começar.</p>
-            <Button onClick={() => setShowAddUser(true)} className="mt-4 gap-2 bg-purple-600 hover:bg-purple-700 text-white">
+            <Button onClick={handleOpenAddUser} className="mt-4 gap-2 bg-purple-600 hover:bg-purple-700 text-white">
               <UserPlus className="w-4 h-4" /> Adicionar Primeiro Usuário
             </Button>
           </CardContent>
@@ -262,19 +293,17 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
 
                         {/* Badges de permissões */}
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {user.permissions.slice(0, 5).map((perm) => {
-                            const p = AVAILABLE_PERMISSIONS.find((ap) => ap.key === perm);
-                            return p ? (
-                              <span key={perm} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600">
-                                {p.label}
-                              </span>
-                            ) : null;
-                          })}
-                          {user.permissions.length > 5 && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-500">
-                              +{user.permissions.length - 5}
-                            </span>
-                          )}
+                          {user.permissions
+                            .filter((perm) => perm !== 'active-attendance')
+                            .slice(0, 6)
+                            .map((perm) => {
+                              const p = AVAILABLE_PERMISSIONS.find((ap) => ap.key === perm);
+                              return p ? (
+                                <span key={perm} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                  {p.label}
+                                </span>
+                              ) : null;
+                            })}
                         </div>
                       </div>
                     </div>
@@ -352,38 +381,38 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
               {/* Cargo e Status */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                     Cargo / Papel
                   </label>
                   <Select
                     value={editingUser.role}
                     onValueChange={(v) => handleRoleChangeForEdit(v as any)}
                   >
-                    <SelectTrigger className="bg-white">
+                    <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl z-50 text-slate-900 dark:text-slate-100">
                       {Object.entries(ROLE_LABELS).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>{v}</SelectItem>
+                        <SelectItem key={k} value={k} className="hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-900 dark:text-slate-100">{v}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                     Status
                   </label>
                   <Select
                     value={editingUser.status}
                     onValueChange={(v) => setEditingUser({ ...editingUser, status: v as 'active' | 'blocked' })}
                   >
-                    <SelectTrigger className="bg-white">
+                    <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="active">Ativo</SelectItem>
-                      <SelectItem value="blocked">Inativo / Bloqueado</SelectItem>
+                    <SelectContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl z-50 text-slate-900 dark:text-slate-100">
+                      <SelectItem value="active" className="hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-900 dark:text-slate-100">Ativo</SelectItem>
+                      <SelectItem value="blocked" className="hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-900 dark:text-slate-100">Inativo / Bloqueado</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -418,17 +447,19 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
 
               {/* Permissões */}
               <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                   Permissões de Acesso
                 </label>
-                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1 border rounded-lg border-slate-100">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-1">
                   {AVAILABLE_PERMISSIONS.map((perm) => {
-                    const checked = editingUser.permissions.includes(perm.key);
+                    const checked = isPermChecked(editingUser.permissions, perm.key);
                     return (
                       <label
                         key={perm.key}
-                        className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                          checked ? 'bg-blue-50 border-blue-200 text-blue-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                          checked
+                            ? 'bg-blue-50 border-blue-200 text-blue-900 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-200'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800'
                         }`}
                       >
                         <Checkbox
@@ -436,17 +467,18 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
                           onCheckedChange={(val) => {
                             setEditingUser({
                               ...editingUser,
-                              permissions: val
-                                ? [...editingUser.permissions, perm.key]
-                                : editingUser.permissions.filter((k) => k !== perm.key),
+                              permissions: togglePermission(editingUser.permissions, perm.key, !!val),
                             });
                           }}
                         />
-                        <span className="truncate">{perm.label}</span>
+                        <span className="truncate font-medium">{perm.label}</span>
                       </label>
                     );
                   })}
                 </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  Home, Configurações, Ajuda, Notificações e Preferências Visuais são ativas por padrão para todos os usuários.
+                </p>
               </div>
             </div>
           )}
@@ -538,19 +570,19 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                   Cargo
                 </label>
                 <Select
                   value={newUser.role}
                   onValueChange={(v) => handleRoleChangeForNew(v as any)}
                 >
-                  <SelectTrigger className="bg-white">
+                  <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl z-50 text-slate-900 dark:text-slate-100">
                     {Object.entries(ROLE_LABELS).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                      <SelectItem key={k} value={k} className="hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-900 dark:text-slate-100">{v}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -558,7 +590,7 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                 E-mail *
               </label>
               <Input
@@ -570,7 +602,7 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                 Senha de Acesso *
               </label>
               <div className="relative">
@@ -592,17 +624,19 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                 Permissões de Acesso
               </label>
-              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1 border rounded-lg border-slate-100">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-1">
                 {AVAILABLE_PERMISSIONS.map((perm) => {
-                  const checked = newUser.permissions.includes(perm.key);
+                  const checked = isPermChecked(newUser.permissions, perm.key);
                   return (
                     <label
                       key={perm.key}
-                      className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                        checked ? 'bg-purple-50 border-purple-200 text-purple-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                        checked
+                          ? 'bg-purple-50 border-purple-200 text-purple-900 dark:bg-purple-950/40 dark:border-purple-800 dark:text-purple-200'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800'
                       }`}
                     >
                       <Checkbox
@@ -610,17 +644,18 @@ export function TeamTab({ clientId, userRole }: { clientId: string; userRole: st
                         onCheckedChange={(val) => {
                           setNewUser((p) => ({
                             ...p,
-                            permissions: val
-                              ? [...p.permissions, perm.key]
-                              : p.permissions.filter((x) => x !== perm.key),
+                            permissions: togglePermission(p.permissions, perm.key, !!val),
                           }));
                         }}
                       />
-                      <span className="truncate">{perm.label}</span>
+                      <span className="truncate font-medium">{perm.label}</span>
                     </label>
                   );
                 })}
               </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                Home, Configurações, Ajuda, Notificações e Preferências Visuais são ativas por padrão para todos os usuários.
+              </p>
             </div>
           </div>
 

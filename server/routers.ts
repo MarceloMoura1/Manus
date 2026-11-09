@@ -278,6 +278,81 @@ function getClientOrThrow(clientId: string) {
   return client;
 }
 
+async function ensureClientUser(client: MegaClient, userId: string): Promise<MegaClient["users"][number] | null> {
+  let user = client.users.find((item) => item.id === userId);
+  if (user) return user;
+  try {
+    const [dbRows] = (await getPool().execute(
+      "SELECT user_id, name, email, role, status, permissions_json, password_hash FROM megadesk_domain_client_users WHERE client_id = ? AND user_id = ?",
+      [client.clientId, userId]
+    )) as any[];
+    if ((dbRows as any[]).length > 0) {
+      const row = (dbRows as any[])[0];
+      user = {
+        id: row.user_id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        status: row.status,
+        permissions: JSON.parse(row.permissions_json || "[]"),
+        passwordHash: row.password_hash || undefined,
+      };
+      client.users.push(user);
+      return user;
+    }
+  } catch (err) {
+    console.warn("[ensureClientUser] Falha ao consultar MySQL:", err);
+  }
+  return null;
+}
+
+export async function syncMegaDeskUserToMemory(
+  clientId: string,
+  user: {
+    id: string;
+    name?: string;
+    email?: string;
+    role?: "admin" | "manager" | "agent" | "viewer";
+    status?: "active" | "blocked";
+    permissions?: string[];
+    passwordHash?: string | null;
+  },
+  action: "upsert" | "delete"
+) {
+  await hydrateSyncState();
+  const client = clients.find((c) => c.clientId === clientId);
+  if (!client) return;
+
+  if (action === "delete") {
+    client.users = client.users.filter((u) => u.id !== user.id);
+  } else {
+    const existingIndex = client.users.findIndex((u) => u.id === user.id);
+    if (existingIndex >= 0) {
+      const existing = client.users[existingIndex];
+      client.users[existingIndex] = {
+        id: existing.id,
+        name: user.name ?? existing.name,
+        email: user.email ?? existing.email,
+        role: user.role ?? existing.role,
+        status: user.status ?? existing.status,
+        permissions: user.permissions ?? existing.permissions,
+        passwordHash: user.passwordHash !== undefined ? (user.passwordHash || undefined) : existing.passwordHash,
+      };
+    } else {
+      client.users.push({
+        id: user.id,
+        name: user.name ?? "",
+        email: user.email ?? "",
+        role: user.role ?? "agent",
+        status: user.status ?? "active",
+        permissions: user.permissions ?? [],
+        passwordHash: user.passwordHash || undefined,
+      });
+    }
+  }
+  await persistSyncState();
+}
+
 function getReleasedClientOrThrow(clientId: string, requiredModule?: string) {
   const client = getClientOrThrow(clientId);
   if (!client.accessReleased || client.status !== "active") {
@@ -728,7 +803,7 @@ export const appRouter = router({
     })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
-      const user = client.users.find((u) => u.id === input.userId);
+      const user = await ensureClientUser(client, input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado." });
       const passwordHash = await bcrypt.hash(input.newPassword, 12);
       const updatedUser = { ...user, passwordHash };
@@ -778,7 +853,7 @@ export const appRouter = router({
     updateClientUser: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string(), role: z.enum(["admin", "manager", "agent", "viewer"]).optional(), status: z.enum(["active", "blocked"]).optional() })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
-      const user = client.users.find((item) => item.id === input.userId);
+      const user = await ensureClientUser(client, input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado para este cliente." });
       const updatedUser = { ...user };
       if (input.role) {
@@ -798,7 +873,7 @@ export const appRouter = router({
     updateUserInfo: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string(), name: z.string().min(1), email: z.string().email() })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
-      const user = client.users.find((item) => item.id === input.userId);
+      const user = await ensureClientUser(client, input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado para este cliente." });
       const updatedUser = { ...user, name: input.name, email: input.email };
       const auditEntry = makeAudit("MegaAdmin", `Informações do usuário atualizadas: ${input.email}`, client.clientId);
@@ -810,7 +885,7 @@ export const appRouter = router({
     removeClientUser: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string() })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
-      const user = client.users.find((item) => item.id === input.userId);
+      const user = await ensureClientUser(client, input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado para este cliente." });
       if (client.users.length === 1) throw new TRPCError({ code: "BAD_REQUEST", message: "O cliente precisa manter pelo menos um usuário administrativo." });
       client.users = client.users.filter((item) => item.id !== input.userId);
@@ -874,12 +949,17 @@ export const appRouter = router({
     })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
-      const user = client.users.find((u) => u.id === input.userId);
+      const user = await ensureClientUser(client, input.userId);
       if (!user) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado neste cliente." });
       }
       // CORREÇÃO: Normalizar permissões recebidas do MegaAdmin (underscore → hífen)
-      const normalizedPermissions = normalizeModuleNamesToBackend(input.permissions);
+      let normalizedPermissions = normalizeModuleNamesToBackend(input.permissions);
+      if (normalizedPermissions.includes("conversations") && !normalizedPermissions.includes("active-attendance")) {
+        normalizedPermissions.push("active-attendance");
+      } else if (!normalizedPermissions.includes("conversations")) {
+        normalizedPermissions = normalizedPermissions.filter((p) => p !== "active-attendance");
+      }
       const updatedUser = { ...user, permissions: normalizedPermissions };
       const auditEntry = makeAudit("MegaAdmin", `Permissões atualizadas para usuário ${updatedUser.email}`, client.clientId);
       await persistExistingClientUser(client, user.id, { permissions: normalizedPermissions }, auditEntry);

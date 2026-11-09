@@ -126,6 +126,21 @@ export const teamRouter = router({
         [userId, input.clientId, input.name.trim(), cleanEmail, input.role, input.status, JSON.stringify(permissions), passwordHash]
       );
 
+      const { syncMegaDeskUserToMemory } = await import("../../routers");
+      await syncMegaDeskUserToMemory(
+        input.clientId,
+        {
+          id: userId,
+          name: input.name.trim(),
+          email: cleanEmail,
+          role: input.role,
+          status: input.status,
+          permissions,
+          passwordHash,
+        },
+        "upsert"
+      );
+
       return { success: true, userId };
     }),
 
@@ -226,6 +241,25 @@ export const teamRouter = router({
         );
       }
 
+      const { syncMegaDeskUserToMemory } = await import("../../routers");
+      let passwordHash: string | undefined = undefined;
+      if (input.password && input.password.trim().length >= 6) {
+        passwordHash = await bcrypt.hash(input.password.trim(), 10);
+      }
+      await syncMegaDeskUserToMemory(
+        input.clientId,
+        {
+          id: input.userId,
+          ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+          ...(input.email !== undefined ? { email: input.email.trim().toLowerCase() } : {}),
+          ...(input.role !== undefined ? { role: input.role } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.permissions !== undefined ? { permissions: input.permissions } : {}),
+          ...(passwordHash !== undefined ? { passwordHash } : {}),
+        },
+        "upsert"
+      );
+
       return { success: true };
     }),
 
@@ -272,6 +306,9 @@ export const teamRouter = router({
         [input.userId, input.clientId]
       );
 
+      const { syncMegaDeskUserToMemory } = await import("../../routers");
+      await syncMegaDeskUserToMemory(input.clientId, { id: input.userId }, "delete");
+
       return { success: true, removedUserId: input.userId };
     }),
 
@@ -304,6 +341,9 @@ export const teamRouter = router({
         "UPDATE megadesk_domain_client_users SET password_hash = ? WHERE user_id = ? AND client_id = ?",
         [passwordHash, input.userId, input.clientId]
       );
+
+      const { syncMegaDeskUserToMemory } = await import("../../routers");
+      await syncMegaDeskUserToMemory(input.clientId, { id: input.userId, passwordHash }, "upsert");
 
       return { success: true };
     }),

@@ -44,17 +44,14 @@ const PLAN_OPTIONS = [
   "Plano Enterprise",
 ];
 
-// Módulos configuráveis da MegaDesk — devem coincidir com CONFIGURABLE_MODULES no backend
+// Módulos configuráveis da MegaDesk — exatamente as 6 páginas canônicas
 const ALL_MODULES = [
-  "atendimento_ativo",
   "conversas",
   "chamados",
   "rastreio",
-  "erp",
-  "configurar_bot",
-  "assistente_ia",
-  "clientes",
   "crm",
+  "erp",
+  "assistente_ia",
 ];
 
 const ROLE_LABELS: Record<string, string> = {
@@ -69,9 +66,9 @@ const PERMISSION_LABELS = MODULE_LABELS;
 
 // Permissões padrão por função (espelha rolePermissions do backend)
 const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
-  admin:   ["atendimento_ativo", "conversas", "chamados", "rastreio", "erp", "configurar_bot", "assistente_ia", "clientes", "crm"],
-  manager: ["atendimento_ativo", "conversas", "chamados", "rastreio", "erp", "configurar_bot", "assistente_ia", "clientes", "crm"],
-  agent:   ["atendimento_ativo", "conversas", "chamados"],
+  admin:   ["conversas", "chamados", "rastreio", "crm", "erp", "assistente_ia"],
+  manager: ["conversas", "chamados", "rastreio", "crm", "erp", "assistente_ia"],
+  agent:   ["conversas", "chamados"],
   viewer:  ["chamados"],
 };
 
@@ -604,16 +601,21 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
                 // Normalizar permissões do backend (hífen) para underscore antes de comparar com ALL_MODULES
                 const rawPermissions = editingPermissions[expandedUser] ?? user?.permissions ?? [];
                 const currentPermissions = normalizeModuleNamesToAdmin(rawPermissions);
-                const hasPermission = currentPermissions.includes(mod);
+                const hasPermission = currentPermissions.includes(mod) || (mod === "conversas" && currentPermissions.includes("atendimento_ativo"));
                 return (
                   <label key={mod} className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 cursor-pointer transition border border-slate-700 hover:border-blue-500">
                     <input
                       type="checkbox"
                       checked={hasPermission}
                       onChange={(e) => {
-                        const newPermissions = e.target.checked
-                          ? [...currentPermissions, mod]
+                        let newPermissions = e.target.checked
+                          ? [...currentPermissions.filter((p: string) => p !== mod), mod]
                           : currentPermissions.filter((p: string) => p !== mod);
+                        if (mod === "conversas") {
+                          newPermissions = e.target.checked
+                            ? [...newPermissions.filter((p: string) => p !== "atendimento_ativo"), "atendimento_ativo"]
+                            : newPermissions.filter((p: string) => p !== "atendimento_ativo");
+                        }
                         setEditingPermissions((prev) => ({ ...prev, [expandedUser]: newPermissions }));
                       }}
                       className="rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500/50"
@@ -623,6 +625,9 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
                 );
               })}
             </div>
+            <p className="text-xs text-slate-400 mt-3">
+              Home, Configurações, Ajuda, Notificações e Preferências Visuais são ativas por padrão para todos os usuários.
+            </p>
             {/* Botões de Ação */}
             <div className="mt-6 flex gap-3 justify-end">
               <button
