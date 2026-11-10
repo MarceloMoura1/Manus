@@ -30,7 +30,11 @@ interface TypebotTarget {
 
 const DEFAULT_BUILDER_PUBLIC_URL = "https://bot.megadesk.online";
 const DEFAULT_VIEWER_PUBLIC_URL = "https://viewer-bot.megadesk.online";
-const DEFAULT_FRAME_ANCESTORS = ["https://app.megadesk.online", "https://admin.megadesk.online"];
+const DEFAULT_FRAME_ANCESTORS = [
+  "https://app.megadesk.online",
+  "https://bot.megadesk.online",
+  "https://admin.megadesk.online",
+];
 
 function hostFromUrl(value: string): string | null {
   try {
@@ -165,10 +169,21 @@ export function createTypebotHostProxy() {
           const outHeaders: Record<string, string | string[] | undefined> = { ...proxyRes.headers };
           delete outHeaders["x-frame-options"];
           delete outHeaders["content-security-policy-report-only"];
+
           const csp = outHeaders["content-security-policy"];
           if (csp) {
             outHeaders["content-security-policy"] = rewriteFrameAncestors(Array.isArray(csp) ? csp.join("; ") : String(csp));
+          } else {
+            outHeaders["content-security-policy"] = `frame-ancestors ${frameAncestors()}`;
           }
+
+          // Permite CORS para requisições do builder em bot.megadesk.online para o viewer
+          const origin = req.headers.origin as string | undefined;
+          if (origin && (origin.endsWith("megadesk.online") || origin.includes("localhost"))) {
+            outHeaders["access-control-allow-origin"] = origin;
+            outHeaders["access-control-allow-credentials"] = "true";
+          }
+
           res.writeHead(proxyRes.statusCode || 502, outHeaders);
           proxyRes.pipe(res);
         },
