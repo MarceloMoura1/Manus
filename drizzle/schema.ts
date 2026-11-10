@@ -4565,6 +4565,7 @@ export type MegadeskAdminHermesMessageInsert = typeof megadeskAdminHermesMessage
 export const megadeskDomainIaUserPreferences = mysqlTable(
   "megadesk_domain_ia_user_preferences",
   {
+    id: varchar("id", { length: 255 }).primaryKey().notNull(),
     tenantId: varchar("tenant_id", { length: 191 }).notNull(),
     userId: varchar("user_id", { length: 191 }).notNull(),
     preferredName: varchar("preferred_name", { length: 100 }),
@@ -4583,3 +4584,41 @@ export const megadeskDomainIaUserPreferences = mysqlTable(
 
 export type MegadeskDomainIaUserPreference = typeof megadeskDomainIaUserPreferences.$inferSelect;
 export type MegadeskDomainIaUserPreferenceInsert = typeof megadeskDomainIaUserPreferences.$inferInsert;
+
+export const megadeskAiThreads = mysqlTable(
+  "megadesk_ai_threads",
+  {
+    id: varchar("id", { length: 255 }).primaryKey().notNull(),
+    tenantId: varchar("tenant_id", { length: 255 }).notNull(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    title: text("title").default("Nova Conversa").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    index("idx_ai_threads_tenant_user_updated").on(table.tenantId, table.userId, table.updatedAt),
+  ]
+);
+
+export type MegadeskAiThread = typeof megadeskAiThreads.$inferSelect;
+export type MegadeskAiThreadInsert = typeof megadeskAiThreads.$inferInsert;
+
+export const megadeskAiMessages = mysqlTable(
+  "megadesk_ai_messages",
+  {
+    id: varchar("id", { length: 255 }).primaryKey().notNull(),
+    threadId: varchar("thread_id", { length: 255 })
+      .notNull()
+      .references(() => megadeskAiThreads.id, { onDelete: "cascade" }),
+    role: mysqlEnum("role", ["user", "assistant", "system"]).notNull(),
+    content: text("content").notNull(),
+    toolInvocations: json("tool_invocations"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  table => [
+    index("idx_ai_messages_thread_created").on(table.threadId, table.createdAt),
+  ]
+);
+
+export type MegadeskAiMessage = typeof megadeskAiMessages.$inferSelect;
+export type MegadeskAiMessageInsert = typeof megadeskAiMessages.$inferInsert;

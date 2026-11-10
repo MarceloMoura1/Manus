@@ -3678,7 +3678,7 @@ async function chatWithClientGeminiInternal(
   const systemInstruction = buildSystemInstruction(allowedTools, userPreferences);
 
   let aiResult: any;
-  const targetModel = DEFAULT_GEMINI_MODEL || "gemini-1.5-flash";
+  const targetModel = DEFAULT_GEMINI_MODEL;
   const isGreeting = isConversationalGreeting(userMessage);
 
   const stopConditions = [
@@ -3805,68 +3805,7 @@ async function chatWithClientGeminiInternal(
     modelText = sanitizeModelResponseText(rawModelText);
   }
 
-  // Se o usuário solicitou cadastro de entidade e nenhuma tool foi chamada
-  if (!pendingActionRequest) {
-    const entityAction = extractEntityCreationFromMessage(userMessage, allowedTools, { clientId, userId }, existingHistory);
-    if (entityAction) {
-      pendingActionRequest = entityAction;
-      if (!functionCallsMade.includes(entityAction.toolName)) {
-        functionCallsMade.push(entityAction.toolName);
-      }
-    }
-  }
-
-  // Se a intenção do usuário foi orçamento/proposta e não há pendingActionRequest
-  const proposalDetails = extractProposalDetailsFromMessage(userMessage, executedReadResults, existingHistory);
-  if (proposalDetails.isProposal && !pendingActionRequest) {
-    const createProposalTool = allowedTools.find(t => t.name === "create_proposal");
-    if (createProposalTool) {
-      try {
-        pendingActionRequest = createPendingActionRequest(
-          createProposalTool,
-          {
-            clientName: proposalDetails.clientName,
-            items: proposalDetails.items,
-            notes: `Orçamento gerado a partir do pedido do usuário: "${userMessage}"`,
-          },
-          { clientId, userId },
-        );
-        if (!functionCallsMade.includes("create_proposal")) {
-          functionCallsMade.push("create_proposal");
-        }
-      } catch {}
-    }
-  }
-
-  // Fallback para ferramentas READ obrigatórias se omitidas
-  const requiredReadTool = requiredBusinessReadTool(userMessage);
-  if (requiredReadTool && !pendingActionRequest
-    && !executedReadResults.some(result => result.name === requiredReadTool)
-    && getAuthorizedHermesTool(requiredReadTool, userPermissions)) {
-    const rawResult = await executeClientFunction(requiredReadTool, {}, clientId, userPermissions, geminiKey, userId);
-    let output: unknown;
-    try { output = JSON.parse(rawResult); } catch { output = { success: false }; }
-    executedReadResults.push({ name: requiredReadTool, args: {}, output });
-    functionCallsMade.push(requiredReadTool);
-  }
-
   let finalResponse = modelText;
-
-  // Se houver chamadas READ executadas, prioriza sintetização determinística
-  if (executedReadResults.length > 0) {
-    const whatsappResult = executedReadResults.find(r => r.name === "get_whatsapp_status");
-    if (whatsappResult && whatsappResult.output) {
-      const isDisconnected = whatsappResult.output.status === "disconnected" || whatsappResult.output.connected === false;
-      finalResponse = isDisconnected
-        ? "A instância do WhatsApp está **desconectada**. É preciso restabelecer a conexão antes de enviar mensagens."
-        : "A conexão do WhatsApp está **ativa** no momento.";
-    } else {
-      const synth = synthesizeDeterministicResponse(executedReadResults, userMessage);
-      if (synth && (!finalResponse || isPreliminaryWaitingText(finalResponse) || /\b(panorama|resumo|chamados|conversas|estoque)\b/i.test(userMessage))) {
-        finalResponse = synth;
-      }
-    }
-  }
 
   // Se o modelo invocou uma ferramenta e não gerou texto complementar, usamos a mensagem retornada pela ferramenta
   if (!finalResponse && aiResult.toolResults && aiResult.toolResults.length > 0) {
@@ -3935,6 +3874,7 @@ async function chatWithClientGeminiInternal(
     }
   }
 
+  const requiredReadTool = requiredBusinessReadTool(userMessage);
   if (!pendingActionRequest && requiredReadTool) {
     const requiredResult = executedReadResults.find(result => result.name === requiredReadTool);
     finalResponse = requiredResult

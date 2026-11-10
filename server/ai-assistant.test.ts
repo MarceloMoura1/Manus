@@ -942,6 +942,7 @@ describe("Hermes security controls", () => {
       "update_supplier",
       "request_purchase_order",
       "send_supplier_message",
+      "send_whatsapp_outbound",
       "get_conversations_summary",
       "get_whatsapp_status",
       "extract_lead_from_conversation",

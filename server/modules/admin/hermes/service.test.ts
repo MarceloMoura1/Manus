@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { HermesService } from "./service";
+import { HermesService, CANONICAL_HERMES_MODEL } from "./service";
 import { HermesRepository } from "./repository";
 import { resolveAdminUserId, hermesRouter, createHermesRouter } from "./router";
 import type { HermesMessageItem, HermesRole } from "./contracts";
@@ -40,19 +40,23 @@ class MockHermesRepository extends HermesRepository {
     };
   }
 
-  // helper for test inspection
   getAllMessages() {
     return this.messages;
   }
 }
 
-describe("Hermes Module - Unit & Isolation Tests", () => {
+describe("Hermes Module - Vercel AI SDK & Strict Partner Isolation", () => {
   let mockRepo: MockHermesRepository;
+  let mockAiGenerate: any;
   let service: HermesService;
 
   beforeEach(() => {
     mockRepo = new MockHermesRepository();
-    service = new HermesService(mockRepo);
+    mockAiGenerate = vi.fn().mockResolvedValue({
+      text: "Resposta executiva gerada via Gemini 3.5 Flash Lite.",
+      toolCalls: [],
+    });
+    service = new HermesService(mockRepo, undefined, mockAiGenerate);
     delete process.env.GEMINI_API_KEY;
   });
 
@@ -72,6 +76,8 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
 
   describe("HermesService - Strict Partner Isolation", () => {
     it("guarantees that Sócio A and Sócio B have completely isolated conversation histories", async () => {
+      process.env.GEMINI_API_KEY = "test-key-partner-isolation";
+
       const socioA = "socio.a@megadesk.online";
       const socioB = "socio.b@megadesk.online";
 
@@ -103,42 +109,49 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
       expect(historyBAfterClear.length).toBe(2);
     });
 
-    it("generates structured diagnostic fallback when asked about vistoria or tokens", async () => {
+    it("informs cleanly when GEMINI_API_KEY is not configured without using hardcoded regex fallbacks", async () => {
+      delete process.env.GEMINI_API_KEY;
+
       const socioA = "marcelo@megadesk.online";
-      const resultVistoria = await service.sendMessage(socioA, "Faça uma vistoria da VPS");
-      expect(resultVistoria.response.content).toContain("Vistoria Operacional da Plataforma");
-      expect(resultVistoria.response.metadataJson?.source).toBe("fallback");
-      expect(resultVistoria.response.metadataJson?.actionTriggered).toBe("vistoria_vps");
-
-      const resultTokens = await service.sendMessage(socioA, "Como está o consumo de tokens?");
-      expect(resultTokens.response.content).toContain("Telemetria de Tokens & Recursos");
-      expect(resultTokens.response.metadataJson?.actionTriggered).toBe("token_telemetry");
-
-      const resultWhatsApp = await service.sendMessage(socioA, "Como está a conexão do WhatsApp Evolution?");
-      expect(resultWhatsApp.response.content).toContain("Diagnóstico do Gateway WhatsApp");
-      expect(resultWhatsApp.response.metadataJson?.actionTriggered).toBe("whatsapp_check");
+      const result = await service.sendMessage(socioA, "Faça uma vistoria da VPS");
+      expect(result.response.content).toContain("GEMINI_API_KEY");
+      expect(result.response.metadataJson?.source).toBe("unconfigured_key");
+      expect(mockAiGenerate).not.toHaveBeenCalled();
     });
 
-    it("detects on-demand actions accurately", () => {
-      expect(service.detectAction("Checar containers Docker")).toBe("vistoria_vps");
-      expect(service.detectAction("Status do zap e evolution")).toBe("whatsapp_check");
-      expect(service.detectAction("Consumo de cotas")).toBe("token_telemetry");
-      expect(service.detectAction("Auditoria de multi-tenant")).toBe("security_audit");
-      expect(service.detectAction("Consumo do cliente FaYerS")).toBe("tenant_inspection");
-      expect(service.detectAction("Ver armazenamento do cliente")).toBe("tenant_inspection");
-      expect(service.detectAction("Qual a previsão para o próximo trimestre?")).toBeNull();
+    it("executes Vercel AI SDK generateText with canonical gemini-3.5-flash-lite model and clean tools", async () => {
+      process.env.GEMINI_API_KEY = "valid-test-key";
+
+      const socioA = "marcelo@megadesk.online";
+      const result = await service.sendMessage(socioA, "Qual o status dos containers?");
+
+      expect(mockAiGenerate).toHaveBeenCalledTimes(1);
+      const callArgs = mockAiGenerate.mock.calls[0][0];
+      expect(callArgs.system).toContain("Hermes");
+      expect(callArgs.messages.length).toBe(1);
+      expect(callArgs.messages[0]).toEqual({
+        role: "user",
+        content: "Qual o status dos containers?",
+      });
+
+      // Verifica ferramentas disponíveis
+      expect(callArgs.tools).toBeDefined();
+      expect(callArgs.tools.inspectTenantStorage).toBeDefined();
+      expect(callArgs.tools.vistoriaVps).toBeDefined();
+      expect(callArgs.tools.whatsappCheck).toBeDefined();
+      expect(callArgs.tools.tokenTelemetry).toBeDefined();
+      expect(callArgs.tools.securityAudit).toBeDefined();
+
+      expect(result.response.content).toBe("Resposta executiva gerada via Gemini 3.5 Flash Lite.");
+      expect(result.response.metadataJson?.model).toBe(CANONICAL_HERMES_MODEL);
+      expect(result.response.metadataJson?.source).toBe("gemini_api");
     });
 
-    it("handles tenant storage inspection with structured read-only metrics", async () => {
-      const socioA = "marcelo@megadesk.online";
-
-      // Mock inspector customizado para validar os dados auditados
+    it("provides Zod-schema tools that execute operational inspection safely", async () => {
       const mockInspector = vi.fn().mockResolvedValue({
         tenantFound: true,
         clientName: "FaYerS Indústria",
         clientId: "client-fayers-01",
-        internalId: "fayers",
-        tenantDatabaseName: "megadesk_tenant_fayers",
         totalMessages: 1250,
         mediaCount: 140,
         totalContacts: 326,
@@ -148,60 +161,44 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
         totalConversations: 450,
         totalChamados: 85,
         chamadosAbertos: 2,
-        ultimoChamadoData: "2026-10-22T10:00:00.000Z",
-        estimatedDbSizeKB: 4500,
         estimatedDbSizeFormatted: "4.39 MB",
         activeStatus: "active",
       });
 
-      const customService = new HermesService(mockRepo, mockInspector);
-      const result = await customService.sendMessage(socioA, "Qual o consumo do cliente FaYerS?");
+      const customService = new HermesService(mockRepo, mockInspector, mockAiGenerate);
+      const tools = customService.getTools();
 
+      // Testa execução direta da tool com schema Zod limpo
+      const tenantToolRes = await tools.inspectTenantStorage.execute({ slugOrName: "FaYerS" });
       expect(mockInspector).toHaveBeenCalledWith("FaYerS");
-      expect(result.response.content).toContain("Auditoria de Armazenamento e Métricas do Cliente");
-      expect(result.response.content).toContain("FaYerS Indústria");
-      expect(result.response.content).toContain("1.250");
-      expect(result.response.content).toContain("4.39 MB");
-      expect(result.response.content).toContain("310"); // WhatsApp
-      expect(result.response.content).toContain("6");   // CRM
-      expect(result.response.content).toContain("Clientes no CRM");
-      expect(result.response.content).toContain("10");  // ERP
-      expect(result.response.content).toContain("2 chamado(s) em aberto");
-      expect(result.response.metadataJson?.actionTriggered).toBe("tenant_inspection");
+      expect(tenantToolRes.clientName).toBe("FaYerS Indústria");
+      expect(tenantToolRes.totalMessages).toBe(1250);
+
+      // Testa tool de vistoria da VPS
+      const vpsToolRes = await tools.vistoriaVps.execute({});
+      expect(vpsToolRes.status).toBe("online");
+      expect(vpsToolRes.containers.app).toContain("megadesk-app");
+
+      // Testa tool do WhatsApp Evolution
+      const wppToolRes = await tools.whatsappCheck.execute({});
+      expect(wppToolRes.service).toBe("Evolution API");
+      expect(wppToolRes.status).toBe("online");
+
+      // Testa telemetria de tokens
+      const tokenToolRes = await tools.tokenTelemetry.execute({});
+      expect(tokenToolRes.canonicalModel).toBe(CANONICAL_HERMES_MODEL);
     });
 
-    it("handles tenant not found gracefully without hallucinations", async () => {
+    it("handles AI provider failure gracefully and logs error metadata", async () => {
+      process.env.GEMINI_API_KEY = "valid-test-key";
+      mockAiGenerate.mockRejectedValueOnce(new Error("API Quota Exceeded"));
+
       const socioA = "marcelo@megadesk.online";
+      const result = await service.sendMessage(socioA, "Status do sistema");
 
-      const mockNotFoundInspector = vi.fn().mockResolvedValue({
-        tenantFound: false,
-        clientName: "InexistenteCorp",
-        totalMessages: 0,
-        mediaCount: 0,
-        totalContacts: 0,
-        totalConversations: 0,
-        totalChamados: 0,
-        estimatedDbSizeKB: 0,
-        estimatedDbSizeFormatted: "0 KB",
-        activeStatus: "not_found",
-        details: "Tenant não localizado",
-      });
-
-      const customService = new HermesService(mockRepo, mockNotFoundInspector);
-      const result = await customService.sendMessage(socioA, "consumo do cliente InexistenteCorp");
-
-      expect(result.response.content).toContain("Cliente não localizado");
-      expect(result.response.metadataJson?.actionTriggered).toBe("tenant_inspection");
-    });
-
-    it("handles humanized conversational queries and injects Brasilia timestamp", async () => {
-      const socioA = "marcelo@megadesk.online";
-      const resultDate = await service.sendMessage(socioA, "Que dia é hoje?");
-      expect(resultDate.response.content).toContain("Horário de Brasília");
-
-      const resultGreeting = await service.sendMessage(socioA, "Olá, tudo bem?");
-      expect(resultGreeting.response.content).toContain("Hermes");
-      expect(resultGreeting.response.content.toLowerCase()).toContain("tudo bem");
+      expect(result.response.content).toContain("Erro na comunicação com a inteligência artificial");
+      expect(result.response.content).toContain("API Quota Exceeded");
+      expect(result.response.metadataJson?.source).toBe("error");
     });
 
     it("provides quick stats for the inspection dashboard", () => {
@@ -216,6 +213,7 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
 
   describe("HermesRouter - Authorization and tRPC procedures", () => {
     it("allows admin callers and enforces session-based isolation", async () => {
+      process.env.GEMINI_API_KEY = "test-key";
       const testRouter = createHermesRouter(service);
       const mockAdminCallerA = testRouter.createCaller({
         req: {} as any,

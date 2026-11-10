@@ -99,7 +99,7 @@ export function getErpTopbarItems({
     { id:"purchases" as const, label: "Compras", icon: ShoppingBag },
     { id:"finance" as const, label: "Financeiro", icon: DollarSign, hidden: !canAccessFinance },
     { id:"fiscal" as const, label: "Fiscal", icon: Receipt, hidden: !canAccessFiscal },
-    { id:"reports" as const, label: "Relatórios", icon: BarChart3, hidden: !canAccessReports },
+    { id:"reports" as const, label:"Relatórios", icon: BarChart3, hidden: !canAccessReports },
     { id:"suppliers" as const, label: "Fornecedores", icon: Truck },
     ...(canAccessClients ? [{ id:"clients" as const, label: "Clientes", icon: Users }] : []),
   ];

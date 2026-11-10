@@ -48,6 +48,7 @@ import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
 import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whatsapp.socket";
 import { classifyAssistantFailure } from "./assistant-error";
 import { hermesRouter } from "./modules/admin/hermes";
+import { assistantThreadsRouter } from "./modules/assistant";
 import { botTrpcRouter } from "./modules/bot/bot.router";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
 import { executeHermesCrmAction } from "./hermes-crm-actions";
@@ -553,6 +554,7 @@ export const appRouter = router({
   whatsappModule: whatsappModuleRouter,
   conversas: conversasRouter,
   bot: botTrpcRouter,
+  assistantThreads: assistantThreadsRouter,
   admin: router({
     hermes: hermesRouter,
   }),
@@ -2008,6 +2010,14 @@ export const appRouter = router({
     }),
   }),
   assistant: router({
+    // ── Multi-Chat Threads do Novo Copiloto ──
+    listThreads: assistantThreadsRouter._def.procedures.listThreads,
+    createThread: assistantThreadsRouter._def.procedures.createThread,
+    deleteThread: assistantThreadsRouter._def.procedures.deleteThread,
+    renameThread: assistantThreadsRouter._def.procedures.renameThread,
+    getThreadMessages: assistantThreadsRouter._def.procedures.getThreadMessages,
+    sendThreadMessage: assistantThreadsRouter._def.procedures.sendThreadMessage,
+
     chat: publicProcedure
       .input(z.object({
         messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })),
