@@ -20,6 +20,40 @@ export type BotEligibility =
   | { eligible: true }
   | { eligible: false; reason: string };
 
+const cognitiveConversations = new Map<string, number>();
+const COGNITIVE_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+const sessionKey = (tenantId: string, conversationId: string) => `${tenantId}\u0000${conversationId}`;
+
+export function isConversationInCognitiveMode(tenantId: string, conversationId: string): boolean {
+  const key = sessionKey(tenantId, conversationId);
+  const expiry = cognitiveConversations.get(key);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    cognitiveConversations.delete(key);
+    return false;
+  }
+  return true;
+}
+
+export function setConversationCognitiveMode(tenantId: string, conversationId: string, active: boolean): void {
+  const key = sessionKey(tenantId, conversationId);
+  if (active) {
+    cognitiveConversations.set(key, Date.now() + COGNITIVE_SESSION_TTL_MS);
+  } else {
+    cognitiveConversations.delete(key);
+  }
+}
+
+export function clearConversationCognitiveMode(tenantId: string, conversationId: string): void {
+  cognitiveConversations.delete(sessionKey(tenantId, conversationId));
+}
+
+/** Usado por testes */
+export function __resetCognitiveConversations(): void {
+  cognitiveConversations.clear();
+}
+
 /** Verifica se a conversa ainda está sob responsabilidade do robô e sem trava de 24h. */
 export async function checkBotEligibility(tenantId: string, conversationId: string): Promise<BotEligibility> {
   const pool = getPool();
@@ -178,8 +212,9 @@ export async function transferConversationToHuman(input: {
   );
   console.log(`[BotWebhook] Conversa transferida para fila humana tenant=${tenantId} conv=${conversationId} motivo="${reason}"`);
 
-  // Limpa sessão ativa do bot
+  // Limpa sessão ativa do bot e modo cognitivo
   clearTypebotSession(tenantId, conversationId);
+  clearConversationCognitiveMode(tenantId, conversationId);
 
   emitOperationalTenantEvent(tenantId, "wa:transfer_to_human", {
     conversationId,

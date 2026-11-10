@@ -43,6 +43,7 @@ const mockGenerateText = vi.fn();
 vi.mock("ai", () => ({
   generateText: (...args: any[]) => mockGenerateText(...args),
   tool: (config: any) => config,
+  isStepCount: (count: number) => ({ type: "stepCount", count }),
 }));
 
 vi.mock("@ai-sdk/google", () => ({
@@ -66,6 +67,7 @@ import {
   dispatchBotConversationMessage,
   __resetCognitiveConversations,
 } from "./bot-orchestrator";
+import { processCognitiveBotMessage, ELEGANT_TRANSFER_MESSAGE } from "./bot-gemini-engine";
 
 describe("Bot Orchestrator & Typebot Runtime", () => {
   beforeEach(() => {
@@ -426,6 +428,86 @@ describe("Bot Orchestrator & Typebot Runtime", () => {
       } finally {
         global.fetch = originalFetch;
       }
+    });
+  });
+
+  describe("processCognitiveBotMessage - Política de Transbordo Elegante", () => {
+    it("aciona transbordo elegante quando a IA não gera texto final", async () => {
+      // 1. Elegibilidade
+      mockPoolExecute.mockResolvedValueOnce([
+        [{ status: "bot", assigned_user_id: "bot_system", bot_suspended_at: null }],
+      ]);
+      // 2. Empresa
+      mockPoolExecute.mockResolvedValueOnce([[{ company: "FaYerS Company LTDA" }]]);
+      // 3. Histórico
+      mockPoolExecute.mockResolvedValueOnce([[]]);
+
+      // IA retorna texto vazio
+      mockGenerateText.mockResolvedValueOnce({ text: "" });
+
+      // Transbordo humano + entrega da mensagem
+      mockPoolExecute
+        .mockResolvedValueOnce([{ affectedRows: 1 }]) // transferConversationToHuman UPDATE
+        .mockResolvedValueOnce([{ affectedRows: 1 }]) // deliverBotMessage INSERT
+        .mockResolvedValueOnce([{ affectedRows: 1 }]); // deliverBotMessage UPDATE
+
+      process.env.GEMINI_API_KEY = "test-key";
+
+      const outcome = await processCognitiveBotMessage({
+        tenantId: "tenant-1",
+        conversationId: "conv-1",
+        phone: "5541999998888",
+        text: "qual o valor da correia dentada?",
+      });
+
+      expect(outcome.replied).toBe(true);
+      expect(outcome.transferredToHuman).toBe(true);
+      expect(outcome.replyText).toBe(ELEGANT_TRANSFER_MESSAGE);
+
+      expect(mockEvoSendText).toHaveBeenCalledWith(
+        "megadesk-tenant-1",
+        "5541999998888",
+        ELEGANT_TRANSFER_MESSAGE
+      );
+    });
+
+    it("aciona transbordo elegante de contingência em caso de erro na IA", async () => {
+      // 1. Elegibilidade
+      mockPoolExecute.mockResolvedValueOnce([
+        [{ status: "bot", assigned_user_id: "bot_system", bot_suspended_at: null }],
+      ]);
+      // 2. Empresa
+      mockPoolExecute.mockResolvedValueOnce([[{ company: "FaYerS Company LTDA" }]]);
+      // 3. Histórico
+      mockPoolExecute.mockResolvedValueOnce([[]]);
+
+      // IA lança exceção (ex: timeout ou quota excedida)
+      mockGenerateText.mockRejectedValueOnce(new Error("Gemini API rate limit exceeded"));
+
+      // Contingência: transbordo humano + entrega da mensagem elegante
+      mockPoolExecute
+        .mockResolvedValueOnce([{ affectedRows: 1 }]) // transferConversationToHuman UPDATE
+        .mockResolvedValueOnce([{ affectedRows: 1 }]) // deliverBotMessage INSERT
+        .mockResolvedValueOnce([{ affectedRows: 1 }]); // deliverBotMessage UPDATE
+
+      process.env.GEMINI_API_KEY = "test-key";
+
+      const outcome = await processCognitiveBotMessage({
+        tenantId: "tenant-1",
+        conversationId: "conv-1",
+        phone: "5541999998888",
+        text: "preciso de cotação de filtro de óleo",
+      });
+
+      expect(outcome.replied).toBe(true);
+      expect(outcome.transferredToHuman).toBe(true);
+      expect(outcome.replyText).toBe(ELEGANT_TRANSFER_MESSAGE);
+
+      expect(mockEvoSendText).toHaveBeenCalledWith(
+        "megadesk-tenant-1",
+        "5541999998888",
+        ELEGANT_TRANSFER_MESSAGE
+      );
     });
   });
 });

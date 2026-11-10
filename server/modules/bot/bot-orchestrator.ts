@@ -10,9 +10,24 @@
  * 5. Se o cliente solicitar atendimento humano, executa o transbordo imediato para a fila "Aguardando"
  *    e silencia o robô por 24 horas.
  */
-import { checkBotEligibility, deliverBotMessage, transferConversationToHuman } from "./bot-runtime";
+import {
+  checkBotEligibility,
+  deliverBotMessage,
+  transferConversationToHuman,
+  isConversationInCognitiveMode,
+  setConversationCognitiveMode,
+  clearConversationCognitiveMode,
+  __resetCognitiveConversations,
+} from "./bot-runtime";
 import { resolvePublishedTypebot, runTypebotTurn, clearTypebotSession } from "./typebot-runtime.service";
 import { processCognitiveBotMessage } from "./bot-gemini-engine";
+
+export {
+  isConversationInCognitiveMode,
+  setConversationCognitiveMode,
+  clearConversationCognitiveMode,
+  __resetCognitiveConversations,
+};
 
 export interface BotDispatchInput {
   tenantId: string;
@@ -20,40 +35,6 @@ export interface BotDispatchInput {
   phone: string;
   text: string;
   customerName?: string;
-}
-
-const cognitiveConversations = new Map<string, number>();
-const COGNITIVE_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-
-const sessionKey = (tenantId: string, conversationId: string) => `${tenantId}\u0000${conversationId}`;
-
-export function isConversationInCognitiveMode(tenantId: string, conversationId: string): boolean {
-  const key = sessionKey(tenantId, conversationId);
-  const expiry = cognitiveConversations.get(key);
-  if (!expiry) return false;
-  if (Date.now() > expiry) {
-    cognitiveConversations.delete(key);
-    return false;
-  }
-  return true;
-}
-
-export function setConversationCognitiveMode(tenantId: string, conversationId: string, active: boolean): void {
-  const key = sessionKey(tenantId, conversationId);
-  if (active) {
-    cognitiveConversations.set(key, Date.now() + COGNITIVE_SESSION_TTL_MS);
-  } else {
-    cognitiveConversations.delete(key);
-  }
-}
-
-export function clearConversationCognitiveMode(tenantId: string, conversationId: string): void {
-  cognitiveConversations.delete(sessionKey(tenantId, conversationId));
-}
-
-/** Usado por testes */
-export function __resetCognitiveConversations(): void {
-  cognitiveConversations.clear();
 }
 
 export async function dispatchBotConversationMessage(input: BotDispatchInput): Promise<void> {

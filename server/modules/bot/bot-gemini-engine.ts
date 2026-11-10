@@ -2,10 +2,17 @@
  * Bot Module — Cognitive Fallback Engine (Gemini + ERP/CRM Tools)
  * Processa mensagens em linguagem natural recebidas pelo WhatsApp
  * utilizando o Gemini com persona configurada do tenant e ferramentas do ERP/CRM.
+ *
+ * Política de Transbordo Elegante:
+ * - Para orçamentos, cotações de peças/serviços e dúvidas comerciais específicas,
+ *   a IA acolhe o cliente, pede detalhes contextuais se útil (ex: modelo/ano) e
+ *   transfere para a equipe humana especializada.
+ * - NUNCA inventa valores nem diz que o produto não existe.
+ * - Elimina qualquer loop de saudação estática ("Olá! Como posso ajudar...").
  */
 
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { generateText, tool } from "ai";
+import { generateText, tool, isStepCount } from "ai";
 import { z } from "zod";
 import { getPool } from "../../db";
 import { queryErpProducts, queryTicketsByPhone, saveLead } from "./bot.router";
@@ -26,6 +33,9 @@ export interface BotProcessOutcome {
   error?: string;
 }
 
+export const ELEGANT_TRANSFER_MESSAGE =
+  "Compreendi perfeitamente o seu pedido! Estou encaminhando a sua solicitação para um de nossos especialistas para confirmar esses detalhes para você. Aguarde só um instante que nossa equipe já vai te responder por aqui.";
+
 /**
  * Obtém a chave de API do Gemini para o tenant ou do ambiente.
  */
@@ -35,7 +45,7 @@ function getGeminiApiKey(): string | null {
 }
 
 /**
- * Motor cognitivo de resposta do Bot via Gemini.
+ * Motor cognitivo de resposta do Bot via Gemini com Política de Transbordo Elegante.
  */
 export async function processCognitiveBotMessage(
   input: ProcessBotMessageInput
@@ -53,23 +63,35 @@ export async function processCognitiveBotMessage(
     }
 
     // 2. Busca o nome da empresa (persona do tenant)
-    let companyName = "MegaDesk";
+    let companyName = "FaYerS Company LTDA";
     try {
       const [clientRows] = await pool.execute(
         "SELECT company FROM megadesk_domain_clients WHERE client_id = ? LIMIT 1",
         [tenantId]
       ) as any[];
-      if (clientRows?.[0]?.company) {
-        companyName = clientRows[0].company;
+      if (clientRows?.[0]?.company?.trim()) {
+        companyName = clientRows[0].company.trim();
       }
     } catch {
-      // fallback gracioso
+      // fallback gracioso para a persona
     }
 
     const apiKey = getGeminiApiKey();
     if (!apiKey) {
-      console.warn("[BotGeminiEngine] GEMINI_API_KEY não configurada. Bot não pôde responder.");
-      return { replied: false, error: "GEMINI_API_KEY ausente." };
+      console.warn("[BotGeminiEngine] GEMINI_API_KEY ausente. Acionando transbordo elegante de contingência...");
+      await transferConversationToHuman({
+        tenantId,
+        conversationId,
+        phone,
+        reason: "Transferência por contingência: GEMINI_API_KEY ausente",
+      });
+      await deliverBotMessage({
+        tenantId,
+        conversationId,
+        phone,
+        text: ELEGANT_TRANSFER_MESSAGE,
+      });
+      return { replied: true, replyText: ELEGANT_TRANSFER_MESSAGE, transferredToHuman: true };
     }
 
     // 3. Carrega histórico recente da conversa (últimas 6 mensagens) para contexto
@@ -99,18 +121,23 @@ export async function processCognitiveBotMessage(
 
     // 4. Declaração das ferramentas cognitivas integradas ao ERP/CRM
     let requestedHumanTransfer = false;
+    let transferReason = "Solicitado via atendimento inteligente";
 
     const tools: Record<string, any> = {
       get_erp_products: tool({
         description: "Consulta o catálogo de produtos e serviços do ERP, seus preços e disponibilidade em estoque.",
         parameters: z.object({
-          search: z.string().describe("Termo de busca, nome do produto ou SKU"),
+          search: z.string().optional().describe("Termo de busca, nome do produto, peça ou SKU"),
         }),
-        execute: async ({ search }: { search: string }) => {
+        execute: async ({ search }: { search?: string }) => {
           try {
-            const results = await queryErpProducts(tenantId, search || "");
+            const queryTerm = (search || text || "").trim();
+            const results = await queryErpProducts(tenantId, queryTerm);
             if (results.length === 0) {
-              return { found: false, message: "Nenhum produto encontrado com este termo no catálogo." };
+              return {
+                found: false,
+                message: "Item não localizado no catálogo padrão ou requer cotação personalizada. Acolha cordialmente o cliente, informe que a equipe especializada irá verificar a disponibilidade e valores exatos, solicite detalhes como modelo/ano se útil, e acione transfer_to_human.",
+              };
             }
             return {
               found: true,
@@ -121,7 +148,10 @@ export async function processCognitiveBotMessage(
               })),
             };
           } catch (err: any) {
-            return { found: false, error: err?.message || "Erro ao consultar produtos." };
+            return {
+              found: false,
+              error: err?.message || "Erro na consulta ao catálogo. Transfira para a equipe humana.",
+            };
           }
         },
       } as any),
@@ -181,30 +211,41 @@ export async function processCognitiveBotMessage(
       } as any),
 
       transfer_to_human: tool({
-        description: "Transfere o atendimento imediatamente para a fila humana e silencia o robô.",
+        description: "Transfere o atendimento imediatamente para a equipe de especialistas humanos e silencia o robô por 24h.",
         parameters: z.object({
-          reason: z.string().describe("Motivo da transferência para atendente humano"),
+          reason: z.string().optional().describe("Motivo da transferência para atendente humano"),
         }),
-        execute: async ({ reason }: { reason: string }) => {
+        execute: async ({ reason }: { reason?: string }) => {
           requestedHumanTransfer = true;
+          if (reason) transferReason = reason;
           return {
             transferred: true,
-            message: `Atendimento transferido para fila humana com sucesso. Motivo: ${reason}`,
+            message: `Atendimento transferido para fila humana com sucesso. Motivo: ${transferReason}`,
           };
         },
       } as any),
     };
 
-    // 5. System Instruction configurada com a persona da empresa
+    // 5. System Instruction configurada com a política de transbordo elegante
     const systemInstruction = `Você é o assistente virtual de atendimento da empresa "${companyName}".
-Você atende clientes via WhatsApp de forma cordial, prestativa, direta e resolutiva.
+Você atende clientes via WhatsApp em português brasileiro de forma acolhedora, prestativa, ágil, direta e altamente profissional.
 
-Diretrizes obrigatórias:
-1. Responda em português brasileiro de forma natural e amigável.
-2. Utilize as ferramentas disponíveis sempre que o cliente perguntar por produtos, preços, estoque, chamados em andamento ou quiser registrar seu interesse/orçamento.
-3. NUNCA invente, presuma ou alucine preços ou produtos que não foram confirmados pela ferramenta get_erp_products.
-4. Se o cliente solicitar expressamente falar com um atendente humano, ou se o assunto exigir intervenção humana (reclamação grave, negociação especial fora do padrão), use a ferramenta transfer_to_human e informe cordialmente que um especialista humano dará sequência.
-5. Formate mensagens de forma limpa para WhatsApp: use quebras de linha e negrito (*texto*) onde facilitar a leitura. Evite textos excessivamente longos.`;
+Diretrizes obrigatórias de comportamento:
+1. Para perguntas gerais, saudações ou institucionais:
+   - Responda de forma natural, calorosa e objetiva.
+
+2. Para orçamentos, cotações de peças/serviços, preços específicos ou dúvidas comerciais/técnicas:
+   - NUNCA invente, presuma ou alucine preços, prazos ou dados que não existam no catálogo oficial.
+   - NUNCA diga secamente que "o produto não existe", que "não foi localizado no catálogo" ou que "não temos o item". Isso prejudica a imagem da empresa.
+   - Sempre acolha o cliente com gentileza e informe que você está transferindo o atendimento para um de nossos especialistas para confirmar os detalhes, a disponibilidade e os valores exatos.
+   - Sempre que aplicável, solicite cordialmente um dado contextual importante (ex: modelo, ano ou versão do veículo/equipamento) para que os especialistas já tenham o contexto completo ao assumirem.
+   - ACIONE OBRIGATORIAMENTE a ferramenta transfer_to_human.
+
+3. Quando consultar a ferramenta get_erp_products:
+   - Se o produto tiver preço e estoque claros e confirmados, informe cordialmente ao cliente.
+   - Se o produto não for localizado ou o resultado for inconclusivo: acione imediatamente transfer_to_human e explique que os especialistas humanos farão a cotação correta.
+
+4. Formate mensagens de forma limpa para WhatsApp: use quebras de linha e negrito (*texto*) onde facilitar a leitura. Evite textos excessivamente longos.`;
 
     const googleInstance = createGoogleGenerativeAI({ apiKey });
     const targetModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
@@ -216,29 +257,39 @@ Diretrizes obrigatórias:
       system: systemInstruction,
       messages: historyMessages,
       tools,
+      stopWhen: isStepCount(5),
     });
 
     let replyText = (aiResult.text || "").trim();
 
-    // 6. Se o transbordo humano foi acionado
+    // 6. Se o transbordo humano foi acionado por ferramenta ou detecção
     if (requestedHumanTransfer) {
       await transferConversationToHuman({
         tenantId,
         conversationId,
         phone,
-        reason: "Solicitado via atendimento inteligente",
+        reason: transferReason,
       });
 
       if (!replyText) {
-        replyText = "Estou transferindo você para um de nossos atendentes. Em instantes nossa equipe dará continuidade ao seu atendimento!";
+        replyText = ELEGANT_TRANSFER_MESSAGE;
       }
     }
 
+    // 7. Se não houve texto de resposta gerado (ou falha na geração de texto), aciona transbordo elegante
     if (!replyText) {
-      replyText = "Olá! Como posso ajudar você hoje?";
+      console.log(`[BotGeminiEngine] Resposta vazia da IA. Executando transbordo elegante para conv=${conversationId}...`);
+      await transferConversationToHuman({
+        tenantId,
+        conversationId,
+        phone,
+        reason: "Transbordo elegante por ausência de texto final da IA",
+      });
+      replyText = ELEGANT_TRANSFER_MESSAGE;
+      requestedHumanTransfer = true;
     }
 
-    // 7. Envia a resposta via WhatsApp e grava no histórico
+    // 8. Envia a resposta via WhatsApp e grava no histórico
     await deliverBotMessage({
       tenantId,
       conversationId,
@@ -246,7 +297,7 @@ Diretrizes obrigatórias:
       text: replyText,
     });
 
-    console.log(`[BotGeminiEngine] Resposta enviada com sucesso para conv=${conversationId}`);
+    console.log(`[BotGeminiEngine] Resposta enviada com sucesso para conv=${conversationId} (transferred=${requestedHumanTransfer})`);
 
     return {
       replied: true,
@@ -255,6 +306,31 @@ Diretrizes obrigatórias:
     };
   } catch (error: any) {
     console.error(`[BotGeminiEngine] Erro ao processar mensagem do bot para tenant=${tenantId}:`, error);
-    return { replied: false, error: error?.message || "Erro interno do motor do bot." };
+
+    // Contingência elegante: transfere para atendimento humano com aviso educado
+    try {
+      await transferConversationToHuman({
+        tenantId,
+        conversationId,
+        phone,
+        reason: "Transferência por contingência/dúvida técnica",
+      });
+
+      await deliverBotMessage({
+        tenantId,
+        conversationId,
+        phone,
+        text: ELEGANT_TRANSFER_MESSAGE,
+      });
+
+      return {
+        replied: true,
+        replyText: ELEGANT_TRANSFER_MESSAGE,
+        transferredToHuman: true,
+      };
+    } catch (deliverErr) {
+      console.error("[BotGeminiEngine] Falha crítica ao enviar transbordo de contingência:", deliverErr);
+      return { replied: false, error: error?.message || "Erro interno do motor do bot." };
+    }
   }
 }
