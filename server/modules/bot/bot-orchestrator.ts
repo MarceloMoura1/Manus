@@ -3,11 +3,15 @@
  *
  * Ponto central de execução do Bot para mensagens recebidas via WhatsApp:
  * 1. Verifica elegibilidade da conversa (status 'bot', assigned_user_id 'bot_system', sem trava 24h).
- * 2. Tenta executar o Typebot publicado no Workspace do cliente via rede interna (Typebot Viewer).
- * 3. Se não houver Typebot publicado (ou se falhar), aciona o Fallback Cognitivo com IA (Gemini).
+ * 2. Se a conversa já transitou para modo cognitivo, processa diretamente via IA Gemini.
+ * 3. Tenta executar o Typebot publicado no Workspace do cliente via rede interna (Typebot Viewer).
+ * 4. Ao término do fluxo do Typebot (flowEnded = true) ou recebimento de dúvida em texto livre,
+ *    aciona a Transição Cognitiva Pós-Fluxo com IA Gemini (gemini-3.5-flash-lite) e ferramentas de ERP/CRM.
+ * 5. Se o cliente solicitar atendimento humano, executa o transbordo imediato para a fila "Aguardando"
+ *    e silencia o robô por 24 horas.
  */
 import { checkBotEligibility, deliverBotMessage, transferConversationToHuman } from "./bot-runtime";
-import { resolvePublishedTypebot, runTypebotTurn } from "./typebot-runtime.service";
+import { resolvePublishedTypebot, runTypebotTurn, clearTypebotSession } from "./typebot-runtime.service";
 import { processCognitiveBotMessage } from "./bot-gemini-engine";
 
 export interface BotDispatchInput {
@@ -16,6 +20,40 @@ export interface BotDispatchInput {
   phone: string;
   text: string;
   customerName?: string;
+}
+
+const cognitiveConversations = new Map<string, number>();
+const COGNITIVE_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+const sessionKey = (tenantId: string, conversationId: string) => `${tenantId}\u0000${conversationId}`;
+
+export function isConversationInCognitiveMode(tenantId: string, conversationId: string): boolean {
+  const key = sessionKey(tenantId, conversationId);
+  const expiry = cognitiveConversations.get(key);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    cognitiveConversations.delete(key);
+    return false;
+  }
+  return true;
+}
+
+export function setConversationCognitiveMode(tenantId: string, conversationId: string, active: boolean): void {
+  const key = sessionKey(tenantId, conversationId);
+  if (active) {
+    cognitiveConversations.set(key, Date.now() + COGNITIVE_SESSION_TTL_MS);
+  } else {
+    cognitiveConversations.delete(key);
+  }
+}
+
+export function clearConversationCognitiveMode(tenantId: string, conversationId: string): void {
+  cognitiveConversations.delete(sessionKey(tenantId, conversationId));
+}
+
+/** Usado por testes */
+export function __resetCognitiveConversations(): void {
+  cognitiveConversations.clear();
 }
 
 export async function dispatchBotConversationMessage(input: BotDispatchInput): Promise<void> {
@@ -29,7 +67,20 @@ export async function dispatchBotConversationMessage(input: BotDispatchInput): P
     return;
   }
 
-  // 2. Tenta resolver Typebot publicado para este tenant
+  // 2. Se a conversa já transitou para o modo cognitivo contínuo (IA Gemini)
+  if (isConversationInCognitiveMode(tenantId, conversationId)) {
+    console.log(`[BotWebhook] Conversa ${conversationId} em modo cognitivo contínuo. Roteando direto para o Gemini...`);
+    await processCognitiveBotMessage({
+      tenantId,
+      conversationId,
+      phone,
+      text,
+      customerName,
+    });
+    return;
+  }
+
+  // 3. Tenta resolver Typebot publicado para este tenant
   let publishedTypebot = null;
   try {
     publishedTypebot = await resolvePublishedTypebot(tenantId);
@@ -38,7 +89,7 @@ export async function dispatchBotConversationMessage(input: BotDispatchInput): P
   }
 
   if (publishedTypebot) {
-    console.log(`[BotWebhook] Typebot publicado encontrado: "${publishedTypebot.name}" (publicId=${publishedTypebot.publicId}). Executando fluxo...`);
+    console.log(`[BotWebhook] Typebot publicado encontrado: "${publishedTypebot.name}" (publicId=${publishedTypebot.publicId}). Executando turno...`);
     try {
       const turn = await runTypebotTurn({
         tenantId,
@@ -49,25 +100,60 @@ export async function dispatchBotConversationMessage(input: BotDispatchInput): P
         customerName,
       });
 
-      console.log(`[BotWebhook] Turno Typebot concluído com ${turn.messages.length} mensagens. flowEnded=${turn.flowEnded}`);
+      console.log(`[BotWebhook] Turno Typebot concluído com ${turn.items.length} itens. flowEnded=${turn.flowEnded}`);
 
       let transferred = false;
-      for (const msg of turn.messages) {
-        if (!msg.trim()) continue;
-        await deliverBotMessage({ tenantId, conversationId, phone, text: msg });
-        // Detecta se a mensagem indica transferência para atendente humano
-        if (/transferir|atendente humano|equipe dar[aá] continuidade/i.test(msg)) {
-          transferred = true;
+      for (const item of turn.items) {
+        if (item.type === "text") {
+          if (!item.text.trim()) continue;
+          await deliverBotMessage({ tenantId, conversationId, phone, text: item.text });
+          if (/transferir|atendente humano|equipe dar[aá] continuidade|especialista humano/i.test(item.text)) {
+            transferred = true;
+          }
+        } else {
+          // Despacho de mídias (imagem, vídeo, áudio)
+          await deliverBotMessage({
+            tenantId,
+            conversationId,
+            phone,
+            media: {
+              type: item.type,
+              url: item.url,
+              caption: "caption" in item ? item.caption : undefined,
+            },
+          });
         }
       }
 
-      if (transferred) {
+      // Se o fluxo ou o texto indicar transferência humana
+      if (transferred || /falar com atendente|quero atendente|atendimento humano|falar com humano/i.test(text)) {
         await transferConversationToHuman({
           tenantId,
           conversationId,
           phone,
           reason: "Transferência automática indicada pelo fluxo do Typebot",
         });
+        clearConversationCognitiveMode(tenantId, conversationId);
+        clearTypebotSession(tenantId, conversationId);
+        return;
+      }
+
+      // ─── Transição Cognitiva Pós-Fluxo (Gemini) ─────────────────────────
+      // Se o fluxo do Typebot terminou (flowEnded = true)
+      if (turn.flowEnded) {
+        setConversationCognitiveMode(tenantId, conversationId, true);
+
+        // Se o turno não gerou mensagens de saída (ex: bloco de text input no final do fluxo absorveu a pergunta)
+        if (turn.items.length === 0) {
+          console.log(`[BotWebhook] Fluxo Typebot encerrou sem mensagens de saída. Acionando IA Gemini para responder a pergunta...`);
+          await processCognitiveBotMessage({
+            tenantId,
+            conversationId,
+            phone,
+            text,
+            customerName,
+          });
+        }
       }
 
       return;
@@ -78,7 +164,7 @@ export async function dispatchBotConversationMessage(input: BotDispatchInput): P
     console.log(`[BotWebhook] Nenhum Typebot publicado encontrado para tenant=${tenantId}. Usando Fallback Cognitivo Gemini...`);
   }
 
-  // 3. Fallback Cognitivo com IA (Gemini)
+  // 4. Fallback Cognitivo com IA (Gemini)
   try {
     const outcome = await processCognitiveBotMessage({
       tenantId,

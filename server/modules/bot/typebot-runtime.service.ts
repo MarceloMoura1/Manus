@@ -3,9 +3,10 @@
  *
  * 1. Resolve o Typebot publicado no workspace isolado do tenant
  *    (Workspace.settings.megadeskClientId = clientId).
- * 2. Executa o fluxo pelo viewer na rede interna do Docker
+ * 2. Normaliza estruturas de botões consecutivos para evitar corte de opções.
+ * 3. Executa o fluxo pelo viewer na rede interna do Docker
  *    (`/api/v1/typebots/{publicId}/startChat` e `/api/v1/sessions/{id}/continueChat`).
- * 3. Converte as mensagens/inputs do Typebot em texto pronto para WhatsApp.
+ * 4. Converte mensagens (texto, imagens, vídeos, áudios) e inputs para o WhatsApp.
  */
 import { typebotWorkspaceService } from "./typebot-workspace.service";
 
@@ -15,9 +16,16 @@ export interface PublishedTypebot {
   name: string;
 }
 
+export type TypebotTurnItem =
+  | { type: "text"; text: string }
+  | { type: "image"; url: string; caption?: string }
+  | { type: "video"; url: string; caption?: string }
+  | { type: "audio"; url: string; caption?: string };
+
 export interface TypebotTurnResult {
   sessionId: string;
   messages: string[];
+  items: TypebotTurnItem[];
   /** true quando o fluxo terminou (não há input aguardando resposta do cliente). */
   flowEnded: boolean;
 }
@@ -43,6 +51,69 @@ export function __resetTypebotSessions(): void {
   sessions.clear();
 }
 
+/**
+ * Normaliza os blocos do Typebot: quando blocos de "choice input" consecutivos
+ * são criados no mesmo grupo (ex: o usuário arrasta múltiplos botões como blocos separados),
+ * mescla os itens no primeiro bloco de escolha e atualiza os edges correspondentes.
+ */
+export async function normalizeTypebotStructure(typebotId: string): Promise<boolean> {
+  try {
+    const pool = typebotWorkspaceService.getPool();
+    let anyChanged = false;
+
+    for (const table of ["PublicTypebot", "Typebot"]) {
+      const whereClause = table === "PublicTypebot" ? `WHERE "typebotId" = $1` : `WHERE id = $1`;
+      const res = await pool.query(
+        `SELECT id, groups, edges FROM "${table}" ${whereClause}`,
+        [typebotId]
+      );
+      for (const row of (res?.rows || [])) {
+        const groups = typeof row.groups === "string" ? JSON.parse(row.groups) : (row.groups || []);
+        let edges = typeof row.edges === "string" ? JSON.parse(row.edges) : (row.edges || []);
+        let changed = false;
+
+        for (const group of groups) {
+          const newBlocks: any[] = [];
+          for (let i = 0; i < (group.blocks || []).length; i++) {
+            const block = group.blocks[i];
+            if (block.type === "choice input" || block.type === "picture choice input") {
+              while (
+                i + 1 < group.blocks.length &&
+                (group.blocks[i + 1].type === "choice input" || group.blocks[i + 1].type === "picture choice input")
+              ) {
+                const nextBlock = group.blocks[i + 1];
+                block.items = (block.items || []).concat(nextBlock.items || []);
+                for (const edge of edges) {
+                  if (edge.from && edge.from.blockId === nextBlock.id) {
+                    edge.from.blockId = block.id;
+                  }
+                }
+                i++;
+                changed = true;
+              }
+            }
+            newBlocks.push(block);
+          }
+          group.blocks = newBlocks;
+        }
+
+        if (changed) {
+          await pool.query(
+            `UPDATE "${table}" SET groups = $1, edges = $2, "updatedAt" = NOW() WHERE id = $3`,
+            [JSON.stringify(groups), JSON.stringify(edges), row.id]
+          );
+          anyChanged = true;
+          console.log(`[TypebotRuntime] Fluxo normalizado com sucesso para ${table} ${row.id}`);
+        }
+      }
+    }
+    return anyChanged;
+  } catch (err: any) {
+    console.warn(`[TypebotRuntime] Erro não-bloqueante na normalização do typebot ${typebotId}:`, err?.message || err);
+    return false;
+  }
+}
+
 /** Localiza o Typebot publicado mais recente no workspace do tenant. */
 export async function resolvePublishedTypebot(tenantId: string): Promise<PublishedTypebot | null> {
   const pool = typebotWorkspaceService.getPool();
@@ -60,6 +131,10 @@ export async function resolvePublishedTypebot(tenantId: string): Promise<Publish
   );
   const row = res.rows?.[0];
   if (!row?.publicId) return null;
+
+  // Normalização assíncrona não-bloqueante
+  normalizeTypebotStructure(row.typebotId).catch(() => {});
+
   return { typebotId: row.typebotId, publicId: row.publicId, name: row.name };
 }
 
@@ -111,18 +186,35 @@ export function typebotInputToText(input: any): string {
       .map((item) => String(item?.content ?? item?.title ?? "").trim())
       .filter(Boolean);
     if (labels.length === 0) return "";
-    return labels.map((label, idx) => `${idx + 1}. ${label}`).join("\n");
+    const optionsText = labels.map((label, idx) => `${idx + 1}. ${label}`).join("\n");
+    return `${optionsText}\n\n_Responda com o número ou o texto da opção._`;
   }
   return "";
 }
 
-/** Para inputs de escolha, permite que o cliente responda com o número da opção. */
-function mapChoiceAnswer(input: any, text: string): string {
+function normalizeComparisonText(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+/** Para inputs de escolha, permite que o cliente responda com o número ou texto da opção. */
+export function mapChoiceAnswer(input: any, text: string): string {
   if (!input || (input.type !== "choice input" && input.type !== "picture choice input")) return text;
   const items: any[] = Array.isArray(input.items) ? input.items : [];
-  const n = Number(text.trim());
+  const trimmed = text.trim();
+  const n = Number(trimmed);
   if (Number.isInteger(n) && n >= 1 && n <= items.length) {
     return String(items[n - 1]?.content ?? items[n - 1]?.title ?? text);
+  }
+  const normTarget = normalizeComparisonText(trimmed);
+  for (const item of items) {
+    const label = String(item?.content ?? item?.title ?? "");
+    if (normalizeComparisonText(label) === normTarget) {
+      return label;
+    }
   }
   return text;
 }
@@ -149,12 +241,46 @@ async function postJson(url: string, body: unknown): Promise<{ status: number; d
 }
 
 function toTurn(sessionId: string, data: any): TypebotTurnResult {
-  const messages: string[] = (Array.isArray(data?.messages) ? data.messages : [])
-    .map(typebotMessageToText)
-    .filter((t: string) => t.trim().length > 0);
+  const items: TypebotTurnItem[] = [];
+  const messages: string[] = [];
+
+  const rawMessages = Array.isArray(data?.messages) ? data.messages : [];
+  for (const m of rawMessages) {
+    if (!m) continue;
+    if (m.type === "text") {
+      const text = typebotMessageToText(m);
+      if (text.trim()) {
+        items.push({ type: "text", text });
+        messages.push(text);
+      }
+    } else if (m.type === "image") {
+      const url = m.content?.url;
+      if (typeof url === "string" && url.trim()) {
+        items.push({ type: "image", url, caption: m.content?.caption });
+        messages.push(url);
+      }
+    } else if (m.type === "video") {
+      const url = m.content?.url;
+      if (typeof url === "string" && url.trim()) {
+        items.push({ type: "video", url, caption: m.content?.caption });
+        messages.push(url);
+      }
+    } else if (m.type === "audio") {
+      const url = m.content?.url;
+      if (typeof url === "string" && url.trim()) {
+        items.push({ type: "audio", url });
+        messages.push(url);
+      }
+    }
+  }
+
   const inputText = typebotInputToText(data?.input);
-  if (inputText) messages.push(inputText);
-  return { sessionId, messages, flowEnded: !data?.input };
+  if (inputText) {
+    items.push({ type: "text", text: inputText });
+    messages.push(inputText);
+  }
+
+  return { sessionId, messages, items, flowEnded: !data?.input };
 }
 
 /**
@@ -177,7 +303,7 @@ export async function runTypebotTurn(input: {
   if (existing && existing.typebotId === input.typebot.typebotId && now - existing.updatedAt < SESSION_TTL_MS) {
     const answer = mapChoiceAnswer(lastInputs.get(key), input.text);
     const url = `${base}/api/v1/sessions/${encodeURIComponent(existing.sessionId)}/continueChat`;
-    console.log(`[BotWebhook] Typebot continueChat session=${existing.sessionId}`);
+    console.log(`[BotWebhook] Typebot continueChat session=${existing.sessionId} answer="${answer}"`);
     const { status, data } = await postJson(url, {
       message: { type: "text", text: answer },
       textBubbleContentFormat: "markdown",
@@ -219,4 +345,3 @@ export async function runTypebotTurn(input: {
   }
   return turn;
 }
-

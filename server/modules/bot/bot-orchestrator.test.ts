@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock dependencies
 const mockEvoSendText = vi.fn();
+const mockEvoSendAttachment = vi.fn();
 vi.mock("../../evolution/client", () => ({
   evoSendText: (...args: any[]) => mockEvoSendText(...args),
+  evoSendAttachment: (...args: any[]) => mockEvoSendAttachment(...args),
 }));
 
 vi.mock("../../evolution/session-store", () => ({
@@ -50,6 +52,7 @@ vi.mock("@ai-sdk/google", () => ({
 import {
   typebotMessageToText,
   typebotInputToText,
+  mapChoiceAnswer,
   resolvePublishedTypebot,
   runTypebotTurn,
   __resetTypebotSessions,
@@ -59,12 +62,16 @@ import {
   deliverBotMessage,
   transferConversationToHuman,
 } from "./bot-runtime";
-import { dispatchBotConversationMessage } from "./bot-orchestrator";
+import {
+  dispatchBotConversationMessage,
+  __resetCognitiveConversations,
+} from "./bot-orchestrator";
 
 describe("Bot Orchestrator & Typebot Runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __resetTypebotSessions();
+    __resetCognitiveConversations();
   });
 
   describe("typebotMessageToText & typebotInputToText", () => {
@@ -97,12 +104,26 @@ describe("Bot Orchestrator & Typebot Runtime", () => {
       expect(typebotMessageToText(msg)).toBe("Olá *cliente!*");
     });
 
-    it("converte choice input em opções numeradas", () => {
+    it("converte choice input em opções numeradas com instrução", () => {
       const input = {
         type: "choice input",
         items: [{ content: "Vendas" }, { content: "Suporte" }, { content: "Financeiro" }],
       };
-      expect(typebotInputToText(input)).toBe("1. Vendas\n2. Suporte\n3. Financeiro");
+      expect(typebotInputToText(input)).toBe(
+        "1. Vendas\n2. Suporte\n3. Financeiro\n\n_Responda com o número ou o texto da opção._"
+      );
+    });
+
+    it("mapeia resposta de escolha por número ou texto", () => {
+      const input = {
+        type: "choice input",
+        items: [{ content: "Falar com Atendente" }, { content: "Tirar Dúvidas" }],
+      };
+      expect(mapChoiceAnswer(input, "1")).toBe("Falar com Atendente");
+      expect(mapChoiceAnswer(input, "2")).toBe("Tirar Dúvidas");
+      expect(mapChoiceAnswer(input, "falar com atendente")).toBe("Falar com Atendente");
+      expect(mapChoiceAnswer(input, "tirar duvidas")).toBe("Tirar Dúvidas");
+      expect(mapChoiceAnswer(input, "outra coisa")).toBe("outra coisa");
     });
   });
 
@@ -206,6 +227,32 @@ describe("Bot Orchestrator & Typebot Runtime", () => {
         "tenant-1",
         "conversation:message",
         expect.objectContaining({ conversationId: "conv-1" })
+      );
+    });
+
+    it("dispara mídia via Evolution API e registra mensagem de mídia", async () => {
+      mockPoolExecute
+        .mockResolvedValueOnce([{ affectedRows: 1 }]) // insert message
+        .mockResolvedValueOnce([{ affectedRows: 1 }]); // update conversation
+
+      await deliverBotMessage({
+        tenantId: "tenant-1",
+        conversationId: "conv-1",
+        phone: "5541999998888",
+        media: {
+          type: "image",
+          url: "https://app.megadesk.online/api/typebot-media/public/img.png",
+          caption: "Veja nossa foto",
+        },
+      });
+
+      expect(mockEvoSendAttachment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          instanceName: "megadesk-tenant-1",
+          number: "5541999998888",
+          kind: "image",
+          caption: "Veja nossa foto",
+        })
       );
     });
   });
@@ -328,6 +375,57 @@ describe("Bot Orchestrator & Typebot Runtime", () => {
         "5541999998888",
         "Olá! Sou o assistente da Empresa Teste."
       );
+    });
+
+    it("aciona transição cognitiva Gemini quando Typebot finaliza sem mensagens de retorno", async () => {
+      // 1. Elegibilidade
+      mockPoolExecute.mockResolvedValueOnce([
+        [{ status: "bot", assigned_user_id: "bot_system", bot_suspended_at: null }],
+      ]);
+      // 2. Typebot publicado
+      mockPgQuery.mockResolvedValueOnce({
+        rows: [{ typebotId: "tb-1", publicId: "pub-1", name: "Atendimento Padrão" }],
+      });
+
+      // Typebot startChat retorna flowEnded=true e sem messages (absorveu dúvida em text input)
+      const originalFetch = global.fetch;
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        status: 200,
+        text: async () => JSON.stringify({ sessionId: "sess-1", messages: [] }),
+      } as any);
+
+      // Gemini AI fallback
+      mockPoolExecute.mockResolvedValueOnce([
+        [{ status: "bot", assigned_user_id: "bot_system", bot_suspended_at: null }],
+      ]);
+      mockPoolExecute.mockResolvedValueOnce([[{ company: "MegaDesk AI" }]]);
+      mockPoolExecute.mockResolvedValueOnce([[]]);
+      mockGenerateText.mockResolvedValueOnce({
+        text: "Temos o servidor Dell PowerEdge em estoque com garantia de 3 anos!",
+      });
+      mockPoolExecute
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+      process.env.GEMINI_API_KEY = "dummy-key";
+
+      try {
+        await dispatchBotConversationMessage({
+          tenantId: "tenant-1",
+          conversationId: "conv-1",
+          phone: "5541999998888",
+          text: "Vocês vendem servidor Dell?",
+          customerName: "Carlos",
+        });
+
+        expect(mockEvoSendText).toHaveBeenCalledWith(
+          "megadesk-tenant-1",
+          "5541999998888",
+          "Temos o servidor Dell PowerEdge em estoque com garantia de 3 anos!"
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
     });
   });
 });

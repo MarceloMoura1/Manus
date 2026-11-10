@@ -30,6 +30,7 @@ import { registerSaleDocumentRoutes } from "../modules/erp/sales/documents-http"
 import { registerCrmWebhookIngressRoutes } from "../modules/crm/automations/webhook-ingress";
 import { registerBotRoutes } from "../modules/bot/bot.router";
 import { createLegacyTypebotPathRedirect, createTypebotHostProxy } from "../modules/bot/typebot-proxy";
+import { createTypebotStorageProxy } from "../modules/bot/typebot-storage-proxy";
 export { typebotWorkspaceService } from "../modules/bot/typebot-workspace.service";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
 import { createSupplierUploadIngressMiddleware } from "./media-ingress";
@@ -112,6 +113,9 @@ async function startServer() {
   // Deve ser o primeiro middleware: requisições desses hosts são repassadas
   // integralmente ao Typebot e nunca chegam às rotas/SPA do MegaDesk.
   app.use(createTypebotHostProxy());
+
+  // ─── Typebot S3 Storage Proxy & Public Media Serving ───────────────────────
+  app.use(createTypebotStorageProxy());
 
   app.get("/healthz", (_req, res) => {
     res.status(200).json({

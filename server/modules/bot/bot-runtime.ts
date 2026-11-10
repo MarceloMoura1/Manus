@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { getPool } from "../../db";
 import { botDispatcherService } from "./bot-dispatcher.service";
 import { emitOperationalTenantEvent } from "../whatsapp/socket/whatsapp.socket";
+import { clearTypebotSession } from "./typebot-runtime.service";
 
 export const BOT_SYSTEM_USER_ID = "bot_system";
 
@@ -41,25 +42,88 @@ export async function checkBotEligibility(tenantId: string, conversationId: stri
   return { eligible: true };
 }
 
-/** Envia uma mensagem do robô pelo WhatsApp, grava no histórico e notifica a tela de atendimento. */
-export async function deliverBotMessage(input: {
+export interface DeliverBotMediaInput {
+  type: "image" | "video" | "audio";
+  url: string;
+  caption?: string;
+}
+
+export interface DeliverBotMessageInput {
   tenantId: string;
   conversationId: string;
   phone: string;
-  text: string;
-}): Promise<void> {
-  const { tenantId, conversationId, phone } = input;
-  const text = input.text.trim();
-  if (!text) return;
+  text?: string;
+  media?: DeliverBotMediaInput;
+}
 
-  console.log(`[BotDispatcher] Enviando resposta do bot tenant=${tenantId} conv=${conversationId} chars=${text.length}`);
-  await botDispatcherService.sendTextMessage({ tenantId, to: phone, text, provider: "evolution" });
-  console.log(`[BotDispatcher] Resposta entregue à Evolution API tenant=${tenantId} conv=${conversationId}`);
+/** Envia uma mensagem do robô (texto ou mídia) pelo WhatsApp, grava no histórico e notifica a tela de atendimento. */
+export async function deliverBotMessage(input: DeliverBotMessageInput): Promise<void> {
+  const { tenantId, conversationId, phone, media } = input;
+  const text = (input.text || "").trim();
+
+  if (!text && !media) return;
 
   const pool = getPool();
   const botMessageId = `msg-bot-${randomUUID()}`;
   const now = new Date();
   const timeLabel = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+  if (media) {
+    console.log(`[BotDispatcher] Despachando mídia ${media.type} para tenant=${tenantId} conv=${conversationId} url=${media.url}`);
+    await botDispatcherService.sendMediaMessage({
+      tenantId,
+      to: phone,
+      mediaUrl: media.url,
+      kind: media.type,
+      caption: media.caption || text,
+      provider: "evolution",
+    });
+
+    const displayMsg = media.caption || text || `[${media.type.toUpperCase()}]`;
+
+    await pool.execute(
+      `INSERT INTO megadesk_domain_conversations_messages
+       (message_id, conversation_id, client_id, provider, integration_id,
+        direction, message_type, sender, sender_name_snapshot, message, media_reference, status, timestamp, updated_at)
+       VALUES (?, ?, ?, 'evolution', ?, 'outbound', ?, 'bot', 'Bot Virtual', ?, ?, 'sent', NOW(), NOW())`,
+      [
+        botMessageId,
+        conversationId,
+        tenantId,
+        `megadesk-${tenantId}`,
+        media.type,
+        displayMsg,
+        JSON.stringify({ url: media.url, kind: media.type, caption: media.caption }),
+      ]
+    );
+
+    await pool.execute(
+      `UPDATE megadesk_domain_conversations
+       SET last_message = ?, last_message_from = 'bot', time_label = ?, updated_at = NOW()
+       WHERE conversation_id = ? AND client_id = ?`,
+      [displayMsg.substring(0, 255), timeLabel, conversationId, tenantId]
+    );
+
+    emitOperationalTenantEvent(tenantId, "conversation:message", {
+      conversationId,
+      clientId: tenantId,
+      message: {
+        id: botMessageId,
+        from: "bot",
+        sender: "bot",
+        text: displayMsg,
+        time: timeLabel,
+        timestamp: now.toISOString(),
+        media: { url: media.url, type: media.type },
+      },
+    });
+    return;
+  }
+
+  // Envio de Texto
+  console.log(`[BotDispatcher] Enviando resposta do bot tenant=${tenantId} conv=${conversationId} chars=${text.length}`);
+  await botDispatcherService.sendTextMessage({ tenantId, to: phone, text, provider: "evolution" });
+  console.log(`[BotDispatcher] Resposta entregue à Evolution API tenant=${tenantId} conv=${conversationId}`);
 
   await pool.execute(
     `INSERT INTO megadesk_domain_conversations_messages
@@ -114,6 +178,9 @@ export async function transferConversationToHuman(input: {
   );
   console.log(`[BotWebhook] Conversa transferida para fila humana tenant=${tenantId} conv=${conversationId} motivo="${reason}"`);
 
+  // Limpa sessão ativa do bot
+  clearTypebotSession(tenantId, conversationId);
+
   emitOperationalTenantEvent(tenantId, "wa:transfer_to_human", {
     conversationId,
     phone,
@@ -125,4 +192,3 @@ export async function transferConversationToHuman(input: {
     conversation: { id: conversationId, status: "pending", assignedUserId: null, iaActive: 0 },
   });
 }
-
