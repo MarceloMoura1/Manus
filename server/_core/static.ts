@@ -23,7 +23,10 @@ export function serveStatic(app: Express) {
   }));
 
   // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  app.use("*", (req, res) => {
+    if (req.originalUrl.startsWith("/typebot-builder") || req.originalUrl.startsWith("/api/")) {
+      return res.status(404).json({ error: "Recurso não encontrado." });
+    }
     res.setHeader("Cache-Control", "no-cache");
     res.sendFile(path.resolve(distPath, "index.html"));
   });

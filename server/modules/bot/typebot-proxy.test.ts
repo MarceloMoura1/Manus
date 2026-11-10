@@ -8,6 +8,16 @@ describe("Typebot Proxy Middleware", () => {
     vi.clearAllMocks();
   });
 
+  it("deve redirecionar /typebot-builder sem barra para /typebot-builder/", () => {
+    const handler = createTypebotProxyHandler();
+    const req: any = { originalUrl: "/typebot-builder" };
+    const res: any = { redirect: vi.fn() };
+
+    handler(req, res);
+
+    expect(res.redirect).toHaveBeenCalledWith(301, "/typebot-builder/");
+  });
+
   it("deve reescrever cabeçalhos e remover X-Frame-Options", async () => {
     const handler = createTypebotProxyHandler();
 
@@ -26,7 +36,11 @@ describe("Typebot Proxy Middleware", () => {
     mockProxyReq.setHeader = vi.fn();
 
     vi.spyOn(http, "request").mockImplementation((options: any, callback: any) => {
-      // Executa callback na próxima iteração
+      expect(options.headers).toMatchObject({
+        host: "127.0.0.1:3002",
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "app.megadesk.online",
+      });
       setTimeout(() => {
         callback(mockProxyRes);
         mockProxyRes.emit("data", Buffer.from("<head><title>Typebot</title></head><body><script src=\"/_next/static/app.js\"></script></body>"));
@@ -36,9 +50,10 @@ describe("Typebot Proxy Middleware", () => {
     });
 
     const req: any = new EventEmitter();
+    req.originalUrl = "/typebot-builder/signin";
     req.url = "/signin";
     req.method = "GET";
-    req.headers = { host: "localhost:3000" };
+    req.headers = { host: "app.megadesk.online" };
     req.pipe = vi.fn();
 
     const res: any = {
@@ -65,4 +80,3 @@ describe("Typebot Proxy Middleware", () => {
     });
   });
 });
-

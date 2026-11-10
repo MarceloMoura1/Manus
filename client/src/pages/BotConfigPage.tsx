@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import {
@@ -18,7 +18,6 @@ import {
   Ticket,
   UserCheck,
   ShieldCheck,
-  ArrowUpRight,
   Info
 } from 'lucide-react';
 
@@ -26,15 +25,9 @@ export function BotConfigPage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [iframeLoaded, setIframeLoaded] = useState(false);
-  const [builderUrl, setBuilderUrl] = useState('/typebot-builder/');
   const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    // Configura a URL do builder baseada na origem atual
-    if (typeof window !== 'undefined') {
-      setBuilderUrl(`${window.location.origin}/typebot-builder/`);
-    }
-  }, []);
+  const builderUrl = '/typebot-builder/';
 
   const webhookBaseUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/api/bot`
@@ -82,7 +75,7 @@ export function BotConfigPage() {
     setIframeLoaded(false);
     const iframe = document.getElementById('typebot-iframe') as HTMLIFrameElement | null;
     if (iframe) {
-      iframe.src = iframe.src;
+      iframe.src = builderUrl;
     }
   };
 
@@ -90,37 +83,51 @@ export function BotConfigPage() {
     <div className="space-y-6">
       {/* ─── TOPO: Painel de Status e Integração ─────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Card 1: Status do Motor Typebot */}
-        <Card className="border-emerald-200/80 bg-gradient-to-br from-emerald-50/50 via-white to-teal-50/30 shadow-sm dark:bg-slate-900/60 dark:border-emerald-900/50">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold tracking-wider uppercase text-emerald-700 dark:text-emerald-400">
-                Motor Conversacional
-              </span>
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-            </div>
-            <CardTitle className="text-lg font-bold flex items-center gap-2 text-slate-900 dark:text-slate-100">
-              <Bot className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-              Typebot Conectado
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-xs text-slate-600 dark:text-slate-400">
-            <p>
-              Instância isolada em contêiner Docker na porta interna 3002 com banco Postgres dedicado.
-            </p>
-            <div className="flex items-center gap-2 pt-1">
-              <Badge variant="outline" className="bg-emerald-100/80 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300">
-                <ShieldCheck className="w-3 h-3 mr-1" />
-                Multi-Tenant Seguro
-              </Badge>
-              <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300">
-                v2.29.0 / ARM64
-              </Badge>
-            </div>
-          </CardContent>
+        {/* Card 1: Status do Motor Typebot com Botão Destacado de Nova Janela */}
+        <Card className="border-emerald-200/80 bg-gradient-to-br from-emerald-50/50 via-white to-teal-50/30 shadow-sm dark:bg-slate-900/60 dark:border-emerald-900/50 flex flex-col justify-between">
+          <div>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold tracking-wider uppercase text-emerald-700 dark:text-emerald-400">
+                  Motor Conversacional
+                </span>
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+              </div>
+              <CardTitle className="text-lg font-bold flex items-center gap-2 text-slate-900 dark:text-slate-100">
+                <Bot className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                Typebot Conectado
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-xs text-slate-600 dark:text-slate-400">
+              <p>
+                Instância isolada em contêiner Docker na porta interna 3002 com banco Postgres dedicado.
+              </p>
+              <div className="flex items-center gap-2 pt-0.5">
+                <Badge variant="outline" className="bg-emerald-100/80 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300">
+                  <ShieldCheck className="w-3 h-3 mr-1" />
+                  Multi-Tenant
+                </Badge>
+                <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300">
+                  v2.29.0
+                </Badge>
+              </div>
+            </CardContent>
+          </div>
+
+          <div className="p-4 pt-0">
+            <Button
+              asChild
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm gap-2 h-9 text-xs"
+            >
+              <a href={builderUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="w-4 h-4" />
+                Abrir Editor em Nova Janela
+              </a>
+            </Button>
+          </div>
         </Card>
 
         {/* Card 2: Webhook de Transbordo Humano */}

@@ -2,7 +2,7 @@
  * Bot Module — Typebot Reverse Proxy Middleware
  * Direciona requisições de /typebot-builder/* para o container interno
  * do Typebot Builder removendo bloqueios de iframe (X-Frame-Options / CSP).
- * Suporta resolução em ambiente Docker (typebot-builder:3000) e local (127.0.0.1:3002).
+ * Suporta resolução em ambiente Docker (typebot-builder:3000) e VPS host (127.0.0.1:3002).
  */
 import http from "node:http";
 import type { Request, Response } from "express";
@@ -18,8 +18,8 @@ function getUpstreamCandidates(): UpstreamEndpoint[] {
     return [{ hostname: process.env.TYPEBOT_BUILDER_HOST, port }];
   }
   return [
-    { hostname: "typebot-builder", port: 3000 }, // Rede Docker compartilhada (megadesk-backend)
-    { hostname: "127.0.0.1", port: 3002 },        // Host local / desenvolvimento
+    { hostname: "typebot-builder", port: 3000 }, // Rede Docker interna (megadesk-backend)
+    { hostname: "127.0.0.1", port: 3002 },        // Host VPS / fallback local
     { hostname: "localhost", port: 3002 },
   ];
 }
@@ -28,12 +28,22 @@ export function createTypebotProxyHandler() {
   let cachedWorkingEndpoint: UpstreamEndpoint | null = null;
 
   return function typebotProxy(req: Request, res: Response) {
-    // req.url quando montado em app.use('/typebot-builder', ...) é relativo ao mount
-    // Ex: /typebot-builder/signin -> req.url é /signin
-    let upstreamPath = req.url || "/";
+    // Redireciona /typebot-builder para /typebot-builder/ com trailing slash
+    const originalUrl = req.originalUrl || req.url || "";
+    if (originalUrl === "/typebot-builder") {
+      return res.redirect(301, "/typebot-builder/");
+    }
+
+    // Extrai o caminho sem o prefixo /typebot-builder
+    const queryIndex = originalUrl.indexOf("?");
+    const pathOnly = queryIndex !== -1 ? originalUrl.substring(0, queryIndex) : originalUrl;
+    const queryOnly = queryIndex !== -1 ? originalUrl.substring(queryIndex) : "";
+
+    let upstreamPath = pathOnly.replace(/^\/typebot-builder/, "") || "/";
     if (!upstreamPath.startsWith("/")) {
       upstreamPath = "/" + upstreamPath;
     }
+    upstreamPath += queryOnly;
 
     const candidates = cachedWorkingEndpoint
       ? [cachedWorkingEndpoint, ...getUpstreamCandidates().filter(c => c.hostname !== cachedWorkingEndpoint?.hostname || c.port !== cachedWorkingEndpoint?.port)]
@@ -43,8 +53,12 @@ export function createTypebotProxyHandler() {
 
     function trySendToUpstream(endpoint: UpstreamEndpoint) {
       const clientHeaders: Record<string, string | string[] | undefined> = { ...req.headers };
-      clientHeaders.host = `${endpoint.hostname}:${endpoint.port}`;
-      delete clientHeaders["accept-encoding"]; // Evita compressão do upstream para permitir reescrita de HTML
+
+      // Cabeçalhos essenciais requeridos para NextAuth e proxies reversos
+      clientHeaders.host = "127.0.0.1:3002";
+      clientHeaders["x-forwarded-proto"] = (req.headers["x-forwarded-proto"] as string) || "https";
+      clientHeaders["x-forwarded-host"] = (req.headers["x-forwarded-host"] as string) || req.headers.host || "app.megadesk.online";
+      delete clientHeaders["accept-encoding"]; // Evita compressão gzip do upstream para permitir reescrita de HTML
 
       const proxyReq = http.request(
         {
@@ -77,7 +91,11 @@ export function createTypebotProxyHandler() {
               } catch {}
             }
             if (loc.startsWith("/")) {
-              headers.location = `/typebot-builder${loc}`;
+              if (!loc.startsWith("/typebot-builder")) {
+                headers.location = `/typebot-builder${loc}`;
+              } else {
+                headers.location = loc;
+              }
             }
           }
 
@@ -119,7 +137,7 @@ export function createTypebotProxyHandler() {
           return;
         }
 
-        console.error("[TypebotProxy] Erro ao conectar ao Typebot Builder em todos os candidatos:", err?.message || err);
+        console.error("[TypebotProxy] Erro de conexão com Typebot Builder em todos os candidatos:", err?.message || err);
         if (!res.headersSent) {
           res.status(502).json({
             error: "Typebot Builder temporariamente indisponível.",
