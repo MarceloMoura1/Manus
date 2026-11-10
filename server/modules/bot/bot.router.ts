@@ -8,8 +8,12 @@
  */
 import { Router, type Request, type Response } from "express";
 import crypto from "node:crypto";
+import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { router, megadeskProcedure } from "../../_core/trpc";
 import { getPool, validateMegaDeskClientToken } from "../../db";
 import { emitOperationalTenantEvent } from "../whatsapp/socket/whatsapp.socket";
+import { typebotWorkspaceService } from "./typebot-workspace.service";
 
 /**
  * Helper para extrair clientId e autenticar tenant.
@@ -343,3 +347,67 @@ export function createBotRouter(): Router {
 export function registerBotRoutes(app: { use: (path: string, router: Router) => void }): void {
   app.use("/api/bot", createBotRouter());
 }
+
+// ─── tRPC ROUTER PARA PROVISIONAMENTO E RESOLUÇÃO DE WORKSPACE ────────────────
+export const botTrpcRouter = router({
+  getClientWorkspaceUrl: megadeskProcedure
+    .input(
+      z
+        .object({
+          clientId: z.string().optional(),
+          userRole: z.string().optional(),
+        })
+        .optional()
+    )
+    .query(async ({ input, ctx }) => {
+      // Validação de permissão: apenas admin operacional do tenant ou admin master
+      if (ctx.operationalUserRole !== "admin" && ctx.user?.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Apenas administradores podem acessar a configuração do bot.",
+        });
+      }
+
+      const clientId = input?.clientId || ctx.tenantId;
+      if (!clientId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Identificador do cliente não informado.",
+        });
+      }
+
+      // Busca dados do cliente no banco MySQL
+      let clientCompany = `Cliente ${clientId.slice(0, 8)}`;
+      try {
+        const pool = getPool();
+        const [rows] = await pool.execute(
+          "SELECT company FROM megadesk_domain_clients WHERE client_id = ? LIMIT 1",
+          [clientId]
+        ) as any[];
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.company) {
+          clientCompany = rows[0].company;
+        }
+      } catch (err) {
+        console.warn("[BotRouter] Não foi possível consultar company de megadesk_domain_clients:", err);
+      }
+
+      const userEmail = ctx.userEmail || ctx.user?.email || `admin@${clientId}.megadesk.online`;
+      const userName = ctx.operationalUserId || ctx.user?.name || "Administrador";
+
+      const workspace = await typebotWorkspaceService.getOrCreateClientWorkspace(
+        clientId,
+        clientCompany,
+        userEmail,
+        userName
+      );
+
+      return {
+        url: workspace.loginUrl,
+        directUrl: workspace.directUrl,
+        workspaceId: workspace.workspaceId,
+        workspaceName: workspace.workspaceName,
+        isNewWorkspace: workspace.isNewWorkspace,
+      };
+    }),
+});
+

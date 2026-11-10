@@ -80,4 +80,30 @@ describe("Typebot Proxy (subdomínio dedicado)", () => {
     createLegacyTypebotPathRedirect()({ originalUrl: "/typebot-builder/pt-BR/signin" } as any, res);
     expect(res.redirect).toHaveBeenCalledWith(302, "https://bot.megadesk.online/pt-BR/signin");
   });
+
+  it("intercepta /api/megadesk-login, injeta cookies de sessão e redireciona para o workspace", () => {
+    const handler = createTypebotHostProxy();
+    const req: any = {
+      path: "/api/megadesk-login",
+      headers: { host: "bot.megadesk.online", "x-forwarded-proto": "https" },
+      query: { token: "token-uuid-12345", workspaceId: "ws_tenant_abc" },
+    };
+    const res: any = {
+      setHeader: vi.fn(),
+      redirect: vi.fn(),
+    };
+    const next = vi.fn();
+
+    handler(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.setHeader).toHaveBeenCalledWith(
+      "Set-Cookie",
+      expect.arrayContaining([
+        expect.stringContaining("__Secure-authjs.session-token=token-uuid-12345"),
+        expect.stringContaining("Domain=.megadesk.online"),
+      ])
+    );
+    expect(res.redirect).toHaveBeenCalledWith(302, "/w/ws_tenant_abc/typebots");
+  });
 });

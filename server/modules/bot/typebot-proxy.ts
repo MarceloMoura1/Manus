@@ -113,6 +113,32 @@ export function createTypebotHostProxy() {
     const target = resolveTypebotTarget(host);
     if (!target) return next();
 
+    // ─── Auto-Login Bridge Endpoint ──────────────────────────────────────────
+    // Permite que o MegaDesk injete o cookie de sessão do Typebot (Auth.js)
+    // e redirecione o iframe/navegador diretamente para o workspace exclusivo do cliente.
+    const pathname = (req.path || req.originalUrl?.split("?")[0] || "").toLowerCase();
+    if (pathname === "/api/megadesk-login") {
+      const token = String(req.query.token || "").trim();
+      const workspaceId = String(req.query.workspaceId || "").trim();
+      const redirectUrl = workspaceId ? `/w/${workspaceId}/typebots` : "/";
+
+      if (token) {
+        const isSecure = (req.headers["x-forwarded-proto"] as string) === "https";
+        const isMegaDeskDomain = host.includes("megadesk.online");
+        const domainAttr = isMegaDeskDomain ? "; Domain=.megadesk.online" : "";
+        const secureAttr = isSecure ? "; Secure" : "";
+
+        const cookies = [
+          `__Secure-authjs.session-token=${token}; Path=/${domainAttr}; HttpOnly${secureAttr}; SameSite=Lax`,
+          `authjs.session-token=${token}; Path=/${domainAttr}; HttpOnly${secureAttr}; SameSite=Lax`,
+          `__Secure-authjs.session-token=${token}; Path=/; HttpOnly${secureAttr}; SameSite=Lax`,
+          `authjs.session-token=${token}; Path=/; HttpOnly${secureAttr}; SameSite=Lax`,
+        ];
+        res.setHeader("Set-Cookie", cookies);
+      }
+      return res.redirect(302, redirectUrl);
+    }
+
     const cached = cache.get(target.name);
     const candidates = cached
       ? [cached, ...target.candidates.filter((c) => c.hostname !== cached.hostname || c.port !== cached.port)]
