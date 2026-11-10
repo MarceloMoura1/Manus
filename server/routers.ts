@@ -2017,6 +2017,7 @@ export const appRouter = router({
     renameThread: assistantThreadsRouter._def.procedures.renameThread,
     getThreadMessages: assistantThreadsRouter._def.procedures.getThreadMessages,
     sendThreadMessage: assistantThreadsRouter._def.procedures.sendThreadMessage,
+    sendThreadAudioMessage: assistantThreadsRouter._def.procedures.sendThreadAudioMessage,
 
     chat: publicProcedure
       .input(z.object({

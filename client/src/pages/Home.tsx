@@ -11,6 +11,7 @@ import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
+import { AIAssistant } from "./AIAssistant";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
 import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorkspace";
 import { Users } from "lucide-react";
@@ -4001,6 +4002,10 @@ function formatAssistantMessageContent(msg: { content?: string; pendingActionReq
 }
 
 function AIAssistantPage() {
+  return <AIAssistant />;
+}
+
+function LegacyAIAssistantPage() {
   // IMPORTANTE: usar a mesma chave que o login salva a sessão
   const SESSION_KEY = "megadesk_session_v1";
 

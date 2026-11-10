@@ -32,6 +32,14 @@ export const sendThreadMessageSchema = z.object({
 
 export type SendThreadMessageInput = z.infer<typeof sendThreadMessageSchema>;
 
+export const sendThreadAudioMessageSchema = z.object({
+  threadId: z.string().trim().min(1, "threadId é obrigatório"),
+  audioBase64: z.string().trim().min(1, "Áudio não pode ser vazio"),
+  mimeType: z.string().trim().min(1, "mimeType é obrigatório").default("audio/webm"),
+});
+
+export type SendThreadAudioMessageInput = z.infer<typeof sendThreadAudioMessageSchema>;
+
 export interface AssistantThreadItem {
   id: string;
   tenantId: string;
@@ -49,3 +57,4 @@ export interface AssistantMessageItem {
   toolInvocations: unknown | null;
   createdAt: Date;
 }
+

@@ -6,6 +6,10 @@ import {
   CANONICAL_GEMINI_MODEL,
 } from "./assistant-threads.router";
 import { AssistantThreadsRepository } from "./repository";
+import {
+  processQuickVoiceRequest,
+  DAILY_OPERATIONS_THREAD_TITLE,
+} from "../../routes/voice-shortcut";
 import type { MegadeskAiThread, MegadeskAiMessage } from "../../../drizzle/schema";
 
 class MockAssistantThreadsRepository extends AssistantThreadsRepository {
@@ -326,4 +330,94 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
       expect(result.assistantMessage.content).toContain("Rate limit exceeded");
     });
   });
+
+  describe("sendThreadAudioMessage (Multimodal Voice Transcription & Execution)", () => {
+    it("persists voice user message, passes multimodal file part to Gemini and saves assistant response", async () => {
+      mockAiGenerate.mockResolvedValueOnce({
+        text: "Entendi seu áudio! Temos 5 chamados abertos hoje.",
+      });
+
+      const caller = router.createCaller({
+        req: {} as any,
+        res: {} as any,
+        assistantIdentity: { tenantId: "tenant-1", userId: "user-a" },
+      } as any);
+
+      const thread = (await caller.createThread({})).thread;
+
+      const result = await caller.sendThreadAudioMessage({
+        threadId: thread.id,
+        audioBase64: "data:audio/webm;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEA",
+        mimeType: "audio/webm",
+      });
+
+      expect(result.userMessage.role).toBe("user");
+      expect(result.userMessage.content).toBe("🎤 [Mensagem de voz enviada]");
+      expect(result.assistantMessage.role).toBe("assistant");
+      expect(result.assistantMessage.content).toBe("Entendi seu áudio! Temos 5 chamados abertos hoje.");
+
+      expect(mockAiGenerate).toHaveBeenCalledTimes(1);
+      const callArgs = mockAiGenerate.mock.calls[0][0];
+      const lastMessage = callArgs.messages[callArgs.messages.length - 1];
+      expect(lastMessage.role).toBe("user");
+      expect(Array.isArray(lastMessage.content)).toBe(true);
+      expect(lastMessage.content[0]).toEqual({
+        type: "text",
+        text: "Interprete o áudio a seguir e execute as ações necessárias ou responda ao usuário:",
+      });
+      expect(lastMessage.content[1]).toMatchObject({
+        type: "file",
+        data: "UklGRiQAAABXQVZFZm10IBAAAAABAAEA",
+        mediaType: "audio/webm",
+        mimeType: "audio/webm",
+      });
+    });
+  });
+
+  describe("Quick Voice Hands-Free Shortcut (processQuickVoiceRequest)", () => {
+    it("automatically creates 'Operações do Dia' thread and returns speechResponse", async () => {
+      mockAiGenerate.mockResolvedValueOnce({
+        text: "Chamado #1042 aberto com sucesso para a Mecânica Silva.",
+      });
+
+      const res = await processQuickVoiceRequest(
+        {
+          tenantId: "tenant-oficina",
+          userId: "mecanico@oficina.com",
+          audioBase64: "UklGRiQAAABXQVZFZm10IBAAAAABAAEA",
+          mimeType: "audio/ogg",
+        },
+        mockRepo,
+        mockAiGenerate
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.speechResponse).toBe("Chamado #1042 aberto com sucesso para a Mecânica Silva.");
+      expect(res.threadId).toBeDefined();
+
+      const threads = await mockRepo.listThreads("tenant-oficina", "mecanico@oficina.com");
+      expect(threads.length).toBe(1);
+      expect(threads[0].title).toBe(DAILY_OPERATIONS_THREAD_TITLE);
+
+      // Segunda chamada reutiliza a mesma thread "Operações do Dia"
+      mockAiGenerate.mockResolvedValueOnce({
+        text: "Faturamento do dia atualizado.",
+      });
+      const res2 = await processQuickVoiceRequest(
+        {
+          tenantId: "tenant-oficina",
+          userId: "mecanico@oficina.com",
+          text: "Qual o faturamento de hoje?",
+        },
+        mockRepo,
+        mockAiGenerate
+      );
+
+      expect(res2.success).toBe(true);
+      expect(res2.threadId).toBe(res.threadId);
+      const threadsAfter = await mockRepo.listThreads("tenant-oficina", "mecanico@oficina.com");
+      expect(threadsAfter.length).toBe(1);
+    });
+  });
 });
+
