@@ -1,499 +1,338 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { trpc } from '@/lib/trpc';
-import { formatTime } from '@/lib/conversationDateTime';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Trash2, Send, Edit2, Check } from 'lucide-react';
-
-interface BotScript {
-  scriptId: string;
-  clientId: string;
-  name: string;
-  description: string | null;
-  systemPrompt?: string; // mapeado para description no backend
-  initialMessage: string | null;
-  active: number; // tinyint: 0 = inativo, 1 = ativo
-  isActive?: boolean; // alias legacy
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-}
+import {
+  Bot,
+  Copy,
+  Check,
+  ExternalLink,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+  Zap,
+  Database,
+  Ticket,
+  UserCheck,
+  ShieldCheck,
+  ArrowUpRight,
+  Info
+} from 'lucide-react';
 
 export function BotConfigPage() {
-  const [clientId, setClientId] = useState<string | null>(null);
-  const [scripts, setScripts] = useState<BotScript[]>([]);
-  const [selectedScript, setSelectedScript] = useState<BotScript | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [builderUrl, setBuilderUrl] = useState('/typebot-builder/');
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Estados do formulário
-  const [formName, setFormName] = useState('');
-  const [formDescription, setFormDescription] = useState('');
-  const [formPrompt, setFormPrompt] = useState('');
-  const [formInitialMsg, setFormInitialMsg] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
-
-  // Estados de edição
-  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
-  const [editingPrompt, setEditingPrompt] = useState('');
-
-  // Estados do chat
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [isLoadingChat, setIsLoadingChat] = useState(false);
-
-  // Obter clientId da sessão
   useEffect(() => {
-    try {
-      const SESSION_KEY = 'megadesk_session_v1';
-      const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const session = JSON.parse(raw);
-        setClientId(session.clientId);
-      }
-    } catch (e) {
-      console.error('Erro ao obter clientId:', e);
+    // Configura a URL do builder baseada na origem atual
+    if (typeof window !== 'undefined') {
+      setBuilderUrl(`${window.location.origin}/typebot-builder/`);
     }
   }, []);
 
-  // Mutations
-  const createScriptMutation = trpc.botScripts.create.useMutation();
-  const updateScriptMutation = trpc.botScripts.update.useMutation();
-  const deleteScriptMutation = trpc.botScripts.delete.useMutation();
-  const activateScriptMutation = trpc.botScripts.activate.useMutation();
-  const deactivateScriptMutation = trpc.botScripts.deactivate.useMutation();
-  const { data: scriptsData, refetch: refetchScripts } = trpc.botScripts.list.useQuery(
-    { clientId: clientId || '' },
-    { enabled: !!clientId }
-  );
-  const testScriptMutation = trpc.botScripts.testScript.useMutation();
+  const webhookBaseUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/api/bot`
+    : 'https://app.megadesk.online/api/bot';
 
-  // Carregar roteiros
-  useEffect(() => {
-    if (scriptsData) {
-      setScripts(scriptsData);
-    }
-  }, [scriptsData]);
-
-  const loadScripts = async () => {
-    if (refetchScripts) {
-      await refetchScripts();
-    }
+  const copyToClipboard = (text: string, key: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    toast.success(`${label} copiado para a área de transferência!`);
+    setTimeout(() => {
+      setCopiedKey(null);
+    }, 2500);
   };
 
-  const handleCreateScript = async () => {
-    if (!clientId || !formName.trim() || !formPrompt.trim()) {
-      toast.error('Preencha todos os campos obrigatórios');
-      return;
-    }
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
 
-    setIsCreating(true);
-    try {
-      await createScriptMutation.mutateAsync({
-        clientId,
-        name: formName,
-        description: formDescription,
-        systemPrompt: formPrompt,
-        initialMessage: formInitialMsg,
-      });
-
-      toast.success('Roteiro criado com sucesso!');
-      setFormName('');
-      setFormDescription('');
-      setFormPrompt('');
-      setFormInitialMsg('');
-      await loadScripts();
-    } catch (error) {
-      console.error('Erro ao criar roteiro:', error);
-      toast.error('Erro ao criar roteiro');
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
-  const handleUpdatePrompt = async (scriptId: string) => {
-    if (!clientId || !editingPrompt.trim()) {
-      toast.error('Preencha o System Prompt');
-      return;
-    }
-
-    try {
-      await updateScriptMutation.mutateAsync({
-        clientId,
-        scriptId,
-        systemPrompt: editingPrompt,
-      });
-
-      toast.success('Roteiro atualizado com sucesso!');
-      setEditingScriptId(null);
-      setEditingPrompt('');
-      await loadScripts();
-    } catch (error) {
-      console.error('Erro ao atualizar roteiro:', error);
-      toast.error('Erro ao atualizar roteiro');
-    }
-  };
-
-  const handleDeleteScript = async (scriptId: string) => {
-    if (!clientId) return;
-
-    if (!confirm('Tem certeza que deseja deletar este roteiro?')) return;
-
-    try {
-      await deleteScriptMutation.mutateAsync({ clientId, scriptId });
-      toast.success('Roteiro deletado com sucesso!');
-      if (selectedScript?.scriptId === scriptId) {
-        setSelectedScript(null);
-        setChatMessages([]);
+    if (!isFullscreen) {
+      if (containerRef.current.requestFullscreen) {
+        containerRef.current.requestFullscreen().catch(() => {
+          setIsFullscreen(true);
+        });
+      } else {
+        setIsFullscreen(true);
       }
-      await loadScripts();
-    } catch (error) {
-      console.error('Erro ao deletar roteiro:', error);
-      toast.error('Erro ao deletar roteiro');
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsFullscreen(false);
     }
   };
 
-  const handleActivateScript = async (scriptId: string) => {
-    if (!clientId) return;
-
-    try {
-      await activateScriptMutation.mutateAsync({ clientId, scriptId });
-      toast.success('Roteiro ativado!');
-      await loadScripts();
-    } catch (error) {
-      console.error('Erro ao ativar roteiro:', error);
-      toast.error('Erro ao ativar roteiro');
-    }
-  };
-
-  const handleDeactivateScript = async (scriptId: string) => {
-    if (!clientId) return;
-
-    try {
-      await deactivateScriptMutation.mutateAsync({ clientId, scriptId });
-      toast.success('Roteiro desativado!');
-      await loadScripts();
-    } catch (error) {
-      console.error('Erro ao desativar roteiro:', error);
-      toast.error('Erro ao desativar roteiro');
-    }
-  };
-
-  const handleSelectScript = (script: BotScript) => {
-    setSelectedScript(script);
-    setChatMessages([
-      {
-        role: 'assistant',
-        content: script.initialMessage || 'Olá! Como posso ajudá-lo?',
-        timestamp: new Date(),
-      },
-    ]);
-  };
-
-  const handleSendMessage = async () => {
-    if (!chatInput.trim() || !selectedScript || !clientId) return;
-
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: chatInput,
-      timestamp: new Date(),
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
     };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
-    setChatMessages((prev) => [...prev, userMessage]);
-    setChatInput('');
-    setIsLoadingChat(true);
-
-    try {
-      const response = await testScriptMutation.mutateAsync({
-        clientId,
-        scriptId: selectedScript.scriptId,
-        userMessage: chatInput,
-        conversationHistory: chatMessages,
-      });
-
-      const botMessage: ChatMessage = {
-        role: 'assistant',
-        content: response.botResponse || 'Desculpe, houve um erro na resposta.',
-        timestamp: new Date(),
-      };
-
-      setChatMessages((prev) => [...prev, botMessage]);
-    } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
-      toast.error('Erro ao enviar mensagem');
-    } finally {
-      setIsLoadingChat(false);
+  const reloadIframe = () => {
+    setIframeLoaded(false);
+    const iframe = document.getElementById('typebot-iframe') as HTMLIFrameElement | null;
+    if (iframe) {
+      iframe.src = iframe.src;
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900">Configuração do Bot</h1>
-          <p className="text-slate-600 mt-2">Crie e teste roteiros de IA para sua plataforma</p>
-        </div>
+    <div className="space-y-6">
+      {/* ─── TOPO: Painel de Status e Integração ─────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Card 1: Status do Motor Typebot */}
+        <Card className="border-emerald-200/80 bg-gradient-to-br from-emerald-50/50 via-white to-teal-50/30 shadow-sm dark:bg-slate-900/60 dark:border-emerald-900/50">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold tracking-wider uppercase text-emerald-700 dark:text-emerald-400">
+                Motor Conversacional
+              </span>
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+            </div>
+            <CardTitle className="text-lg font-bold flex items-center gap-2 text-slate-900 dark:text-slate-100">
+              <Bot className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              Typebot Conectado
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-xs text-slate-600 dark:text-slate-400">
+            <p>
+              Instância isolada em contêiner Docker na porta interna 3002 com banco Postgres dedicado.
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <Badge variant="outline" className="bg-emerald-100/80 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300">
+                <ShieldCheck className="w-3 h-3 mr-1" />
+                Multi-Tenant Seguro
+              </Badge>
+              <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300">
+                v2.29.0 / ARM64
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 px-40">
-          {/* Painel Esquerdo: Novo Roteiro */}
-          <div className="lg:col-span-1">
-            <Card className="p-6 bg-white shadow-sm border-slate-200" style={{marginLeft: '-381px', marginRight: '235px', marginBottom: '7px'}}>
-              <h2 className="text-xl font-bold text-slate-900 mb-6">Novo Roteiro</h2>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Nome</label>
-                  <Input
-                    placeholder="Ex: Suporte Técnico"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    className="border-slate-300"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Descrição</label>
-                  <Input
-                    placeholder="Descrição do roteiro"
-                    value={formDescription}
-                    onChange={(e) => setFormDescription(e.target.value)}
-                    className="border-slate-300"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">System Prompt</label>
-                  <Textarea
-                    placeholder="Instruções para o bot..."
-                    value={formPrompt}
-                    onChange={(e) => setFormPrompt(e.target.value)}
-                    rows={4}
-                    className="border-slate-300 resize-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Mensagem Inicial</label>
-                  <Textarea
-                    placeholder="Mensagem de boas-vindas"
-                    value={formInitialMsg}
-                    onChange={(e) => setFormInitialMsg(e.target.value)}
-                    rows={3}
-                    className="border-slate-300 resize-none"
-                  />
-                </div>
-
-                <Button
-                  onClick={handleCreateScript}
-                  disabled={isCreating}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg"
-                >
-                  {isCreating ? 'Criando...' : '+ Criar Roteiro'}
-                </Button>
-              </div>
-            </Card>
-          </div>
-
-          {/* Painel Central: Roteiros */}
-          <div className="lg:col-span-1">
-            <Card className="p-6 bg-white shadow-sm border-slate-200" style={{marginLeft: '-249px', marginRight: '168px', paddingLeft: '26px', paddingRight: '34px'}}>
-              <h2 className="text-xl font-bold text-slate-900 mb-6">Roteiros</h2>
-
-              <div className="space-y-4 max-h-96 overflow-y-auto">
-                {scripts.length === 0 ? (
-                  <p className="text-slate-500 text-center py-8">Nenhum roteiro criado</p>
+        {/* Card 2: Webhook de Transbordo Humano */}
+        <Card className="border-blue-200/80 bg-gradient-to-br from-blue-50/50 via-white to-indigo-50/30 shadow-sm dark:bg-slate-900/60 dark:border-blue-900/50">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold tracking-wider uppercase text-blue-700 dark:text-blue-400">
+                Webhook de Ação
+              </span>
+              <Zap className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            </div>
+            <CardTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
+              Transbordo Humano
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-xs">
+            <p className="text-slate-600 dark:text-slate-400">
+              Cole esta URL no nó Webhook do fluxo para transferir o cliente para o atendente humano:
+            </p>
+            <div className="flex items-center gap-2 bg-slate-100/90 dark:bg-slate-800/90 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+              <code className="text-[11px] font-mono truncate text-blue-700 dark:text-blue-300 flex-1">
+                {webhookBaseUrl}/typebot-webhook
+              </code>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 hover:bg-blue-100 dark:hover:bg-blue-950"
+                onClick={() =>
+                  copyToClipboard(
+                    `${webhookBaseUrl}/typebot-webhook`,
+                    'webhook-url',
+                    'URL de Webhook'
+                  )
+                }
+              >
+                {copiedKey === 'webhook-url' ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
                 ) : (
-                  scripts.map((script) => (
-                    <div
-                      key={script.scriptId}
-                      className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md hover:border-slate-300 transition-all duration-200 cursor-pointer group"
-                      onClick={() => handleSelectScript(script)}
-                    >
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-slate-900 text-base mb-1 group-hover:text-blue-600 transition">{script.name}</h3>
-                          {script.description && (
-                            <p className="text-sm text-slate-500 line-clamp-1">{script.description}</p>
-                          )}
-                        </div>
-                        {script.isActive && (
-                          <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 ml-2 flex-shrink-0">Ativo</Badge>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-1.5 flex-wrap pt-3 border-t border-slate-100">
-                        {script.isActive ? (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeactivateScript(script.scriptId);
-                              }}
-                              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs"
-                            >
-                              <Check className="w-4 h-4 mr-1" />
-                              Desativar
-                            </Button>
-                          </>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleActivateScript(script.scriptId);
-                            }}
-                            className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs"
-                          >
-                            <Check className="w-4 h-4 mr-1" />
-                            Ativar
-                          </Button>
-                        )}
-
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingScriptId(script.scriptId);
-                            setEditingPrompt(script.systemPrompt ?? script.description ?? "");
-                          }}
-                          className="text-blue-600 hover:bg-blue-50 p-1.5 h-auto"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </Button>
-
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteScript(script.scriptId);
-                          }}
-                          className="text-red-600 hover:bg-red-50 p-1.5 h-auto"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-
-                      {/* Modal de Edição */}
-                      {editingScriptId === script.scriptId && (
-                        <div className="mt-4 pt-4 border-t border-slate-200">
-                          <label className="block text-sm font-medium text-slate-700 mb-2">
-                            Editar System Prompt
-                          </label>
-                          <Textarea
-                            value={editingPrompt}
-                            onChange={(e) => setEditingPrompt(e.target.value)}
-                            rows={4}
-                            className="border-slate-300 resize-none mb-3"
-                          />
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() => handleUpdatePrompt(script.scriptId)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white"
-                            >
-                              Salvar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setEditingScriptId(null);
-                                setEditingPrompt('');
-                              }}
-                              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs"
-                            >
-                              Cancelar
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))
+                  <Copy className="w-3.5 h-3.5 text-slate-600" />
                 )}
-              </div>
-            </Card>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Card 3: Ferramentas de Negócio (API Tools) */}
+        <Card className="border-purple-200/80 bg-gradient-to-br from-purple-50/50 via-white to-pink-50/30 shadow-sm dark:bg-slate-900/60 dark:border-purple-900/50">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold tracking-wider uppercase text-purple-700 dark:text-purple-400">
+                Integração HTTP (Tools)
+              </span>
+              <Info className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+            </div>
+            <CardTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
+              Endpoints de Consulta
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1.5 text-xs">
+            <div className="flex items-center justify-between group">
+              <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                <Database className="w-3.5 h-3.5 text-red-500" />
+                Estoque / Produtos:
+              </span>
+              <button
+                type="button"
+                className="font-mono text-[11px] text-purple-700 hover:underline dark:text-purple-300 flex items-center gap-1"
+                onClick={() =>
+                  copyToClipboard(
+                    `${webhookBaseUrl}/tools/products`,
+                    'tool-products',
+                    'Endpoint de Produtos'
+                  )
+                }
+              >
+                /tools/products
+                {copiedKey === 'tool-products' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 opacity-60" />}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between group">
+              <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                <Ticket className="w-3.5 h-3.5 text-orange-500" />
+                Chamados (Tickets):
+              </span>
+              <button
+                type="button"
+                className="font-mono text-[11px] text-purple-700 hover:underline dark:text-purple-300 flex items-center gap-1"
+                onClick={() =>
+                  copyToClipboard(
+                    `${webhookBaseUrl}/tools/tickets`,
+                    'tool-tickets',
+                    'Endpoint de Chamados'
+                  )
+                }
+              >
+                /tools/tickets
+                {copiedKey === 'tool-tickets' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 opacity-60" />}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between group">
+              <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                <UserCheck className="w-3.5 h-3.5 text-blue-500" />
+                Captura de Leads:
+              </span>
+              <button
+                type="button"
+                className="font-mono text-[11px] text-purple-700 hover:underline dark:text-purple-300 flex items-center gap-1"
+                onClick={() =>
+                  copyToClipboard(
+                    `${webhookBaseUrl}/tools/leads`,
+                    'tool-leads',
+                    'Endpoint de Leads'
+                  )
+                }
+              >
+                /tools/leads
+                {copiedKey === 'tool-leads' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 opacity-60" />}
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ─── CORPO: Construtor Visual do Typebot (iframe) ───────────────── */}
+      <div
+        ref={containerRef}
+        className={`relative rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden dark:border-slate-800 dark:bg-slate-950 transition-all duration-200 ${
+          isFullscreen ? 'fixed inset-0 z-50 rounded-none border-0' : 'h-[750px] min-h-[600px]'
+        }`}
+      >
+        {/* Barra de Controles do Editor */}
+        <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-200 dark:bg-slate-900/90 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <Bot className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+              Construtor de Fluxos Typebot
+            </span>
           </div>
 
-          {/* Painel Direito: Teste do Roteiro */}
-          <div className="lg:col-span-2">
-            <Card className="p-6 bg-white shadow-sm border-slate-200 flex flex-col h-full" style={{marginLeft: '-180px', marginRight: '-378px'}}>
-              <h2 className="text-xl font-bold text-slate-900 mb-6">Teste do Roteiro</h2>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5 bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700"
+              onClick={reloadIframe}
+              title="Recarregar construtor"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Recarregar
+            </Button>
 
-              {!selectedScript ? (
-                <div className="flex items-center justify-center flex-1 text-slate-500">
-                  <p>Selecione um roteiro para testar</p>
-                </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5 bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Sair da tela cheia' : 'Expandir em tela cheia'}
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5" />
+                  Restaurar
+                </>
               ) : (
-                <div className="flex flex-col flex-1">
-                  {/* Chat Messages */}
-                  <div className="flex-1 overflow-y-auto mb-4 space-y-3 bg-slate-50 rounded-lg p-4">
-                    {chatMessages.map((msg, idx) => (
-                      <div
-                        key={idx}
-                        className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div
-                          className={`max-w-xs px-4 py-2 rounded-lg ${
-                            msg.role === 'user'
-                              ? 'bg-blue-600 text-white rounded-br-none'
-                              : 'bg-slate-200 text-slate-900 rounded-bl-none'
-                          }`}
-                        >
-                          <p className="text-sm">{msg.content}</p>
-                          <p className="text-xs mt-1 opacity-70">
-                            {formatTime(msg.timestamp)}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                    {isLoadingChat && (
-                      <div className="flex justify-start">
-                        <div className="bg-slate-200 text-slate-900 px-4 py-2 rounded-lg rounded-bl-none">
-                          <p className="text-sm">Digitando...</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Input */}
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Digite sua mensagem..."
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                      disabled={isLoadingChat}
-                      className="border-slate-300"
-                    />
-                    <Button
-                      onClick={handleSendMessage}
-                      disabled={isLoadingChat || !chatInput.trim()}
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      <Send className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
+                <>
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  Tela Cheia
+                </>
               )}
-            </Card>
+            </Button>
+
+            <Button
+              size="sm"
+              variant="default"
+              className="h-8 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => window.open(builderUrl, '_blank', 'noopener,noreferrer')}
+              title="Abrir construtor em nova aba"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Abrir em Nova Aba
+            </Button>
           </div>
         </div>
+
+        {/* Loading Spinner enquanto o iframe carrega */}
+        {!iframeLoaded && (
+          <div className="absolute inset-0 top-11 z-10 flex flex-col items-center justify-center bg-slate-50/80 backdrop-blur-sm dark:bg-slate-900/80">
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-white shadow-md border border-slate-100 dark:bg-slate-800 dark:border-slate-700">
+              <RefreshCw className="w-5 h-5 text-blue-600 animate-spin" />
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Carregando Construtor Typebot...
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Conectando ao serviço interno na porta 3002
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Iframe do Construtor */}
+        <iframe
+          id="typebot-iframe"
+          src={builderUrl}
+          className="w-full h-[calc(100%-44px)] border-0"
+          title="Typebot Builder"
+          allow="clipboard-read; clipboard-write; fullscreen"
+          onLoad={() => setIframeLoaded(true)}
+        />
       </div>
     </div>
   );
