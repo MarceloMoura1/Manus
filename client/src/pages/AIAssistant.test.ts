@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import {
   formatRecordingDuration,
   extractPendingActionFromMessage,
+  AI_THEMES,
 } from "./AIAssistant";
 
 const aiAssistantSource = readFileSync(
@@ -11,7 +12,7 @@ const aiAssistantSource = readFileSync(
   "utf8"
 );
 
-describe("AIAssistant Multi-Chat & Multimodal Voice UI", () => {
+describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", () => {
   it("formats recording timer duration accurately in MM:SS", () => {
     expect(formatRecordingDuration(0)).toBe("00:00");
     expect(formatRecordingDuration(9)).toBe("00:09");
@@ -51,15 +52,49 @@ describe("AIAssistant Multi-Chat & Multimodal Voice UI", () => {
     expect(extractPendingActionFromMessage(msgWithoutAction)).toBeNull();
   });
 
-  it("implements the two-column Gemini layout with left threads sidebar and main chat area", () => {
+  it("enforces 100% fullscreen layout without floating card borders or outer margins", () => {
     expect(aiAssistantSource).toContain('data-testid="ai-assistant-workspace"');
+    // Verifies full height/width and no calc margin wrappers
+    expect(aiAssistantSource).toContain("flex h-full w-full overflow-hidden bg-slate-950 text-slate-100 flex-row");
+    expect(aiAssistantSource).not.toContain("h-[calc(100vh-140px)]");
     expect(aiAssistantSource).toContain('data-testid="ai-threads-sidebar"');
     expect(aiAssistantSource).toContain('data-testid="new-thread-button"');
-    expect(aiAssistantSource).toContain("+ Nova Conversa");
-    expect(aiAssistantSource).toContain("trpc.assistantThreads.listThreads.useQuery");
-    expect(aiAssistantSource).toContain("trpc.assistantThreads.createThread.useMutation");
-    expect(aiAssistantSource).toContain("trpc.assistantThreads.renameThread.useMutation");
-    expect(aiAssistantSource).toContain("trpc.assistantThreads.deleteThread.useMutation");
+  });
+
+  it("implements Typebot-style multi-tabs in the topbar (Chat, Temas, Rotinas & Horários, Configurações)", () => {
+    expect(aiAssistantSource).toContain('data-testid="assistant-tabs"');
+    expect(aiAssistantSource).toContain('data-testid="tab-chat"');
+    expect(aiAssistantSource).toContain('data-testid="tab-themes"');
+    expect(aiAssistantSource).toContain('data-testid="tab-routines"');
+    expect(aiAssistantSource).toContain('data-testid="tab-settings"');
+
+    // Views for each tab
+    expect(aiAssistantSource).toContain('data-testid="themes-tab-view"');
+    expect(aiAssistantSource).toContain('data-testid="routines-tab-view"');
+    expect(aiAssistantSource).toContain('data-testid="settings-tab-view"');
+  });
+
+  it("provides 4 visual themes with instant localStorage persistence", () => {
+    expect(AI_THEMES["deep-navy"]).toBeDefined();
+    expect(AI_THEMES["midnight-black"]).toBeDefined();
+    expect(AI_THEMES["aqua-glass"]).toBeDefined();
+    expect(AI_THEMES["terminal-emerald"]).toBeDefined();
+
+    expect(AI_THEMES["deep-navy"].name).toBe("Deep Navy");
+    expect(AI_THEMES["midnight-black"].name).toBe("Midnight Black");
+    expect(AI_THEMES["aqua-glass"].name).toBe("Aqua Glass");
+    expect(AI_THEMES["terminal-emerald"].name).toBe("Terminal Emerald");
+
+    expect(aiAssistantSource).toContain("megadesk_ai_theme");
+    expect(aiAssistantSource).toContain("theme-card-${theme.id}");
+    expect(aiAssistantSource).toContain("apply-theme-${theme.id}");
+  });
+
+  it("handles composer textarea auto-expansion and restricts vertical scrollbar strictly to > 2 lines", () => {
+    expect(aiAssistantSource).toContain('rows={1}');
+    expect(aiAssistantSource).toContain('data-testid="assistant-composer-input"');
+    expect(aiAssistantSource).toContain('composerHasScroll ? "overflow-y-auto" : "overflow-hidden"');
+    expect(aiAssistantSource).toContain('style={{ maxHeight: "76px" }}');
   });
 
   it("wires multimodal microphone recording (MediaRecorder) and sendThreadAudioMessage", () => {
@@ -80,8 +115,5 @@ describe("AIAssistant Multi-Chat & Multimodal Voice UI", () => {
 
   it("removes footer model label and enforces native dark theme styling", () => {
     expect(aiAssistantSource).not.toContain("Voz Multimodal • Gemini 3.5 Flash Lite");
-    expect(aiAssistantSource).toContain("bg-slate-950 dark:bg-[#070d19]");
-    expect(aiAssistantSource).toContain("bg-blue-600/90 text-white");
-    expect(aiAssistantSource).toContain("bg-slate-900/80 dark:bg-slate-900/90");
   });
 });

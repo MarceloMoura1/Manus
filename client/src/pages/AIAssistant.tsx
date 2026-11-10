@@ -8,13 +8,17 @@ import {
   Check,
   X,
   Mic,
-  Square,
   Send,
   PanelLeft,
-  Volume2,
   Loader2,
   Bot,
   User as UserIcon,
+  Palette,
+  Clock,
+  Sliders,
+  Sun,
+  Moon,
+  CheckCircle2,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -143,6 +147,134 @@ export function AssistantMarkdown({ content }: { content: string }) {
   return <div data-testid="assistant-markdown" className="space-y-1">{elements}</div>;
 }
 
+export type AIAssistantTab = "chat" | "themes" | "routines" | "settings";
+
+export type AIThemeId = "deep-navy" | "midnight-black" | "aqua-glass" | "terminal-emerald";
+
+export interface AITheme {
+  id: AIThemeId;
+  name: string;
+  badge: string;
+  description: string;
+  sidebarBg: string;
+  sidebarBorder: string;
+  chatBg: string;
+  headerBg: string;
+  headerBorder: string;
+  composerBg: string;
+  composerBorder: string;
+  composerInputBg: string;
+  composerInputBorder: string;
+  userBubble: string;
+  assistantBubble: string;
+  assistantBubbleBorder: string;
+  accentBg: string;
+  accentHoverBg: string;
+  accentText: string;
+  accentBorder: string;
+  activeTabBg: string;
+  swatches: [string, string, string];
+}
+
+export const AI_THEMES: Record<AIThemeId, AITheme> = {
+  "deep-navy": {
+    id: "deep-navy",
+    name: "Deep Navy",
+    badge: "Padrão",
+    description: "Tons de azul marinho profundo e ardósia, com realces azuis corporativos elegantes.",
+    sidebarBg: "bg-[#090f1d]",
+    sidebarBorder: "border-slate-800",
+    chatBg: "bg-[#050b16]",
+    headerBg: "bg-[#090f1d]/95",
+    headerBorder: "border-slate-800",
+    composerBg: "bg-[#090f1d]/95",
+    composerBorder: "border-slate-800",
+    composerInputBg: "bg-[#050b16]",
+    composerInputBorder: "border-slate-800 focus:border-blue-500",
+    userBubble: "bg-blue-600/90 text-white",
+    assistantBubble: "bg-slate-900/90 text-slate-100",
+    assistantBubbleBorder: "border-slate-800",
+    accentBg: "bg-blue-600",
+    accentHoverBg: "hover:bg-blue-500",
+    accentText: "text-blue-400",
+    accentBorder: "border-blue-500/40",
+    activeTabBg: "bg-blue-600 text-white shadow-sm",
+    swatches: ["#090f1d", "#050b16", "#2563eb"],
+  },
+  "midnight-black": {
+    id: "midnight-black",
+    name: "Midnight Black",
+    badge: "AMOLED",
+    description: "Preto puro AMOLED com bordas neutras de alto contraste e foco total no conteúdo.",
+    sidebarBg: "bg-[#0c0c0e]",
+    sidebarBorder: "border-neutral-800",
+    chatBg: "bg-[#000000]",
+    headerBg: "bg-[#0c0c0e]/95",
+    headerBorder: "border-neutral-800",
+    composerBg: "bg-[#0c0c0e]/95",
+    composerBorder: "border-neutral-800",
+    composerInputBg: "bg-[#141417]",
+    composerInputBorder: "border-neutral-800 focus:border-neutral-600",
+    userBubble: "bg-neutral-800 text-white",
+    assistantBubble: "bg-neutral-900/95 text-neutral-100",
+    assistantBubbleBorder: "border-neutral-800",
+    accentBg: "bg-neutral-800",
+    accentHoverBg: "hover:bg-neutral-700",
+    accentText: "text-neutral-300",
+    accentBorder: "border-neutral-700",
+    activeTabBg: "bg-neutral-800 text-white shadow-sm",
+    swatches: ["#0c0c0e", "#000000", "#737373"],
+  },
+  "aqua-glass": {
+    id: "aqua-glass",
+    name: "Aqua Glass",
+    badge: "Ciano & Teal",
+    description: "Tons ciano e azul petróleo, inspirados em interfaces de telemetria automotiva de alta tecnologia.",
+    sidebarBg: "bg-[#04161f]",
+    sidebarBorder: "border-cyan-950",
+    chatBg: "bg-[#020d14]",
+    headerBg: "bg-[#04161f]/95",
+    headerBorder: "border-cyan-950",
+    composerBg: "bg-[#04161f]/95",
+    composerBorder: "border-cyan-950",
+    composerInputBg: "bg-[#020d14]",
+    composerInputBorder: "border-cyan-900/60 focus:border-cyan-500",
+    userBubble: "bg-cyan-600/90 text-white",
+    assistantBubble: "bg-[#07212e]/90 text-cyan-50",
+    assistantBubbleBorder: "border-cyan-900/60",
+    accentBg: "bg-cyan-600",
+    accentHoverBg: "hover:bg-cyan-500",
+    accentText: "text-cyan-400",
+    accentBorder: "border-cyan-500/40",
+    activeTabBg: "bg-cyan-600 text-white shadow-sm",
+    swatches: ["#04161f", "#020d14", "#0891b2"],
+  },
+  "terminal-emerald": {
+    id: "terminal-emerald",
+    name: "Terminal Emerald",
+    badge: "Esmeralda",
+    description: "Fundo ultra-escuro com realces em esmeralda, estilo console de monitoramento rápido.",
+    sidebarBg: "bg-[#04140d]",
+    sidebarBorder: "border-emerald-950",
+    chatBg: "bg-[#020a06]",
+    headerBg: "bg-[#04140d]/95",
+    headerBorder: "border-emerald-950",
+    composerBg: "bg-[#04140d]/95",
+    composerBorder: "border-emerald-950",
+    composerInputBg: "bg-[#020a06]",
+    composerInputBorder: "border-emerald-900/60 focus:border-emerald-500",
+    userBubble: "bg-emerald-600/90 text-white",
+    assistantBubble: "bg-[#072215]/90 text-emerald-50",
+    assistantBubbleBorder: "border-emerald-900/60",
+    accentBg: "bg-emerald-600",
+    accentHoverBg: "hover:bg-emerald-500",
+    accentText: "text-emerald-400",
+    accentBorder: "border-emerald-500/40",
+    activeTabBg: "bg-emerald-600 text-white shadow-sm",
+    swatches: ["#04140d", "#020a06", "#059669"],
+  },
+};
+
 export interface ThreadSummary {
   id: string;
   tenantId: string;
@@ -227,6 +359,10 @@ export function extractPendingActionFromMessage(msg: ThreadMessage): any | null 
 
 export function AIAssistant() {
   const SESSION_KEY = "megadesk_session_v1";
+  const THEME_KEY = "megadesk_ai_theme";
+  const ROUTINES_KEY = "megadesk_ai_routines";
+  const SETTINGS_KEY = "megadesk_ai_settings";
+
   const [session] = useState<any>(() => {
     try {
       const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
@@ -236,6 +372,93 @@ export function AIAssistant() {
     }
   });
 
+  // Tema Selecionado (Persistência imediata)
+  const [selectedThemeId, setSelectedThemeId] = useState<AIThemeId>(() => {
+    try {
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored && stored in AI_THEMES) {
+        return stored as AIThemeId;
+      }
+    } catch {
+      // ignore
+    }
+    return "deep-navy";
+  });
+
+  const currentTheme: AITheme = AI_THEMES[selectedThemeId] || AI_THEMES["deep-navy"];
+
+  const handleSelectTheme = (themeId: AIThemeId) => {
+    setSelectedThemeId(themeId);
+    try {
+      localStorage.setItem(THEME_KEY, themeId);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Aba Ativa (Typebot style)
+  const [activeTab, setActiveTab] = useState<AIAssistantTab>("chat");
+
+  // Estado das Rotinas Operacionais
+  const [routinesConfig, setRoutinesConfig] = useState(() => {
+    try {
+      const stored = localStorage.getItem(ROUTINES_KEY);
+      if (stored) return JSON.parse(stored);
+    } catch {
+      // ignore
+    }
+    return {
+      startDayTime: "08:00",
+      endDayTime: "18:00",
+      startNightTime: "18:01",
+      endNightTime: "07:59",
+      proactiveSuggestions: true,
+      autoQueueTickets: true,
+      nightMessage:
+        "Olá! Nosso expediente encerrou por hoje. Deixe sua solicitação ou placa do veículo que nossa equipe atenderá na primeira hora da manhã.",
+    };
+  });
+  const [routinesSaved, setRoutinesSaved] = useState<boolean>(false);
+
+  const handleSaveRoutines = () => {
+    try {
+      localStorage.setItem(ROUTINES_KEY, JSON.stringify(routinesConfig));
+      setRoutinesSaved(true);
+      setTimeout(() => setRoutinesSaved(false), 3000);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Estado das Configurações do Assistente
+  const [settingsConfig, setSettingsConfig] = useState(() => {
+    try {
+      const stored = localStorage.getItem(SETTINGS_KEY);
+      if (stored) return JSON.parse(stored);
+    } catch {
+      // ignore
+    }
+    return {
+      voiceTone: "pratico",
+      detailLevel: "balanceado",
+      requireHitl: true,
+      handsFreeVoice: false,
+      autoTranscription: true,
+    };
+  });
+  const [settingsSaved, setSettingsSaved] = useState<boolean>(false);
+
+  const handleSaveSettings = () => {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsConfig));
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 3000);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Sessões / Threads de Chat
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [input, setInput] = useState<string>("");
@@ -264,6 +487,10 @@ export function AIAssistant() {
       }
     >
   >({});
+
+  // Controle de scrollbar no Textarea do Composer:
+  // Inicialmente rows={1} com overflow-hidden, expande suavemente e SÓ ativa scrollbar se ultrapassar 2 linhas (~76px)
+  const [composerHasScroll, setComposerHasScroll] = useState<boolean>(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -363,16 +590,31 @@ export function AIAssistant() {
   }, []);
 
   useEffect(() => {
-    scrollToBottom("smooth");
-  }, [messages.length, isSendingText, isProcessingAudio, scrollToBottom]);
+    if (activeTab === "chat") {
+      scrollToBottom("smooth");
+    }
+  }, [messages.length, isSendingText, isProcessingAudio, activeTab, scrollToBottom]);
 
-  // Auto-expansão do textarea
-  useEffect(() => {
+  // Expansão dinâmica do textarea: 1 a 2 linhas sem scrollbar; ativa overflow-y-auto apenas além de 2 linhas (~76px)
+  const adjustComposerHeight = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
-  }, [input]);
+    const scrollHeight = el.scrollHeight;
+    const maxTwoLinesHeight = 76;
+
+    if (scrollHeight > maxTwoLinesHeight) {
+      el.style.height = `${maxTwoLinesHeight}px`;
+      setComposerHasScroll(true);
+    } else {
+      el.style.height = `${Math.max(scrollHeight, 42)}px`;
+      setComposerHasScroll(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    adjustComposerHeight();
+  }, [input, adjustComposerHeight]);
 
   // Limpeza de stream de microfone ao desmontar
   const cleanupRecordingResources = useCallback(() => {
@@ -401,6 +643,7 @@ export function AIAssistant() {
       if (created?.thread?.id) {
         setSelectedThreadId(created.thread.id);
       }
+      setActiveTab("chat");
       textareaRef.current?.focus();
     } catch (err) {
       console.error("[AIAssistant] Falha ao criar nova conversa:", err);
@@ -645,23 +888,23 @@ export function AIAssistant() {
   return (
     <div
       data-testid="ai-assistant-workspace"
-      className="flex h-[calc(100vh-140px)] min-h-[620px] w-full bg-slate-950 dark:bg-[#070d19] rounded-2xl shadow-sm border border-slate-800 overflow-hidden"
+      className="flex h-full w-full overflow-hidden bg-slate-950 text-slate-100 flex-row"
     >
       {/* ─── COLUNA ESQUERDA: BARRA LATERAL DE CONVERSAS (THREADS) ─────────── */}
       <aside
         data-testid="ai-threads-sidebar"
         className={`${
-          sidebarOpen ? "w-72 border-r border-slate-800" : "w-0 border-r-0"
-        } transition-all duration-200 bg-slate-950 dark:bg-[#050914] text-slate-100 flex flex-col flex-shrink-0 overflow-hidden`}
+          sidebarOpen ? "w-72 border-r" : "w-0 border-r-0"
+        } transition-all duration-200 h-full flex flex-col flex-shrink-0 overflow-hidden ${currentTheme.sidebarBg} ${currentTheme.sidebarBorder}`}
       >
         {/* Botão de destaque no topo: + Nova Conversa */}
-        <div className="p-4 border-b border-slate-800">
+        <div className={`p-4 border-b ${currentTheme.sidebarBorder}`}>
           <button
             type="button"
             data-testid="new-thread-button"
             onClick={() => void handleCreateNewThread()}
             disabled={createThreadMutation.isPending}
-            className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-semibold text-sm shadow-sm transition-all cursor-pointer disabled:opacity-60"
+            className={`w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl ${currentTheme.accentBg} ${currentTheme.accentHoverBg} active:scale-[0.99] text-white font-semibold text-sm shadow-sm transition-all cursor-pointer disabled:opacity-60`}
           >
             <Plus className="w-4 h-4" />
             <span>+ Nova Conversa</span>
@@ -679,7 +922,7 @@ export function AIAssistant() {
               data-testid="threads-empty-state"
               className="px-3 py-8 text-center rounded-xl border border-dashed border-slate-800 bg-slate-900/50"
             >
-              <MessageSquare className="w-7 h-7 text-blue-400/70 mx-auto mb-2" />
+              <MessageSquare className={`w-7 h-7 ${currentTheme.accentText} mx-auto mb-2 opacity-80`} />
               <p className="text-xs font-medium text-slate-300">Nenhuma conversa ainda</p>
               <p className="text-[11px] text-slate-400 mt-1">
                 Clique em &ldquo;+ Nova Conversa&rdquo; ou envie uma mensagem para começar.
@@ -694,17 +937,20 @@ export function AIAssistant() {
                 <div
                   key={thread.id}
                   data-testid={`thread-item-${thread.id}`}
-                  onClick={() => setSelectedThreadId(thread.id)}
+                  onClick={() => {
+                    setSelectedThreadId(thread.id);
+                    setActiveTab("chat");
+                  }}
                   className={`group relative flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-sm transition-all cursor-pointer ${
                     isSelected
                       ? "bg-blue-600/20 text-white border border-blue-500/40 font-medium"
-                      : "text-slate-300 hover:bg-slate-900 hover:text-white border border-transparent"
+                      : "text-slate-300 hover:bg-slate-900/70 hover:text-white border border-transparent"
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <MessageSquare
                       className={`w-4 h-4 flex-shrink-0 ${
-                        isSelected ? "text-blue-400" : "text-slate-500 group-hover:text-slate-400"
+                        isSelected ? currentTheme.accentText : "text-slate-500 group-hover:text-slate-400"
                       }`}
                     />
                     {isEditingThis ? (
@@ -776,23 +1022,23 @@ export function AIAssistant() {
         </div>
       </aside>
 
-      {/* ─── COLUNA PRINCIPAL: CHAT VIEW ────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0 bg-slate-950 dark:bg-[#070d19] text-slate-100">
-        {/* Cabeçalho da Conversa Ativa */}
-        <header className="flex items-center justify-between px-5 py-3.5 bg-slate-900/90 dark:bg-[#0b1326] border-b border-slate-800">
+      {/* ─── COLUNA PRINCIPAL: TABS & CONTEÚDO ───────────────────────────────── */}
+      <div className={`h-full flex-1 flex flex-col min-w-0 overflow-hidden ${currentTheme.chatBg} text-slate-100`}>
+        {/* Cabeçalho Unificado com Abas Estilo Typebot */}
+        <header className={`flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b ${currentTheme.headerBg} ${currentTheme.headerBorder}`}>
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
               data-testid="toggle-threads-sidebar"
               onClick={() => setSidebarOpen((prev) => !prev)}
               title={sidebarOpen ? "Recolher barra lateral" : "Abrir barra lateral"}
-              className="p-2 rounded-xl border border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-xl border border-slate-800 bg-slate-900/80 text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <PanelLeft className="w-4 h-4" />
             </button>
 
-            <div className="w-9 h-9 rounded-xl bg-blue-500/15 flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-5 h-5 text-blue-400" />
+            <div className={`w-9 h-9 rounded-xl ${currentTheme.accentBg}/15 flex items-center justify-center flex-shrink-0`}>
+              <Sparkles className={`w-5 h-5 ${currentTheme.accentText}`} />
             </div>
 
             <div className="min-w-0">
@@ -852,275 +1098,708 @@ export function AIAssistant() {
               </p>
             </div>
           </div>
+
+          {/* Abas Superiores no Estilo Typebot */}
+          <nav
+            data-testid="assistant-tabs"
+            className="flex items-center gap-1 bg-slate-950/70 p-1 rounded-xl border border-slate-800/80"
+          >
+            <button
+              type="button"
+              data-testid="tab-chat"
+              onClick={() => setActiveTab("chat")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                activeTab === "chat"
+                  ? currentTheme.activeTabBg
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Chat</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="tab-themes"
+              onClick={() => setActiveTab("themes")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                activeTab === "themes"
+                  ? currentTheme.activeTabBg
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              }`}
+            >
+              <Palette className="w-3.5 h-3.5" />
+              <span>Temas</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="tab-routines"
+              onClick={() => setActiveTab("routines")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                activeTab === "routines"
+                  ? currentTheme.activeTabBg
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Rotinas &amp; Horários</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="tab-settings"
+              onClick={() => setActiveTab("settings")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                activeTab === "settings"
+                  ? currentTheme.activeTabBg
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Configurações</span>
+            </button>
+          </nav>
         </header>
 
-        {/* Área de Mensagens */}
-        <div
-          data-testid="ai-messages-timeline"
-          className="flex-1 overflow-y-auto px-6 py-6 space-y-5 bg-slate-950 dark:bg-[#070d19] text-slate-100"
-        >
-          {messages.length === 0 && !isSendingText && !isProcessingAudio ? (
-            <div className="flex flex-col items-center justify-center h-full max-w-xl mx-auto text-center py-10 gap-6">
-              <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shadow-sm">
-                <Sparkles className="w-8 h-8 text-blue-400" />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-slate-100 mb-1.5">
-                  Como posso ajudar sua operação hoje?
-                </h3>
-                <p className="text-sm text-slate-400">
-                  Envie uma mensagem de texto ou grave um comando de voz pelo microfone para consultar vendas, CRM, chamados ou abrir solicitações em segundos.
-                </p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
-                {quickSuggestions.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    onClick={() => {
-                      setInput(suggestion);
-                      textareaRef.current?.focus();
-                    }}
-                    className="text-left px-4 py-3 rounded-xl border border-slate-800 bg-slate-900/70 text-sm text-slate-200 hover:border-blue-500/60 hover:bg-slate-800/90 transition-all shadow-xs cursor-pointer"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            messages.map((msg) => {
-              const isUser = msg.role === "user";
-              const pendingAction = extractPendingActionFromMessage(msg);
-              const localAction = pendingAction?.id ? actionStates[pendingAction.id] : undefined;
+        {/* ─── ABA 1: CHAT TIMELINE + COMPOSER ───────────────────────────────── */}
+        {activeTab === "chat" && (
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            {/* Timeline de Mensagens */}
+            <div
+              data-testid="ai-messages-timeline"
+              className={`flex-1 overflow-y-auto px-6 py-6 space-y-5 ${currentTheme.chatBg} text-slate-100`}
+            >
+              {messages.length === 0 && !isSendingText && !isProcessingAudio ? (
+                <div className="flex flex-col items-center justify-center h-full max-w-xl mx-auto text-center py-10 gap-6">
+                  <div className={`w-16 h-16 rounded-2xl ${currentTheme.accentBg}/15 border ${currentTheme.accentBorder} flex items-center justify-center shadow-sm`}>
+                    <Sparkles className={`w-8 h-8 ${currentTheme.accentText}`} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-100 mb-1.5">
+                      Como posso ajudar sua operação hoje?
+                    </h3>
+                    <p className="text-sm text-slate-400">
+                      Envie uma mensagem de texto ou grave um comando de voz pelo microfone para consultar vendas, CRM, chamados ou abrir solicitações em segundos.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                    {quickSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => {
+                          setInput(suggestion);
+                          textareaRef.current?.focus();
+                        }}
+                        className="text-left px-4 py-3 rounded-xl border border-slate-800 bg-slate-900/70 text-sm text-slate-200 hover:border-blue-500/60 hover:bg-slate-800/90 transition-all shadow-xs cursor-pointer"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                messages.map((msg) => {
+                  const isUser = msg.role === "user";
+                  const pendingAction = extractPendingActionFromMessage(msg);
+                  const localAction = pendingAction?.id ? actionStates[pendingAction.id] : undefined;
 
-              return (
-                <div
-                  key={msg.id}
-                  data-testid={`assistant-msg-${msg.role}`}
-                  className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}
-                >
-                  {!isUser && (
-                    <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center flex-shrink-0 mt-1">
-                      <Bot className="w-4 h-4 text-blue-400" />
-                    </div>
-                  )}
-
-                  <div className={`max-w-[78%] ${isUser ? "order-first" : ""}`}>
+                  return (
                     <div
-                      className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                        isUser
-                          ? "bg-blue-600/90 text-white rounded-tr-sm shadow-sm"
-                          : "bg-slate-900/80 dark:bg-slate-900/90 border border-slate-800 rounded-tl-sm text-slate-100 shadow-sm"
-                      }`}
+                      key={msg.id}
+                      data-testid={`assistant-msg-${msg.role}`}
+                      className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}
                     >
-                      {isUser ? (
-                        <div className="whitespace-pre-wrap">{msg.content}</div>
-                      ) : (
-                        <div className="prose prose-sm prose-invert max-w-none">
-                          <AssistantMarkdown content={msg.content} />
+                      {!isUser && (
+                        <div className={`w-8 h-8 rounded-full ${currentTheme.accentBg}/15 border ${currentTheme.accentBorder} flex items-center justify-center flex-shrink-0 mt-1`}>
+                          <Bot className={`w-4 h-4 ${currentTheme.accentText}`} />
                         </div>
                       )}
-                    </div>
 
-                    {/* Card Interativo HITL caso a IA acione ferramentas de mutação */}
-                    {pendingAction && (
-                      <div
-                        data-testid="hitl-action-card"
-                        className="mt-2.5 rounded-xl border border-blue-500/40 bg-slate-900/95 p-4 text-xs text-slate-100 shadow-md"
-                      >
-                        <p className="font-semibold text-blue-400">
-                          Ação preparada pelo Copiloto — Aprovação Humana (HITL)
-                        </p>
-                        <p className="mt-1 text-slate-200">
-                          {pendingAction.summary || `Ação: ${pendingAction.actionType}`}
-                        </p>
+                      <div className={`max-w-[78%] ${isUser ? "order-first" : ""}`}>
+                        <div
+                          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                            isUser
+                              ? `${currentTheme.userBubble} rounded-tr-sm shadow-sm`
+                              : `${currentTheme.assistantBubble} border ${currentTheme.assistantBubbleBorder} rounded-tl-sm shadow-sm`
+                          }`}
+                        >
+                          {isUser ? (
+                            <div className="whitespace-pre-wrap">{msg.content}</div>
+                          ) : (
+                            <div className="prose prose-sm prose-invert max-w-none">
+                              <AssistantMarkdown content={msg.content} />
+                            </div>
+                          )}
+                        </div>
 
-                        {pendingAction.args && typeof pendingAction.args === "object" && (
-                          <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-800 bg-slate-950/80 p-2.5 text-slate-300">
-                            {Object.entries(pendingAction.args).map(([key, value]) => (
-                              <div key={key} className="flex items-start justify-between gap-3">
-                                <dt className="capitalize text-slate-400 font-medium">{key}</dt>
-                                <dd className="text-right text-slate-100 font-semibold">
-                                  {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                                </dd>
-                              </div>
-                            ))}
-                          </dl>
-                        )}
-
-                        {localAction?.message && (
-                          <p
-                            className={`mt-2.5 font-medium ${
-                              localAction.state === "FAILED"
-                                ? "text-rose-300"
-                                : localAction.state === "EXECUTED"
-                                ? "text-emerald-400"
-                                : "text-slate-300"
-                            }`}
+                        {/* Card Interativo HITL caso a IA acione ferramentas de mutação */}
+                        {pendingAction && (
+                          <div
+                            data-testid="hitl-action-card"
+                            className="mt-2.5 rounded-xl border border-blue-500/40 bg-slate-900/95 p-4 text-xs text-slate-100 shadow-md"
                           >
-                            {localAction.message}
-                          </p>
-                        )}
+                            <p className="font-semibold text-blue-400">
+                              Ação preparada pelo Copiloto — Aprovação Humana (HITL)
+                            </p>
+                            <p className="mt-1 text-slate-200">
+                              {pendingAction.summary || `Ação: ${pendingAction.actionType}`}
+                            </p>
 
-                        {!localAction?.state && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              className="bg-blue-600 text-white hover:bg-blue-500 font-semibold shadow-sm"
-                              onClick={() => void handleConfirmPendingAction(pendingAction)}
-                            >
-                              Confirmar e Executar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white"
-                              onClick={() => void handleCancelPendingAction(pendingAction)}
-                            >
-                              Cancelar
-                            </Button>
+                            {pendingAction.args && typeof pendingAction.args === "object" && (
+                              <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-800 bg-slate-950/80 p-2.5 text-slate-300">
+                                {Object.entries(pendingAction.args).map(([key, value]) => (
+                                  <div key={key} className="flex items-start justify-between gap-3">
+                                    <dt className="capitalize text-slate-400 font-medium">{key}</dt>
+                                    <dd className="text-right text-slate-100 font-semibold">
+                                      {typeof value === "object" ? JSON.stringify(value) : String(value)}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            )}
+
+                            {localAction?.message && (
+                              <p
+                                className={`mt-2.5 font-medium ${
+                                  localAction.state === "FAILED"
+                                    ? "text-rose-300"
+                                    : localAction.state === "EXECUTED"
+                                    ? "text-emerald-400"
+                                    : "text-slate-300"
+                                }`}
+                              >
+                                {localAction.message}
+                              </p>
+                            )}
+
+                            {!localAction?.state && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <Button
+                                  size="sm"
+                                  className="bg-blue-600 text-white hover:bg-blue-500 font-semibold shadow-sm"
+                                  onClick={() => void handleConfirmPendingAction(pendingAction)}
+                                >
+                                  Confirmar e Executar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white"
+                                  onClick={() => void handleCancelPendingAction(pendingAction)}
+                                >
+                                  Cancelar
+                                </Button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
-                    )}
+
+                      {isUser && (
+                        <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0 mt-1">
+                          <UserIcon className="w-4 h-4 text-slate-300" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+
+              {/* Indicador de Digitando / Processando Áudio */}
+              {(isSendingText || isProcessingAudio) && (
+                <div
+                  data-testid="assistant-status-indicator"
+                  className="flex gap-3 justify-start animate-fade-in"
+                >
+                  <div className={`w-8 h-8 rounded-full ${currentTheme.accentBg}/15 border ${currentTheme.accentBorder} flex items-center justify-center flex-shrink-0 mt-1`}>
+                    <Loader2 className={`w-4 h-4 ${currentTheme.accentText} animate-spin`} />
+                  </div>
+                  <div className="rounded-2xl px-4 py-3 text-sm bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-sm shadow-xs flex items-center gap-2.5">
+                    <span className="font-medium">
+                      {isProcessingAudio
+                        ? "Processando áudio no Gemini Multimodal..."
+                        : "Digitando resposta..."}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Barra de Composição Inferior (Texto + Microfone) */}
+            <div className={`px-6 py-4 border-t ${currentTheme.composerBg} ${currentTheme.composerBorder}`}>
+              {recordingError && (
+                <div className="mb-3 px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-800/80 text-xs text-rose-300 flex items-center justify-between">
+                  <span>{recordingError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setRecordingError(null)}
+                    className="text-rose-400 hover:text-rose-200 font-semibold cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              )}
+
+              {isRecording ? (
+                /* Estado Visual de Gravação de Áudio */
+                <div
+                  data-testid="audio-recording-bar"
+                  className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-rose-950/60 border border-rose-800/80"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="relative flex h-3.5 w-3.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500" />
+                    </span>
+                    <span className="text-sm font-semibold text-rose-200">
+                      Gravando comando de voz...
+                    </span>
+                    <span
+                      data-testid="recording-timer"
+                      className="font-mono text-sm font-bold text-rose-300 bg-slate-900 px-2.5 py-0.5 rounded-md border border-rose-800"
+                    >
+                      {formatRecordingDuration(recordingSeconds)}
+                    </span>
                   </div>
 
-                  {isUser && (
-                    <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0 mt-1">
-                      <UserIcon className="w-4 h-4 text-slate-300" />
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="cancel-audio-recording"
+                      onClick={cancelAudioRecording}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Cancelar</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="send-audio-recording"
+                      onClick={finishAndSendAudioRecording}
+                      className={`flex items-center gap-1.5 px-4 py-2 rounded-lg ${currentTheme.accentBg} ${currentTheme.accentHoverBg} text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer`}
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Enviar Áudio</span>
+                    </button>
+                  </div>
                 </div>
-              );
-            })
-          )}
+              ) : (
+                <div className="flex items-end gap-3">
+                  {/* Textarea com auto-expansão e scrollbar vertical SOMENTE além de 2 linhas */}
+                  <textarea
+                    ref={textareaRef}
+                    data-testid="assistant-composer-input"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Digite sua mensagem ou clique no microfone para falar... (Enter envia, Shift+Enter quebra linha)"
+                    rows={1}
+                    disabled={isSendingText || isProcessingAudio}
+                    className={`flex-1 resize-none rounded-xl border px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all ${
+                      composerHasScroll ? "overflow-y-auto" : "overflow-hidden"
+                    } ${currentTheme.composerInputBg} ${currentTheme.composerInputBorder}`}
+                    style={{ maxHeight: "76px" }}
+                  />
 
-          {/* Indicador de Digitando / Processando Áudio */}
-          {(isSendingText || isProcessingAudio) && (
-            <div
-              data-testid="assistant-status-indicator"
-              className="flex gap-3 justify-start animate-fade-in"
-            >
-              <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center flex-shrink-0 mt-1">
-                <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
-              </div>
-              <div className="rounded-2xl px-4 py-3 text-sm bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-sm shadow-xs flex items-center gap-2.5">
-                <span className="font-medium">
-                  {isProcessingAudio
-                    ? "Processando áudio no Gemini Multimodal..."
-                    : "Digitando resposta..."}
-                </span>
-              </div>
+                  {/* Botão de Microfone (Gravação Nativa via MediaRecorder) */}
+                  <button
+                    type="button"
+                    data-testid="start-audio-recording"
+                    onClick={() => void startAudioRecording()}
+                    disabled={isSendingText || isProcessingAudio}
+                    title="Gravar comando de voz (Microfone)"
+                    className="w-11 h-11 rounded-xl border border-slate-800 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-500/50 hover:text-rose-400 text-slate-300 flex items-center justify-center transition-all flex-shrink-0 cursor-pointer disabled:opacity-50"
+                  >
+                    <Mic className="w-5 h-5" />
+                  </button>
+
+                  {/* Botão de Envio de Texto */}
+                  <button
+                    type="button"
+                    data-testid="send-text-message"
+                    onClick={() => void handleSendText()}
+                    disabled={!input.trim() || isSendingText || isProcessingAudio}
+                    title="Enviar mensagem"
+                    className={`w-11 h-11 rounded-xl ${currentTheme.accentBg} ${currentTheme.accentHoverBg} disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-all flex-shrink-0 cursor-pointer`}
+                  >
+                    {isSendingText ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
+        )}
 
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* ─── BARRA DE COMPOSIÇÃO INFERIOR (TEXTO + MICROFONE MULTIMODAL) ─── */}
-        <div className="px-6 py-4 bg-slate-900/90 dark:bg-[#0b1326] border-t border-slate-800">
-          {recordingError && (
-            <div className="mb-3 px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-800/80 text-xs text-rose-300 flex items-center justify-between">
-              <span>{recordingError}</span>
-              <button
-                type="button"
-                onClick={() => setRecordingError(null)}
-                className="text-rose-400 hover:text-rose-200 font-semibold"
-              >
-                Fechar
-              </button>
-            </div>
-          )}
-
-          {isRecording ? (
-            /* Estado Visual Claro de Gravação (Indicador Vermelho Pulsante + Timer + Cancelar/Enviar) */
-            <div
-              data-testid="audio-recording-bar"
-              className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-rose-950/60 border border-rose-800/80"
-            >
-              <div className="flex items-center gap-3">
-                <span className="relative flex h-3.5 w-3.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500" />
-                </span>
-                <span className="text-sm font-semibold text-rose-200">
-                  Gravando comando de voz...
-                </span>
-                <span
-                  data-testid="recording-timer"
-                  className="font-mono text-sm font-bold text-rose-300 bg-slate-900 px-2.5 py-0.5 rounded-md border border-rose-800"
-                >
-                  {formatRecordingDuration(recordingSeconds)}
-                </span>
-              </div>
-
+        {/* ─── ABA 2: TEMAS VISUAIS ─────────────────────────────────────────── */}
+        {activeTab === "themes" && (
+          <div data-testid="themes-tab-view" className="flex-1 overflow-y-auto p-8 space-y-6 max-w-4xl mx-auto w-full">
+            <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  data-testid="cancel-audio-recording"
-                  onClick={cancelAudioRecording}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Cancelar</span>
-                </button>
-                <button
-                  type="button"
-                  data-testid="send-audio-recording"
-                  onClick={finishAndSendAudioRecording}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Enviar Áudio</span>
-                </button>
+                <Palette className={`w-5 h-5 ${currentTheme.accentText}`} />
+                <h3 className="text-xl font-bold text-slate-100">Temas Visuais do Assistente</h3>
+              </div>
+              <p className="text-sm text-slate-400">
+                Personalize a paleta de cores da interface do Copiloto IA. As preferências são salvas e aplicadas em tempo real.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {Object.values(AI_THEMES).map((theme) => {
+                const isSelected = selectedThemeId === theme.id;
+                return (
+                  <div
+                    key={theme.id}
+                    data-testid={`theme-card-${theme.id}`}
+                    onClick={() => handleSelectTheme(theme.id)}
+                    className={`cursor-pointer rounded-2xl p-5 border transition-all duration-200 flex flex-col justify-between gap-4 ${
+                      isSelected
+                        ? "border-blue-500 bg-slate-900/90 shadow-lg ring-1 ring-blue-500/50"
+                        : "border-slate-800 bg-slate-950/60 hover:border-slate-700 hover:bg-slate-900/40"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-semibold text-base text-slate-100">{theme.name}</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                          {theme.badge}
+                        </span>
+                      </div>
+                      {isSelected && (
+                        <span className="flex items-center gap-1 text-xs font-semibold text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-800">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Ativo
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-slate-400 leading-relaxed">{theme.description}</p>
+
+                    {/* Amostras de cores */}
+                    <div className="rounded-xl p-3 border border-slate-800/80 bg-slate-950/80 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-5 h-5 rounded-full border border-slate-700"
+                          style={{ backgroundColor: theme.swatches[0] }}
+                          title="Barra Lateral"
+                        />
+                        <div
+                          className="w-5 h-5 rounded-full border border-slate-700"
+                          style={{ backgroundColor: theme.swatches[1] }}
+                          title="Canvas Central"
+                        />
+                        <div
+                          className="w-5 h-5 rounded-full border border-slate-700"
+                          style={{ backgroundColor: theme.swatches[2] }}
+                          title="Cor de Realce"
+                        />
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        {theme.swatches[2]}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      data-testid={`apply-theme-${theme.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectTheme(theme.id);
+                      }}
+                      className={`w-full py-2 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                        isSelected
+                          ? `${theme.accentBg} text-white shadow-sm`
+                          : "bg-slate-800 hover:bg-slate-700 text-slate-200"
+                      }`}
+                    >
+                      {isSelected ? "Tema em Uso" : "Ativar Este Tema"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ─── ABA 3: ROTINAS OPERACIONAIS & HORÁRIOS ───────────────────────── */}
+        {activeTab === "routines" && (
+          <div data-testid="routines-tab-view" className="flex-1 overflow-y-auto p-8 space-y-6 max-w-4xl mx-auto w-full">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Clock className={`w-5 h-5 ${currentTheme.accentText}`} />
+                <h3 className="text-xl font-bold text-slate-100">Rotinas Operacionais &amp; Horários</h3>
+              </div>
+              <p className="text-sm text-slate-400">
+                Configure os turnos operacionais do Copiloto IA para ajustar as respostas automáticas de acordo com o expediente.
+              </p>
+            </div>
+
+            {/* Banner de Status Atual */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">Status Operacional: Modo Oficina Ativa</p>
+                  <p className="text-xs text-slate-400">
+                    Atendimento ágil em tempo real com acesso pleno a consultas de peças, CRM e chamados.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-800/80 px-2.5 py-1 rounded-full">
+                Turno Diurno
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Modo Oficina Ativa */}
+              <div className="rounded-2xl border border-blue-500/30 bg-slate-900/40 p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sun className="w-4 h-4 text-amber-400" />
+                    <h4 className="font-semibold text-slate-100 text-sm">Modo Oficina Ativa</h4>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800">
+                    08:00 às 18:00
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Horário de Início</label>
+                    <input
+                      type="time"
+                      value={routinesConfig.startDayTime}
+                      onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, startDayTime: e.target.value }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Horário de Término</label>
+                    <input
+                      type="time"
+                      value={routinesConfig.endDayTime}
+                      onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, endDayTime: e.target.value }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-400">
+                  Respostas instantâneas para consulta de preços, estoque, histórico de manutenções e abertura de OS.
+                </p>
+
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={routinesConfig.proactiveSuggestions}
+                    onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, proactiveSuggestions: e.target.checked }))}
+                    className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Permitir sugestões proativas (revisões pendentes, peças correlatas)</span>
+                </label>
+              </div>
+
+              {/* Modo Noturno */}
+              <div className="rounded-2xl border border-indigo-500/30 bg-slate-900/40 p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Moon className="w-4 h-4 text-indigo-400" />
+                    <h4 className="font-semibold text-slate-100 text-sm">Modo Noturno (Triagem)</h4>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-800">
+                    18:01 às 07:59
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Horário de Início</label>
+                    <input
+                      type="time"
+                      value={routinesConfig.startNightTime}
+                      onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, startNightTime: e.target.value }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Horário de Término</label>
+                    <input
+                      type="time"
+                      value={routinesConfig.endNightTime}
+                      onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, endNightTime: e.target.value }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Mensagem de Triagem Noturna</label>
+                  <textarea
+                    rows={2}
+                    value={routinesConfig.nightMessage}
+                    onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, nightMessage: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 resize-none"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={routinesConfig.autoQueueTickets}
+                    onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, autoQueueTickets: e.target.checked }))}
+                    className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>Enfileirar chamado para triagem no primeiro horário da manhã</span>
+                </label>
               </div>
             </div>
-          ) : (
-            <div className="flex items-end gap-3">
-              <textarea
-                ref={textareaRef}
-                data-testid="assistant-composer-input"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Digite sua mensagem ou clique no microfone para falar... (Enter envia, Shift+Enter quebra linha)"
-                rows={1}
-                disabled={isSendingText || isProcessingAudio}
-                className="flex-1 resize-none rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-slate-950 transition-all"
-                style={{ maxHeight: "140px", overflowY: "auto" }}
-              />
 
-              {/* Botão de Microfone (Gravação Nativa via MediaRecorder) */}
-              <button
+            <div className="flex justify-end pt-2">
+              <Button
                 type="button"
-                data-testid="start-audio-recording"
-                onClick={() => void startAudioRecording()}
-                disabled={isSendingText || isProcessingAudio}
-                title="Gravar comando de voz (Microfone)"
-                className="w-11 h-11 rounded-xl border border-slate-800 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-500/50 hover:text-rose-400 text-slate-300 flex items-center justify-center transition-all flex-shrink-0 cursor-pointer disabled:opacity-50"
+                data-testid="save-routines-btn"
+                onClick={handleSaveRoutines}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-sm cursor-pointer"
               >
-                <Mic className="w-5 h-5" />
-              </button>
-
-              {/* Botão de Envio de Texto */}
-              <button
-                type="button"
-                data-testid="send-text-message"
-                onClick={() => void handleSendText()}
-                disabled={!input.trim() || isSendingText || isProcessingAudio}
-                title="Enviar mensagem"
-                className="w-11 h-11 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-all flex-shrink-0 cursor-pointer"
-              >
-                {isSendingText ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-              </button>
+                {routinesSaved ? "✓ Rotinas Salvas!" : "Salvar Rotinas & Horários"}
+              </Button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* ─── ABA 4: CONFIGURAÇÕES DA IA ───────────────────────────────────── */}
+        {activeTab === "settings" && (
+          <div data-testid="settings-tab-view" className="flex-1 overflow-y-auto p-8 space-y-6 max-w-4xl mx-auto w-full">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Sliders className={`w-5 h-5 ${currentTheme.accentText}`} />
+                <h3 className="text-xl font-bold text-slate-100">Configurações do Assistente IA</h3>
+              </div>
+              <p className="text-sm text-slate-400">
+                Ajuste a postura do modelo, nível de detalhamento e mecanismos de segurança para a operação.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-5">
+              {/* Tom de Voz */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 space-y-3">
+                <h4 className="font-semibold text-slate-100 text-sm">Tom de Voz</h4>
+                <p className="text-xs text-slate-400">
+                  Define a postura linguística do modelo ao responder comandos da equipe.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    { id: "pratico", label: "Prático / Oficina", desc: "Direto, focado em agilidade e vocabulário automotivo." },
+                    { id: "formal", label: "Formal / Corporativo", desc: "Polido, ideal para relatórios gerenciais e clientes B2B." },
+                    { id: "direto", label: "Direto / Conciso", desc: "Ultra-sintético, sem introduções ou despedidas." },
+                  ].map((tone) => (
+                    <div
+                      key={tone.id}
+                      data-testid={`tone-option-${tone.id}`}
+                      onClick={() => setSettingsConfig((prev: any) => ({ ...prev, voiceTone: tone.id }))}
+                      className={`cursor-pointer p-3.5 rounded-xl border text-xs transition-all ${
+                        settingsConfig.voiceTone === tone.id
+                          ? "border-blue-500 bg-blue-600/10 text-white ring-1 ring-blue-500"
+                          : "border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700"
+                      }`}
+                    >
+                      <p className="font-semibold mb-1 text-slate-100">{tone.label}</p>
+                      <p className="text-[11px] text-slate-400 leading-snug">{tone.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Nível de Detalhamento */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 space-y-3">
+                <h4 className="font-semibold text-slate-100 text-sm">Nível de Detalhe das Respostas</h4>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { id: "resumido", label: "Resumido", desc: "1 a 2 linhas principais." },
+                    { id: "balanceado", label: "Balanceado", desc: "Equilíbrio entre contexto e brevidade." },
+                    { id: "detalhado", label: "Completo", desc: "Explicação técnica com tabelas e itens." },
+                  ].map((level) => (
+                    <div
+                      key={level.id}
+                      data-testid={`detail-option-${level.id}`}
+                      onClick={() => setSettingsConfig((prev: any) => ({ ...prev, detailLevel: level.id }))}
+                      className={`cursor-pointer p-3 rounded-xl border text-xs transition-all ${
+                        settingsConfig.detailLevel === level.id
+                          ? "border-blue-500 bg-blue-600/10 text-white ring-1 ring-blue-500"
+                          : "border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700"
+                      }`}
+                    >
+                      <p className="font-semibold mb-0.5 text-slate-100">{level.label}</p>
+                      <p className="text-[10px] text-slate-400">{level.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Controles Operacionais */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 space-y-4">
+                <h4 className="font-semibold text-slate-100 text-sm">Controles Operacionais</h4>
+
+                <label className="flex items-center justify-between gap-4 cursor-pointer text-xs text-slate-300">
+                  <div>
+                    <span className="font-medium text-slate-100 block">Aprovação Humana Obrigatória (HITL)</span>
+                    <span className="text-slate-400 text-[11px]">Exige confirmação por botão antes de criar chamados ou registrar transações.</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settingsConfig.requireHitl}
+                    onChange={(e) => setSettingsConfig((prev: any) => ({ ...prev, requireHitl: e.target.checked }))}
+                    className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-4 cursor-pointer text-xs text-slate-300">
+                  <div>
+                    <span className="font-medium text-slate-100 block">Modo Mãos-Livres na Oficina (Áudio)</span>
+                    <span className="text-slate-400 text-[11px]">Permite leitura em voz alta e comandos de voz rápidos via microfone.</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settingsConfig.handsFreeVoice}
+                    onChange={(e) => setSettingsConfig((prev: any) => ({ ...prev, handsFreeVoice: e.target.checked }))}
+                    className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-4 cursor-pointer text-xs text-slate-300">
+                  <div>
+                    <span className="font-medium text-slate-100 block">Auto-Transcrição em Tempo Real</span>
+                    <span className="text-slate-400 text-[11px]">Grava o texto transcrito pelo Gemini diretamente no histórico da mensagem.</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settingsConfig.autoTranscription}
+                    onChange={(e) => setSettingsConfig((prev: any) => ({ ...prev, autoTranscription: e.target.checked }))}
+                    className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <Button
+                type="button"
+                data-testid="save-settings-btn"
+                onClick={handleSaveSettings}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-sm cursor-pointer"
+              >
+                {settingsSaved ? "✓ Configurações Salvas!" : "Salvar Configurações"}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

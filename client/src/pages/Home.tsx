@@ -211,6 +211,14 @@ export function getShellWorkspaceLayout(active: RouteId) {
     };
   }
 
+  if (active === "ai-assistant") {
+    return {
+      moduleTopbar: "none" as const,
+      mainContentClassName: "h-full w-full overflow-hidden p-0",
+      settingsPageLayout: "standalone" as const,
+    };
+  }
+
   if (active === "settings") {
     return {
       moduleTopbar: "mobile-only" as const,
@@ -5060,14 +5068,13 @@ function Shell() {
       </div>
 
       {/* Main Content */}
-      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", active.startsWith("erp-") && "bg-background text-foreground")}>
+      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", active.startsWith("erp-") && "bg-background text-foreground", active === "ai-assistant" && "bg-slate-950 text-slate-100")}>
         <ShellTopbarBoundary active={active} mode={shellLayout.moduleTopbar}>
             <ModuleTopbar
             ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : active.startsWith("crm-") ? "Módulos do CRM" : "Ações da página"}
             activeItemId={active.startsWith("erp-") ? erpSection : active.startsWith("crm-") ? crmSection : undefined}
             items={active.startsWith("erp-") ? erpTopbarItems : active.startsWith("crm-") ? crmTopbarItems : []}
             leading={<button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
-            actions={<button type="button" onClick={() => window.dispatchEvent(new Event("megadesk-open-assistant"))} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500" title="Abrir assistente IA" aria-label="Abrir assistente IA"><Sparkles className="h-5 w-5" /></button>}
             />
         </ShellTopbarBoundary>
 
