@@ -278,8 +278,20 @@ ${toneInstruction}`;
 
           const toolMetadata = extractToolMetadata(aiResult);
           const pendingReq = toolMetadata?.pendingActionRequest as any;
+
+          let directMessage = "";
+          if (Array.isArray(toolMetadata?.toolResults)) {
+            for (const tr of toolMetadata.toolResults as any[]) {
+              if (tr?.output?.status === "executado_direto" && tr?.output?.ticketNumber) {
+                directMessage = `Criei o chamado #${tr.output.ticketNumber} com o assunto "${tr.output.assunto || ""}" para o cliente ${tr.output.cliente || ""}.`;
+                break;
+              }
+            }
+          }
+
           const replyText =
             aiResult.text?.trim() ||
+            directMessage ||
             (pendingReq?.summary ? `Preparei a ação solicitada para sua aprovação: ${pendingReq.summary}` : "Não foi possível obter uma resposta do assistente.");
 
           const assistantMessage = await repo.saveMessage(
@@ -417,8 +429,20 @@ Execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, c
 
           const toolMetadata = extractToolMetadata(aiResult);
           const pendingReq = toolMetadata?.pendingActionRequest as any;
+
+          let directMessage = "";
+          if (Array.isArray(toolMetadata?.toolResults)) {
+            for (const tr of toolMetadata.toolResults as any[]) {
+              if (tr?.output?.status === "executado_direto" && tr?.output?.ticketNumber) {
+                directMessage = `Criei o chamado #${tr.output.ticketNumber} com o assunto "${tr.output.assunto || ""}" para o cliente ${tr.output.cliente || ""}.`;
+                break;
+              }
+            }
+          }
+
           const replyText =
             rawText ||
+            directMessage ||
             (pendingReq?.summary ? `Preparei a ação solicitada por voz para sua aprovação: ${pendingReq.summary}` : "Áudio processado com sucesso.");
 
           // Atualiza a mensagem do usuário no banco (se autoTranscribe for true grava a transcrição real, senão preserva áudio)

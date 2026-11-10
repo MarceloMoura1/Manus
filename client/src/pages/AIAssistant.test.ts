@@ -138,4 +138,15 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
     expect(aiAssistantSource).toContain("hitlRequired: settingsConfig.hitlRequired");
     expect(aiAssistantSource).toContain("autoTranscribe: settingsConfig.autoTranscribe");
   });
+
+  it("renders clean 'Nova Conversa' button without duplicate plus icon and implements optimistic message sending", () => {
+    // Clean button text without duplicate +
+    expect(aiAssistantSource).toContain("<span>Nova Conversa</span>");
+    expect(aiAssistantSource).not.toContain("<span>+ Nova Conversa</span>");
+
+    // Optimistic sending
+    expect(aiAssistantSource).toContain("optimisticMsg");
+    expect(aiAssistantSource).toContain("temp-");
+    expect(aiAssistantSource).toContain("setLocalMessages");
+  });
 });

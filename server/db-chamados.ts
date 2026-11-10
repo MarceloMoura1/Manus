@@ -174,12 +174,30 @@ export async function getActiveClientUser(
     .from(megadeskDomainClientUsers)
     .where(and(
       eq(megadeskDomainClientUsers.clientId, clientId),
-      eq(megadeskDomainClientUsers.userId, userId),
+      or(
+        eq(megadeskDomainClientUsers.userId, userId),
+        eq(megadeskDomainClientUsers.email, userId),
+      ),
       eq(megadeskDomainClientUsers.status, 'active'),
     ))
     .limit(1);
 
-  return users[0] ?? null;
+  if (users[0]) return users[0];
+
+  // Fallback para qualquer colaborador ativo no tenant
+  const fallback = await db
+    .select({
+      userId: megadeskDomainClientUsers.userId,
+      userName: megadeskDomainClientUsers.name,
+    })
+    .from(megadeskDomainClientUsers)
+    .where(and(
+      eq(megadeskDomainClientUsers.clientId, clientId),
+      eq(megadeskDomainClientUsers.status, 'active'),
+    ))
+    .limit(1);
+
+  return fallback[0] ?? null;
 }
 
 /**

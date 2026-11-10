@@ -555,7 +555,28 @@ export function AIAssistant() {
     }
   );
 
-  const messages: ThreadMessage[] = (messagesQuery.data?.messages as ThreadMessage[]) ?? [];
+  const serverMessages: ThreadMessage[] = (messagesQuery.data?.messages as ThreadMessage[]) ?? [];
+  const [localMessages, setLocalMessages] = useState<ThreadMessage[]>([]);
+
+  useEffect(() => {
+    if (messagesQuery.data?.messages) {
+      setLocalMessages(messagesQuery.data.messages as ThreadMessage[]);
+    } else if (!selectedThreadId) {
+      setLocalMessages([]);
+    }
+  }, [messagesQuery.data?.messages, selectedThreadId]);
+
+  const updateSettings = (partial: Partial<AIAssistantSettings>) => {
+    setSettingsConfig((prev) => {
+      const next = { ...prev, ...partial };
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   const createThreadMutation = trpc.assistantThreads.createThread.useMutation({
     onSuccess: (data) => {
@@ -619,7 +640,7 @@ export function AIAssistant() {
     if (activeTab === "chat") {
       scrollToBottom("smooth");
     }
-  }, [messages.length, isSendingText, isProcessingAudio, activeTab, scrollToBottom]);
+  }, [localMessages.length, isSendingText, isProcessingAudio, activeTab, scrollToBottom]);
 
   // Expansão dinâmica do textarea: 1 a 2 linhas sem scrollbar; ativa overflow-y-auto apenas além de 2 linhas (~76px)
   const adjustComposerHeight = useCallback(() => {
@@ -694,15 +715,37 @@ export function AIAssistant() {
     const text = input.trim();
     if (!text || isSendingText || isProcessingAudio) return;
 
+    // 1. Limpa o input imediatamente
     setInput("");
+
+    // 2. Cria mensagem otimista temporária do usuário
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: ThreadMessage = {
+      id: tempId,
+      threadId: selectedThreadId || "pending-thread",
+      role: "user",
+      content: text,
+      createdAt: new Date(),
+    };
+
+    // 3. Adiciona imediatamente ao estado local de mensagens
+    setLocalMessages((prev) => [...prev, optimisticMsg]);
+
+    // 4. Ativa estado de carregamento / digitando
     setIsSendingText(true);
+
+    // 5. Rola suavemente para o rodapé
+    scrollToBottom("smooth");
+
     try {
       const targetThreadId = await ensureActiveThreadId();
       if (!targetThreadId) {
         setIsSendingText(false);
+        setLocalMessages((prev) => prev.filter((m) => m.id !== tempId));
         return;
       }
-      await sendMessageMutation.mutateAsync({
+
+      const result = await sendMessageMutation.mutateAsync({
         threadId: targetThreadId,
         content: text,
         settings: {
@@ -712,9 +755,20 @@ export function AIAssistant() {
           autoTranscribe: settingsConfig.autoTranscribe,
         },
       });
+
+      // Atualiza com as mensagens reais retornadas pelo servidor
+      if (result?.userMessage && result?.assistantMessage) {
+        setLocalMessages((prev) => {
+          const withoutTemp = prev.filter((m) => m.id !== tempId);
+          return [...withoutTemp, result.userMessage as ThreadMessage, result.assistantMessage as ThreadMessage];
+        });
+      }
+
       await trpcUtils?.assistantThreads?.getThreadMessages?.invalidate?.({ threadId: targetThreadId });
+      await trpcUtils?.assistantThreads?.listThreads?.invalidate?.();
     } catch (err) {
       console.error("[AIAssistant] Falha ao enviar mensagem:", err);
+      setLocalMessages((prev) => prev.filter((m) => m.id !== tempId));
       setIsSendingText(false);
     }
   };
@@ -795,22 +849,35 @@ export function AIAssistant() {
           return;
         }
 
+        const tempAudioId = `temp-audio-${Date.now()}`;
+        const optimisticAudioMsg: ThreadMessage = {
+          id: tempAudioId,
+          threadId: selectedThreadId || "pending-thread",
+          role: "user",
+          content: "🎤 [Processando áudio...]",
+          createdAt: new Date(),
+        };
+        setLocalMessages((prev) => [...prev, optimisticAudioMsg]);
         setIsProcessingAudio(true);
+        scrollToBottom("smooth");
+
         try {
           const audioBlob = new Blob(chunks, { type: recordedMime });
           const base64Audio = await blobToBase64(audioBlob);
           if (!base64Audio) {
             setIsProcessingAudio(false);
+            setLocalMessages((prev) => prev.filter((m) => m.id !== tempAudioId));
             return;
           }
 
           const targetThreadId = await ensureActiveThreadId();
           if (!targetThreadId) {
             setIsProcessingAudio(false);
+            setLocalMessages((prev) => prev.filter((m) => m.id !== tempAudioId));
             return;
           }
 
-          await sendAudioMutation.mutateAsync({
+          const result = await sendAudioMutation.mutateAsync({
             threadId: targetThreadId,
             audioBase64: base64Audio,
             mimeType: recordedMime.split(";")[0] || "audio/webm",
@@ -821,9 +888,19 @@ export function AIAssistant() {
               autoTranscribe: settingsConfig.autoTranscribe,
             },
           });
+
+          if (result?.userMessage && result?.assistantMessage) {
+            setLocalMessages((prev) => {
+              const withoutTemp = prev.filter((m) => m.id !== tempAudioId);
+              return [...withoutTemp, result.userMessage as ThreadMessage, result.assistantMessage as ThreadMessage];
+            });
+          }
+
           await trpcUtils?.assistantThreads?.getThreadMessages?.invalidate?.({ threadId: targetThreadId });
+          await trpcUtils?.assistantThreads?.listThreads?.invalidate?.();
         } catch (err) {
           console.error("[AIAssistant] Erro ao enviar áudio gravado:", err);
+          setLocalMessages((prev) => prev.filter((m) => m.id !== tempAudioId));
           setIsProcessingAudio(false);
         }
       };
@@ -935,17 +1012,17 @@ export function AIAssistant() {
           sidebarOpen ? "w-72 border-r" : "w-0 border-r-0"
         } transition-all duration-200 h-full flex flex-col flex-shrink-0 overflow-hidden ${currentTheme.sidebarBg} ${currentTheme.sidebarBorder}`}
       >
-        {/* Botão de destaque no topo: + Nova Conversa */}
+        {/* Botão de destaque no topo: Nova Conversa */}
         <div className={`p-4 border-b ${currentTheme.sidebarBorder}`}>
           <button
             type="button"
             data-testid="new-thread-button"
             onClick={() => void handleCreateNewThread()}
             disabled={createThreadMutation.isPending}
-            className={`w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl ${currentTheme.accentBg} ${currentTheme.accentHoverBg} active:scale-[0.99] text-white font-semibold text-sm shadow-sm transition-all cursor-pointer disabled:opacity-60`}
+            className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl ${currentTheme.accentBg} ${currentTheme.accentHoverBg} active:scale-[0.99] text-white font-semibold text-sm shadow-sm transition-all cursor-pointer disabled:opacity-60`}
           >
-            <Plus className="w-4 h-4" />
-            <span>+ Nova Conversa</span>
+            <Plus className="w-4 h-4 mr-2" />
+            <span>Nova Conversa</span>
           </button>
         </div>
 
@@ -963,7 +1040,7 @@ export function AIAssistant() {
               <MessageSquare className={`w-7 h-7 ${currentTheme.accentText} mx-auto mb-2 opacity-80`} />
               <p className="text-xs font-medium text-slate-300">Nenhuma conversa ainda</p>
               <p className="text-[11px] text-slate-400 mt-1">
-                Clique em &ldquo;+ Nova Conversa&rdquo; ou envie uma mensagem para começar.
+                Clique em &ldquo;Nova Conversa&rdquo; ou envie uma mensagem para começar.
               </p>
             </div>
           ) : (
@@ -1208,7 +1285,7 @@ export function AIAssistant() {
               data-testid="ai-messages-timeline"
               className={`flex-1 overflow-y-auto px-6 py-6 space-y-5 ${currentTheme.chatBg} text-slate-100`}
             >
-              {messages.length === 0 && !isSendingText && !isProcessingAudio ? (
+              {localMessages.length === 0 && !isSendingText && !isProcessingAudio ? (
                 <div className="flex flex-col items-center justify-center h-full max-w-xl mx-auto text-center py-10 gap-6">
                   <div className={`w-16 h-16 rounded-2xl ${currentTheme.accentBg}/15 border ${currentTheme.accentBorder} flex items-center justify-center shadow-sm`}>
                     <Sparkles className={`w-8 h-8 ${currentTheme.accentText}`} />
@@ -1238,7 +1315,7 @@ export function AIAssistant() {
                   </div>
                 </div>
               ) : (
-                messages.map((msg) => {
+                localMessages.map((msg) => {
                   const isUser = msg.role === "user";
                   const pendingAction = extractPendingActionFromMessage(msg);
                   const localAction = pendingAction?.id ? actionStates[pendingAction.id] : undefined;
@@ -1741,7 +1818,7 @@ export function AIAssistant() {
                     <div
                       key={tone.id}
                       data-testid={`tone-option-${tone.id}`}
-                      onClick={() => setSettingsConfig((prev) => ({ ...prev, tone: tone.id as any }))}
+                      onClick={() => updateSettings({ tone: tone.id as any })}
                       className={`cursor-pointer p-3.5 rounded-xl border text-xs transition-all ${
                         settingsConfig.tone === tone.id
                           ? "border-blue-500 bg-blue-600/10 text-white ring-1 ring-blue-500"
@@ -1767,7 +1844,7 @@ export function AIAssistant() {
                   <input
                     type="checkbox"
                     checked={settingsConfig.hitlRequired}
-                    onChange={(e) => setSettingsConfig((prev) => ({ ...prev, hitlRequired: e.target.checked }))}
+                    onChange={(e) => updateSettings({ hitlRequired: e.target.checked })}
                     className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
                   />
                 </label>
@@ -1780,7 +1857,7 @@ export function AIAssistant() {
                   <input
                     type="checkbox"
                     checked={settingsConfig.handsFreeAudio}
-                    onChange={(e) => setSettingsConfig((prev) => ({ ...prev, handsFreeAudio: e.target.checked }))}
+                    onChange={(e) => updateSettings({ handsFreeAudio: e.target.checked })}
                     className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
                   />
                 </label>
@@ -1793,7 +1870,7 @@ export function AIAssistant() {
                   <input
                     type="checkbox"
                     checked={settingsConfig.autoTranscribe}
-                    onChange={(e) => setSettingsConfig((prev) => ({ ...prev, autoTranscribe: e.target.checked }))}
+                    onChange={(e) => updateSettings({ autoTranscribe: e.target.checked })}
                     className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
                   />
                 </label>

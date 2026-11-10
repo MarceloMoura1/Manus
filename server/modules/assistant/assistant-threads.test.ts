@@ -555,7 +555,7 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
       });
 
       expect(result.status).toBe("executado_direto");
-      expect(result.ticketNumber).toBe(777);
+      expect(result.ticketNumber).toBe("777");
       expect(result.pendingActionRequest).toBeUndefined();
       expect(mockTicketExecutor).toHaveBeenCalled();
     });

@@ -235,10 +235,10 @@ export function createHermesTools(context: HermesToolContext) {
 
         const ticketTool = HERMES_TOOL_REGISTRY.find((t) => t.name === "create_ticket");
 
-        // Se HITL não for obrigatório, executa a mutação diretamente
+        // Se HITL não for obrigatório, executa a mutação diretamente e NUNCA retorna pendingActionRequest
         if (context.hitlRequired === false) {
           try {
-            const actorUserId = context.userEmail || context.userId || context.operationalUserId || "operator";
+            const actorUserId = context.operationalUserId || context.userEmail || context.userId || "operator";
             const ticketExecutor = context.executeTicketAction ?? executeHermesTicketAction;
             const directResult = await ticketExecutor({
               clientId: context.clientId,
@@ -258,15 +258,20 @@ export function createHermesTools(context: HermesToolContext) {
             return {
               success: true,
               status: "executado_direto",
+              ticketNumber: String(directResult?.entityId ?? ""),
               cliente: resolvedCustomer,
               assunto: assunto.trim(),
               descricao: finalDescription,
               prioridade: mappedPriority,
-              ticketNumber: directResult?.entityId,
-              message: `Chamado nº ${directResult?.entityId ?? ""} criado com sucesso para ${resolvedCustomer}.`,
+              message: "Chamado criado com sucesso no banco de dados.",
             };
           } catch (err: any) {
-            console.warn("[HermesTools] Falha na execução direta sem HITL, preparando pendente:", err);
+            console.error("[HermesTools] Erro ao executar criação direta de chamado:", err);
+            return {
+              success: false,
+              status: "erro_execucao",
+              message: `Não foi possível criar o chamado diretamente: ${err?.message || "Erro desconhecido"}.`,
+            };
           }
         }
 
