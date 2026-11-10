@@ -4,14 +4,12 @@
  * utilizando o Gemini com persona configurada do tenant e ferramentas do ERP/CRM.
  */
 
-import { randomUUID } from "node:crypto";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText, tool } from "ai";
 import { z } from "zod";
 import { getPool } from "../../db";
-import { botDispatcherService } from "./bot-dispatcher.service";
 import { queryErpProducts, queryTicketsByPhone, saveLead } from "./bot.router";
-import { emitOperationalTenantEvent } from "../whatsapp/socket/whatsapp.socket";
+import { checkBotEligibility, deliverBotMessage, transferConversationToHuman } from "./bot-runtime";
 
 export interface ProcessBotMessageInput {
   tenantId: string;
@@ -47,26 +45,11 @@ export async function processCognitiveBotMessage(
   try {
     const pool = getPool();
 
-    // 1. Verifica se a conversa ainda está no ciclo do bot e não está suspensa
-    const [convRows] = await pool.execute(
-      `SELECT status, assigned_user_id, bot_suspended_at
-       FROM megadesk_domain_conversations
-       WHERE conversation_id = ? AND client_id = ?
-       LIMIT 1`,
-      [conversationId, tenantId]
-    ) as any[];
-
-    if (!convRows || convRows.length === 0) {
-      return { replied: false, error: "Conversa não encontrada." };
-    }
-
-    const currentConv = convRows[0];
-    if (currentConv.status !== "bot") {
-      return { replied: false, error: "Conversa não está na fila do bot." };
-    }
-
-    if (currentConv.bot_suspended_at && new Date(currentConv.bot_suspended_at) > new Date()) {
-      return { replied: false, error: "Bot suspenso por operador humano." };
+    // 1. Verifica elegibilidade da conversa via runtime compartilhado
+    const eligibility = await checkBotEligibility(tenantId, conversationId);
+    if (!eligibility.eligible) {
+      console.log(`[BotGeminiEngine] Conversa ${conversationId} ignorada: ${eligibility.reason}`);
+      return { replied: false, error: eligibility.reason };
     }
 
     // 2. Busca o nome da empresa (persona do tenant)
@@ -224,7 +207,9 @@ Diretrizes obrigatórias:
 5. Formate mensagens de forma limpa para WhatsApp: use quebras de linha e negrito (*texto*) onde facilitar a leitura. Evite textos excessivamente longos.`;
 
     const googleInstance = createGoogleGenerativeAI({ apiKey });
-    const targetModel = "gemini-1.5-flash";
+    const targetModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+
+    console.log(`[BotGeminiEngine] Gerando resposta com modelo ${targetModel} para tenant=${tenantId}...`);
 
     const aiResult = await generateText({
       model: googleInstance(targetModel),
@@ -237,32 +222,11 @@ Diretrizes obrigatórias:
 
     // 6. Se o transbordo humano foi acionado
     if (requestedHumanTransfer) {
-      await pool.execute(
-        `UPDATE megadesk_domain_conversations
-         SET status = 'waiting_human',
-             assigned_user_id = NULL,
-             assigned_user_name = NULL,
-             ia_active = 0,
-             bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR),
-             updated_at = NOW()
-         WHERE conversation_id = ? AND client_id = ?`,
-        [conversationId, tenantId]
-      );
-
-      emitOperationalTenantEvent(tenantId, "wa:transfer_to_human", {
+      await transferConversationToHuman({
+        tenantId,
         conversationId,
         phone,
-        status: "AGUARDANDO_HUMANO",
         reason: "Solicitado via atendimento inteligente",
-        timestamp: new Date().toISOString(),
-      });
-      emitOperationalTenantEvent(tenantId, "wa:conversation_updated", {
-        conversation: {
-          id: conversationId,
-          status: "waiting_human",
-          assignedUserId: null,
-          iaActive: 0,
-        },
       });
 
       if (!replyText) {
@@ -274,52 +238,15 @@ Diretrizes obrigatórias:
       replyText = "Olá! Como posso ajudar você hoje?";
     }
 
-    // 7. Envia a resposta via WhatsApp
-    await botDispatcherService.sendTextMessage({
+    // 7. Envia a resposta via WhatsApp e grava no histórico
+    await deliverBotMessage({
       tenantId,
-      to: phone,
+      conversationId,
+      phone,
       text: replyText,
-      provider: "evolution",
     });
 
-    // 8. Grava a mensagem do Bot no banco de dados e atualiza a conversa
-    const botMessageId = `msg-bot-${randomUUID()}`;
-    const now = new Date();
-    const timeLabel = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-
-    await pool.execute(
-      `INSERT INTO megadesk_domain_conversations_messages
-       (message_id, conversation_id, client_id, provider, integration_id,
-        direction, message_type, sender, sender_name_snapshot, message, status, timestamp, updated_at)
-       VALUES (?, ?, ?, 'evolution', ?, 'outbound', 'text', 'bot', 'Bot Virtual', ?, 'sent', NOW(), NOW())`,
-      [botMessageId, conversationId, tenantId, `megadesk-${tenantId}`, replyText]
-    );
-
-    await pool.execute(
-      `UPDATE megadesk_domain_conversations
-       SET last_message = ?,
-           last_message_from = 'bot',
-           time_label = ?,
-           updated_at = NOW()
-       WHERE conversation_id = ? AND client_id = ?`,
-      [replyText.substring(0, 255), timeLabel, conversationId, tenantId]
-    );
-
-    // 9. Emite evento WebSocket para atualizar tela de atendimento em tempo real
-    const socketPayload = {
-      conversationId,
-      clientId: tenantId,
-      message: {
-        id: botMessageId,
-        from: "bot",
-        sender: "bot",
-        text: replyText,
-        time: timeLabel,
-        timestamp: now.toISOString(),
-      },
-    };
-
-    emitOperationalTenantEvent(tenantId, "conversation:message", socketPayload);
+    console.log(`[BotGeminiEngine] Resposta enviada com sucesso para conv=${conversationId}`);
 
     return {
       replied: true,

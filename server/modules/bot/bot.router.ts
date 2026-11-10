@@ -77,10 +77,10 @@ export async function handleTypebotWebhook(req: Request, res: Response): Promise
       }
 
       if (targetConversationId) {
-        // Marca a conversa para atendimento humano e silencia o bot por 24 horas
+        // Marca a conversa para atendimento humano e silencia o bot por 24 horas (status 'bot' com assigned_user_id NULL representa 'Aguardando')
         await pool.execute(
           `UPDATE megadesk_domain_conversations
-           SET status = 'waiting_human',
+           SET status = 'bot',
                assigned_user_id = NULL,
                assigned_user_name = NULL,
                ia_active = 0,

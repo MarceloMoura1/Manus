@@ -896,12 +896,12 @@ export async function saveIncomingMessage(
     transactionStarted = false;
     if (committedEvent) await emitToClient(clientId, committedEvent.name, committedEvent.payload);
 
-    // ─── Disparo Cognitivo ao Bot (em background após commit) ───────────────
+    // ─── Disparo ao Bot (Typebot com Fallback Cognitivo Gemini) ─────────────
     if (shouldTriggerBot && text && text.trim() && payload.type === "text") {
       setImmediate(async () => {
         try {
-          const { processCognitiveBotMessage } = await import("../modules/bot/bot-gemini-engine");
-          await processCognitiveBotMessage({
+          const { dispatchBotConversationMessage } = await import("../modules/bot/bot-orchestrator");
+          await dispatchBotConversationMessage({
             tenantId: clientId,
             conversationId: finalConversationId,
             phone,
@@ -909,7 +909,7 @@ export async function saveIncomingMessage(
             customerName: contactName,
           });
         } catch (botErr) {
-          console.error("[BotEngine] Falha ao processar mensagem cognitiva do bot:", botErr);
+          console.error("[BotEngine] Falha ao processar mensagem no orquestrador do bot:", botErr);
         }
       });
     }
