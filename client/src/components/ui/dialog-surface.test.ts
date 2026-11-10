@@ -7,8 +7,8 @@ describe("shared dialog surface theme", () => {
     const dialog = readFileSync("client/src/components/ui/dialog.tsx", "utf8");
 
     expect(dialog).toContain("bg-background");
-    expect(css).toContain("--color-background: var(--bg-secondary)");
-    expect(css).toMatch(/:root[\s\S]*--bg-secondary:\s*#ffffff/);
-    expect(css).toMatch(/html\.dark[\s\S]*--bg-secondary:\s*#1e293b/);
+    expect(css).toContain("--color-background: var(--bg-primary)");
+    expect(css).toMatch(/:root[\s\S]*--bg-primary:\s*#f6f8fb/);
+    expect(css).toMatch(/html\.dark[\s\S]*--bg-primary:\s*#020617/);
   });
 });

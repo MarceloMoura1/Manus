@@ -9,6 +9,8 @@ export type OutboundConversation = {
   clientId: string;
   integrationId: string;
   conversationPhone: string;
+  conversationStatus?: string | null;
+  assignedUserId?: string | null;
   crmWhatsapp: string | null;
   crmPhone: string | null;
 };
@@ -74,6 +76,8 @@ export async function loadOutboundConversation(
             c.client_id AS clientId,
             COALESCE(c.integration_id, CONCAT('megadesk-', c.client_id)) AS integrationId,
             c.phone AS conversationPhone,
+            c.status AS conversationStatus,
+            c.assigned_user_id AS assignedUserId,
             crm.whatsapp AS crmWhatsapp,
             crm.phone AS crmPhone
        FROM megadesk_domain_conversations c
@@ -91,6 +95,8 @@ export async function loadOutboundConversation(
     clientId: String(row.clientId),
     integrationId: String(row.integrationId),
     conversationPhone: String(row.conversationPhone ?? ""),
+    conversationStatus: typeof row.conversationStatus === "string" ? row.conversationStatus : null,
+    assignedUserId: typeof row.assignedUserId === "string" ? row.assignedUserId : null,
     crmWhatsapp: row.crmWhatsapp == null ? null : String(row.crmWhatsapp),
     crmPhone: row.crmPhone == null ? null : String(row.crmPhone),
   };

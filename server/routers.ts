@@ -59,6 +59,25 @@ type ConversationStatus = "open" | "bot" | "closed";
 type ClientStatus = "provisioning" | "active" | "setup" | "failed" | "paused";
 type OperationalRecordType = "conversation" | "ticket" | "tracking" | "erp";
 
+/**
+ * Formata mensagem outbound enviada por atendente humano para o WhatsApp:
+ * Prefixando o nome do operador em negrito (*Nome*) seguido de quebra de linha dupla,
+ * sem duplicar se o texto já contiver a formatação.
+ */
+export function formatOperatorWhatsAppMessage(operatorName: string | null | undefined, text: string): string {
+  const cleanText = text.trim();
+  const cleanOperator = operatorName?.trim();
+  if (!cleanOperator) return cleanText;
+
+  // Se já começa com o nome do operador formatado em negrito, não duplica
+  const prefixRegex = new RegExp(`^\\*${cleanOperator.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\*(\\r?\\n)*`, "i");
+  if (prefixRegex.test(cleanText)) {
+    return cleanText;
+  }
+
+  return `*${cleanOperator}*\n\n${cleanText}`;
+}
+
 async function resolveOutboundReplyReference(input: Parameters<typeof resolveConversationReplyReference>[1]) {
   try {
     return await resolveConversationReplyReference(getPool(), input);
@@ -1128,13 +1147,14 @@ export const appRouter = router({
         // Resolve local/pre-provider validation before creating a pending row.
         // A failure here proves no provider request was attempted.
         const recipient = resolveOutboundRecipient(outboundConversation);
+        const formattedWhatsAppMessage = formatOperatorWhatsAppMessage(operatorName, input.message);
         const sent = await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId, conversationId: input.conversationId,
           clientId: ctx.tenantId, provider: "evolution", integrationId: outboundConversation.integrationId,
           recipient,
           messageType: "text",
           sender: "agent", senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName,
           text: input.message, timestamp: sentAt, legacyMessage: outgoingMessage, replyToMessageId: input.replyToMessageId ?? null },
-          () => evoSendText(instanceNameFor(outboundConversation.clientId), recipient, input.message, replyReference));
+          () => evoSendText(instanceNameFor(outboundConversation.clientId), recipient, formattedWhatsAppMessage, replyReference));
         if (conversation) {
           conversation.messages.push(canonicalMessageMirror({ messageId: sent.messageId, externalMessageId: sent.externalMessageId,
             clientAttemptId: input.clientAttemptId, conversationId: input.conversationId, clientId: ctx.tenantId,
@@ -1147,6 +1167,11 @@ export const appRouter = router({
 
         // Sincronização com atendimento humano (Human Takeover): assume a conversa e silencia o robô por 24 horas
         try {
+          const wasBotOrUnassigned = outboundConversation.conversationStatus === 'bot'
+            || outboundConversation.conversationStatus === 'waiting_human'
+            || !outboundConversation.assignedUserId
+            || outboundConversation.assignedUserId === 'bot_system';
+
           await getPool().execute(
             `UPDATE megadesk_domain_conversations
              SET status = 'open',
@@ -1158,7 +1183,17 @@ export const appRouter = router({
              WHERE conversation_id = ? AND client_id = ?`,
             [ctx.operationalUserId, operatorName, input.conversationId, ctx.tenantId]
           );
-          await emitConversationEventBestEffort(ctx.tenantId, "wa:conversation_updated", {
+
+          if (wasBotOrUnassigned) {
+            await getPool().execute(
+              `INSERT INTO megadesk_conversation_events
+               (event_id, client_id, conversation_id, event_type, operator_user_id, anchor_message_id, timeline_anchor_kind, metadata_json)
+               VALUES (?, ?, ?, 'claimed', ?, ?, 'message', ?)`,
+              [`event-${randomUUID()}`, ctx.tenantId, input.conversationId, ctx.operationalUserId, sent.messageId, JSON.stringify({ source: "implicit_send" })],
+            ).catch((err) => console.warn("[HumanTakeover] Falha ao registrar evento claimed na timeline:", err));
+          }
+
+          const convPayload = {
             conversation: {
               id: input.conversationId,
               status: "open",
@@ -1166,7 +1201,9 @@ export const appRouter = router({
               assignedUserName: operatorName,
               iaActive: 0,
             },
-          });
+          };
+          await emitConversationEventBestEffort(ctx.tenantId, "wa:conversation_updated", convPayload);
+          await emitConversationEventBestEffort(ctx.tenantId, "conversation:updated", convPayload);
         } catch (botSilenceErr) {
           console.warn("[HumanTakeover] Falha não bloqueante ao silenciar bot na conversa:", botSilenceErr);
         }
@@ -1241,6 +1278,9 @@ export const appRouter = router({
           import("./evolution/client"), import("./evolution/session-store"),
         ]);
         const recipient = resolveOutboundRecipient(outboundConversation);
+        const formattedCaption = input.caption?.trim()
+          ? formatOperatorWhatsAppMessage(operatorName, input.caption.trim())
+          : undefined;
         const sent = await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId,
           conversationId: input.conversationId, clientId: ctx.tenantId, provider: "evolution",
           integrationId: outboundConversation.integrationId,
@@ -1257,7 +1297,7 @@ export const appRouter = router({
             ...(input.kind === "audio" && input.mediaSource === "recording"
               ? { recordingInput: { mimeType: media.mimeType, byteLength: media.bytes.length } }
               : {}),
-            caption: input.caption, quoted: replyReference,
+            caption: formattedCaption, quoted: replyReference,
           }, { send: evoSendAttachment }));
         if (conversation) {
           conversation.messages.push(canonicalMessageMirror({ messageId: sent.messageId, externalMessageId: sent.externalMessageId,
@@ -1272,6 +1312,11 @@ export const appRouter = router({
 
         // Sincronização com atendimento humano (Human Takeover) no envio de anexo: silencia o robô por 24 horas
         try {
+          const wasBotOrUnassigned = outboundConversation.conversationStatus === 'bot'
+            || outboundConversation.conversationStatus === 'waiting_human'
+            || !outboundConversation.assignedUserId
+            || outboundConversation.assignedUserId === 'bot_system';
+
           await getPool().execute(
             `UPDATE megadesk_domain_conversations
              SET status = 'open',
@@ -1283,7 +1328,17 @@ export const appRouter = router({
              WHERE conversation_id = ? AND client_id = ?`,
             [ctx.operationalUserId, operatorName, input.conversationId, ctx.tenantId]
           );
-          await emitConversationEventBestEffort(ctx.tenantId, "wa:conversation_updated", {
+
+          if (wasBotOrUnassigned) {
+            await getPool().execute(
+              `INSERT INTO megadesk_conversation_events
+               (event_id, client_id, conversation_id, event_type, operator_user_id, anchor_message_id, timeline_anchor_kind, metadata_json)
+               VALUES (?, ?, ?, 'claimed', ?, ?, 'message', ?)`,
+              [`event-${randomUUID()}`, ctx.tenantId, input.conversationId, ctx.operationalUserId, sent.messageId, JSON.stringify({ source: "implicit_send" })],
+            ).catch((err) => console.warn("[HumanTakeover] Falha ao registrar evento claimed na timeline após anexo:", err));
+          }
+
+          const convPayload = {
             conversation: {
               id: input.conversationId,
               status: "open",
@@ -1291,7 +1346,9 @@ export const appRouter = router({
               assignedUserName: operatorName,
               iaActive: 0,
             },
-          });
+          };
+          await emitConversationEventBestEffort(ctx.tenantId, "wa:conversation_updated", convPayload);
+          await emitConversationEventBestEffort(ctx.tenantId, "conversation:updated", convPayload);
         } catch (botSilenceErr) {
           console.warn("[HumanTakeover] Falha não bloqueante ao silenciar bot após anexo:", botSilenceErr);
         }

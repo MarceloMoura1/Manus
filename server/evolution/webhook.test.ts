@@ -343,6 +343,13 @@ describe("Evolution webhook HTTP contract", () => {
     ]);
     expect(emit).toHaveBeenCalledWith("tenant-a", "conversation:receipt", {
       clientId: "tenant-a",
+      externalMessageId: `private-provider-${canonicalStatus}`,
+      status: canonicalStatus,
+      receivedAt: "2026-09-29T20:00:00.000Z",
+    });
+    expect(emit).toHaveBeenCalledWith("tenant-a", "message:status_updated", {
+      clientId: "tenant-a",
+      externalMessageId: `private-provider-${canonicalStatus}`,
       status: canonicalStatus,
       receivedAt: "2026-09-29T20:00:00.000Z",
     });
@@ -637,7 +644,7 @@ describe("Evolution inbound attendance lifecycle", () => {
     await expect(saveIncomingMessage("tenant-a", "instance-a", "event-a", ["5541999999999"], "Known", "Oi", new Date()))
       .resolves.toBe("persisted");
     const sql = connection.execute.mock.calls.map(call => String(call[0])).join("\n");
-    expect(sql).toContain("status IN ('open', 'bot')");
+    expect(sql).toContain("status IN ('open', 'bot', 'in_progress', 'waiting_human')");
     expect(sql).not.toContain("INSERT INTO megadesk_domain_conversations\n          (");
     expect(connection.commit).toHaveBeenCalledOnce();
   });

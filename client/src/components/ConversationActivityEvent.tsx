@@ -1,4 +1,4 @@
-import { ArrowRightLeft, Bot, CheckCircle2, Link2, MessageCircle, RotateCcw } from "lucide-react";
+import { ArrowRightLeft, Bot, CheckCircle2, Link2, MessageCircle, RotateCcw, UserCheck } from "lucide-react";
 import { formatTime } from "@/lib/conversationDateTime";
 import type { ConversationActivityEvent as ConversationActivity } from "@/lib/conversationTimeline";
 
@@ -19,8 +19,14 @@ function activityPresentation(event: ConversationActivity): ActivityPresentation
       return { icon: MessageCircle, label: "Atendimento iniciado pelo WhatsApp.", tone: "border-sky-200 bg-sky-50 text-sky-800" };
     case "created_outbound":
       return { icon: MessageCircle, label: `Atendimento iniciado por ${actor}.`, tone: "border-sky-200 bg-sky-50 text-sky-800" };
-    case "claimed":
-      return { icon: Bot, label: `Conversa assumida por ${actor}.`, tone: "border-violet-200 bg-violet-50 text-violet-800" };
+    case "claimed": {
+      const time = activityTime(event.timestamp);
+      return {
+        icon: UserCheck,
+        label: time ? `${actor} assumiu o atendimento às ${time}` : `${actor} assumiu o atendimento.`,
+        tone: "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-800/40 dark:bg-violet-950/40 dark:text-violet-300",
+      };
+    }
     case "transferred":
       return {
         icon: ArrowRightLeft,
@@ -51,7 +57,7 @@ export function ConversationActivityEvent({ event, compact = false }: { event: C
       <div className={`mx-auto flex w-fit max-w-full items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium shadow-sm ${presentation.tone}`}>
         <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>{presentation.label}</span>
-        {time && <time className="shrink-0 text-[11px] opacity-70">{time}</time>}
+        {time && event.eventType !== "claimed" && <time className="shrink-0 text-[11px] opacity-70">{time}</time>}
       </div>
     </div>
   );

@@ -336,21 +336,28 @@ type ClientUser = {
 const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
 
 function outboundReceipt(status: unknown, pending: boolean): { status: "pending" | "sent" | "delivered" | "read" | "played" | "failed"; label: string; tone: string; icon: "clock" | "check" | "double-check" | "alert" } | null {
-  if (pending || String(status ?? "").trim().toLowerCase() === "pending") return { status: "pending", label: "Enviando", tone: "text-slate-200/70", icon: "clock" };
+  if (pending || String(status ?? "").trim().toLowerCase() === "pending") {
+    return { status: "pending", label: "Enviada", tone: "text-slate-400 dark:text-slate-500", icon: "check" };
+  }
   switch (String(status ?? "").trim().toLowerCase()) {
     case "sent":
     case "server_ack":
-      return { status: "sent", label: "Enviada", tone: "text-slate-100/90", icon: "check" };
+    case "1":
+    case "2":
+      return { status: "sent", label: "Enviada", tone: "text-slate-400 dark:text-slate-500", icon: "check" };
     case "delivered":
     case "delivery_ack":
-      return { status: "delivered", label: "Entregue", tone: "text-slate-200", icon: "double-check" };
+    case "3":
+      return { status: "delivered", label: "Entregue", tone: "text-slate-400 dark:text-slate-500", icon: "double-check" };
     case "read":
-      return { status: "read", label: "Lida", tone: "text-sky-200", icon: "double-check" };
     case "played":
-      return { status: "played", label: "Reproduzida", tone: "text-slate-100/90", icon: "double-check" };
+    case "4":
+    case "5":
+      return { status: "read", label: "Lida", tone: "text-sky-500 dark:text-sky-400", icon: "double-check" };
     case "failed":
     case "error":
-      return { status: "failed", label: "Falha no envio", tone: "text-rose-200", icon: "alert" };
+    case "0":
+      return { status: "failed", label: "Falha no envio", tone: "text-rose-500", icon: "alert" };
     default:
       return null;
   }
@@ -880,9 +887,21 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
     // Usa os mesmos campos que a API getConversations retorna (id, name, etc.)
     socket.on('conversation:new', () => { void utils.conversations.list.invalidate(); });
     // Conversa atualizada (nova mensagem)
-    socket.on('conversation:updated', () => { void utils.conversations.list.invalidate(); });
+    socket.on('conversation:updated', () => {
+      void utils.conversations.list.invalidate();
+      void utils.conversations.counts.invalidate();
+    });
+    socket.on('wa:conversation_updated', () => {
+      void utils.conversations.list.invalidate();
+      void utils.conversations.counts.invalidate();
+    });
     socket.on('conversation:message', () => { void utils.conversations.list.invalidate(); });
     socket.on('conversation:receipt', (data: { clientId?: string }) => {
+      if (data?.clientId && data.clientId !== clientId) return;
+      void utils.conversations.messages.invalidate();
+      void utils.conversations.list.invalidate();
+    });
+    socket.on('message:status_updated', (data: { clientId?: string }) => {
       if (data?.clientId && data.clientId !== clientId) return;
       void utils.conversations.messages.invalidate();
       void utils.conversations.list.invalidate();
@@ -961,7 +980,14 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
     setSearchTerm('');
   };
 
-  const selectedConv = conversations.find(c => c.id === selectedConversation);
+  const [activeConvCache, setActiveConvCache] = React.useState<any | null>(null);
+  const rawSelectedConv = conversations.find(c => c.id === selectedConversation);
+  React.useEffect(() => {
+    if (rawSelectedConv) {
+      setActiveConvCache(rawSelectedConv);
+    }
+  }, [rawSelectedConv]);
+  const selectedConv = rawSelectedConv || (activeConvCache && activeConvCache.id === selectedConversation ? activeConvCache : null);
   const conversationSectionTitle = inboxView === 'closed' ? 'Conversas encerradas' : 'Conversas ativas';
   const isRecordingAudio = audioRecordingPhase === 'recording';
   const isAudioBusy = audioRecordingPhase === 'requesting_permission'
@@ -1073,6 +1099,13 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       setReplyTarget(null);
       await outboundAttemptLedger.complete(attempt);
+      if (inboxView === 'bot' || selectedConv?.status === 'bot' || !selectedConv?.assignedUserId) {
+        setActiveConvCache((prev: any) => prev && prev.id === audio.conversationId ? { ...prev, status: 'open' } : prev);
+        selectAttendantScope('mine');
+        setSelectedConversation(audio.conversationId);
+        void utils.conversations.list.invalidate();
+        void utils.conversations.counts.invalidate();
+      }
     } catch (error) {
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       if (isDefinitiveOutboundClientFailure(error)) await outboundAttemptLedger.release(attempt);
@@ -1150,6 +1183,13 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       setReplyTarget(null);
       await outboundAttemptLedger.complete(stableAttempt);
+      if (inboxView === 'bot' || selectedConv?.status === 'bot' || !selectedConv?.assignedUserId) {
+        setActiveConvCache((prev: any) => prev && prev.id === selectedConv.id ? { ...prev, status: 'open' } : prev);
+        selectAttendantScope('mine');
+        setSelectedConversation(selectedConv.id);
+        void utils.conversations.list.invalidate();
+        void utils.conversations.counts.invalidate();
+      }
     } catch (error) {
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       setMessageInput(textToSend);
@@ -1494,8 +1534,20 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
               <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
                 {(selectedConv.status === 'bot' || selectedConv.status === 'waiting_human' || !selectedConv.assignedUserId) && selectedConv.status !== 'closed' && (
                   <button type="button" onClick={() => claimConversationMutation.mutate({ conversationId: selectedConv.id }, {
-                    onSuccess: async () => {
-                      await Promise.all([utils.conversations.list.invalidate(), utils.conversations.counts.invalidate()]);
+                    onSuccess: async (data: any) => {
+                      setActiveConvCache((prev: any) => prev && prev.id === selectedConv.id ? {
+                        ...prev,
+                        status: 'open',
+                        assignedUserId: data?.assignedUserId,
+                        assignedUserName: data?.assignedUserName,
+                      } : prev);
+                      selectAttendantScope('mine');
+                      setSelectedConversation(selectedConv.id);
+                      await Promise.all([
+                        utils.conversations.list.invalidate(),
+                        utils.conversations.counts.invalidate(),
+                        utils.conversations.messages.invalidate(),
+                      ]);
                       showToast('Conversa assumida com sucesso!', 'success');
                     },
                     onError: () => showToast('Não foi possível assumir a conversa', 'error'),
@@ -1635,8 +1687,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                       if (!messageId) return;
                       if (node) messageElementRefs.current.set(messageId, node);
                       else messageElementRefs.current.delete(messageId);
-                    }} data-testid="conversation-message" className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                      <div className={cn("group min-w-0 max-w-[85%]", isAgent ? "md:max-w-sm lg:max-w-lg" : "md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
+                    }} data-testid="conversation-message" className={cn("group relative flex", isAgent ? 'justify-end' : 'justify-start')}>
+                      <div className={cn("min-w-0 max-w-[85%]", isAgent ? "md:max-w-sm lg:max-w-lg" : "md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
                         <div data-testid="conversation-message-bubble" style={conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)} className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${
                           isAgent
                             ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
@@ -1653,7 +1705,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                           {renderContent()}
                           <div data-testid="conversation-message-metadata" className={`mt-2 flex items-center justify-end gap-1.5 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
                             <span>{msgTime}</span>
-                            {receipt && <span data-testid="conversation-message-receipt" data-status={receipt.status} data-icon={receipt.icon} aria-label={receipt.label} title={receipt.label} className={`inline-flex items-center ${receipt.tone}`}>
+                            {receipt && <span data-testid="conversation-message-receipt" data-status={receipt.status} data-icon={receipt.icon} aria-label={receipt.label} title={receipt.label} className={cn("inline-flex items-center", receipt.tone)}>
                               {receipt.icon === 'clock' && <Clock className="h-4 w-4" aria-hidden="true" />}
                               {receipt.icon === 'check' && <Check className="h-4 w-4" aria-hidden="true" />}
                               {receipt.icon === 'double-check' && <CheckCheck className="h-4 w-4" aria-hidden="true" />}
@@ -1662,7 +1714,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                           </div>
                         </div>
                         {canReply && <div className={cn('mt-1 flex', isAgent ? 'justify-end' : 'justify-start')}>
-                          <button type="button" data-testid="conversation-reply-action" onClick={() => selectReplyTarget(msg)} className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-slate-500 opacity-100 transition hover:bg-white hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 md:opacity-0 md:group-hover:opacity-100">
+                          <button type="button" data-testid="conversation-reply-action" onClick={() => selectReplyTarget(msg)} className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-slate-500 opacity-0 group-hover:opacity-100 max-md:opacity-100 focus-visible:opacity-100 transition-opacity duration-150 hover:bg-white hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
                             <Reply className="h-3.5 w-3.5" aria-hidden="true" />Responder
                           </button>
                         </div>}

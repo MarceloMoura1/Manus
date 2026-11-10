@@ -359,7 +359,7 @@ export const conversationsRouter = router({
 
       try {
         const { emitOperationalTenantEventAsync } = await import("./modules/whatsapp/socket/whatsapp.socket");
-        await emitOperationalTenantEventAsync(ctx.tenantId, "wa:conversation_updated", {
+        const convPayload = {
           conversation: {
             id: input.conversationId,
             status: "open",
@@ -367,7 +367,9 @@ export const conversationsRouter = router({
             assignedUserName: user.name,
             iaActive: 0,
           },
-        });
+        };
+        await emitOperationalTenantEventAsync(ctx.tenantId, "wa:conversation_updated", convPayload);
+        await emitOperationalTenantEventAsync(ctx.tenantId, "conversation:updated", convPayload);
       } catch {}
 
       return { ok: true, assignedUserId: user.user_id, assignedUserName: user.name };

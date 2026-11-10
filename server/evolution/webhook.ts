@@ -150,6 +150,13 @@ const EVOLUTION_RECEIPT_STATUS: Record<string, "pending" | "sent" | "delivered" 
 };
 
 export function canonicalEvolutionReceiptStatus(value: unknown): "pending" | "sent" | "delivered" | "read" | "played" | "failed" | null {
+  if (value === 1 || value === "1") return "sent";
+  if (value === 2 || value === "2") return "sent";
+  if (value === 3 || value === "3") return "delivered";
+  if (value === 4 || value === "4") return "read";
+  if (value === 5 || value === "5") return "played";
+  if (value === 0 || value === "0") return "failed";
+
   if (typeof value !== "string") return null;
   return EVOLUTION_RECEIPT_STATUS[value.trim().toUpperCase()] ?? null;
 }
@@ -187,10 +194,13 @@ export function parseEvolutionMessageStatusUpdates(data: Record<string, any> | R
         ? data.messages
         : [data];
   return candidates.flatMap((item: Record<string, any>) => {
-    const externalMessageId = [item?.keyId, item?.messageId, item?.key?.id, item?.id]
-      .find((value): value is string => typeof value === "string"
-        && value.trim().length > 0 && value.trim().length <= 180)?.trim();
-    const status = canonicalEvolutionReceiptStatus(item?.status ?? item?.update?.status);
+    const externalMessageId = [
+      item?.keyId, item?.messageId, item?.key?.id, item?.id,
+      item?.update?.key?.id, item?.update?.id, item?.update?.keyId,
+    ].find((value): value is string => typeof value === "string"
+      && value.trim().length > 0 && value.trim().length <= 180)?.trim();
+    const rawStatus = item?.status ?? item?.update?.status ?? item?.ack ?? item?.update?.ack;
+    const status = canonicalEvolutionReceiptStatus(rawStatus);
     const providerEventAt = canonicalEvolutionEventTimestamp(
       item?.timestamp ?? item?.messageTimestamp ?? item?.update?.timestamp ?? item?.update?.messageTimestamp,
     );
@@ -365,11 +375,14 @@ export async function handleMessagesUpdate(
 
     if (applied) {
       try {
-        const delivery = await emit(clientId, "conversation:receipt", {
+        const receiptPayload = {
           clientId,
+          externalMessageId: update.externalMessageId,
           status: update.status,
           receivedAt,
-        });
+        };
+        const delivery = await emit(clientId, "conversation:receipt", receiptPayload);
+        await emit(clientId, "message:status_updated", receiptPayload).catch(() => null);
         realtimeAttempted = delivery.attempted;
         realtimeEmitSucceeded = delivery.succeeded;
         realtimeRecipientCount = delivery.recipientCount;
