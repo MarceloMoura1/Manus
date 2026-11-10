@@ -526,6 +526,193 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
   );
 }
 
+type ConversationMessageItemProps = {
+  msg: any;
+  idx: number;
+  isAgent?: boolean;
+  highlightedMessageId: string | null;
+  messageElementRefs: React.MutableRefObject<Map<string, HTMLDivElement>>;
+  jumpToQuotedMessage: (messageId: string) => void;
+  conversationBackground: any;
+  style?: React.CSSProperties;
+  selectedConvId: string;
+  selectReplyTarget: (msg: any) => void;
+};
+
+function ConversationMessageItem({
+  msg,
+  idx,
+  isAgent: isAgentProp,
+  highlightedMessageId,
+  messageElementRefs,
+  jumpToQuotedMessage,
+  conversationBackground,
+  style,
+  selectedConvId,
+  selectReplyTarget,
+}: ConversationMessageItemProps) {
+  const [hovered, setHovered] = React.useState(false);
+
+  const isAgent = isAgentProp ?? (msg.sender === 'agent' || msg.from === 'agent' || msg.direction === 'outbound' || msg.sender === 'operator' || msg.from === 'operator');
+  const msgText = msg.text || msg.message || '';
+  const msgTime = formatConversationTime(msg.timestamp);
+  const msgType = msg.type || 'text';
+  const receipt = isAgent ? outboundReceipt(msg.status, msg.pending === true) : null;
+  const isShortText = msgType === 'text' && msgText.trim().length <= 72;
+  const messageId = typeof msg.id === 'string' ? msg.id : '';
+  const canReply = Boolean(messageId) && !msg.pending;
+
+  const renderContent = () => {
+    if (msgType === 'image') {
+      return (
+        <div className="space-y-2">
+          <ConversationMedia conversationId={selectedConvId} message={msg} fallback={<Image className="w-5 h-5" />} />
+          {msgText && !/^\[imagem\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
+        </div>
+      );
+    }
+    if (msgType === 'audio') {
+      return (
+        <ConversationMedia conversationId={selectedConvId} message={msg} fallback={<div className="flex items-center gap-2"><Mic className="w-4 h-4" /><span className="text-sm">Mensagem de áudio indisponível</span></div>} />
+      );
+    }
+    if (msgType === 'video') {
+      return (
+        <div className="space-y-2">
+          <ConversationMedia conversationId={selectedConvId} message={msg} fallback={<Video className="w-5 h-5" />} />
+          {msgText && !/^\[vídeo\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
+        </div>
+      );
+    }
+    if (msgType === 'document') {
+      return (
+        <div className="space-y-2">
+          <ConversationMedia conversationId={selectedConvId} message={msg} fallback={<div className="flex items-center gap-2"><FileText className="w-4 h-4 flex-shrink-0" /><span className="text-sm">Documento indisponível</span></div>} />
+          {msgText && !/^\[documento\]$/i.test(msgText) && <p className="whitespace-pre-wrap break-words text-sm">{msgText}</p>}
+        </div>
+      );
+    }
+    if (msgType === 'sticker') {
+      return (
+        <ConversationMedia conversationId={selectedConvId} message={msg} fallback={<div className="flex items-center gap-2"><Smile className="w-4 h-4" /><span className="text-sm">Figurinha indisponível</span></div>} />
+      );
+    }
+    if (msgType === 'location') {
+      return (
+        <div className="flex items-center gap-2">
+          <MapPinIcon className="w-4 h-4 flex-shrink-0" />
+          <span className="text-sm">Localização</span>
+        </div>
+      );
+    }
+    if (msgType === 'contact') {
+      const contactPhone = String(msg.contact?.vcard || '').match(/TEL[^:]*:([^\r\n]+)/i)?.[1]?.replace(/\D/g, '') || '';
+      return (
+        <div className="min-w-64 space-y-3">
+          <div className="flex items-center gap-3"><div className="rounded-full bg-emerald-100 p-2"><User className="h-5 w-5 text-emerald-700" /></div><div><p className="font-semibold">{msg.contact?.name || 'Contato compartilhado'}</p>{contactPhone && <p className="text-xs opacity-70">+{contactPhone}</p>}</div></div>
+          {contactPhone && <button type="button" onClick={() => {
+            localStorage.setItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE', contactPhone);
+            window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'active-attendance', phone: contactPhone } }));
+          }} className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Iniciar conversa</button>}
+        </div>
+      );
+    }
+    return <p className="text-sm">{msgText}</p>;
+  };
+
+  return (
+    <div
+      key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`}
+      data-message-id={messageId || undefined}
+      ref={node => {
+        if (!messageId) return;
+        if (node) messageElementRefs.current.set(messageId, node);
+        else messageElementRefs.current.delete(messageId);
+      }}
+      data-testid="conversation-message"
+      className={cn("flex", isAgent ? 'justify-end' : 'justify-start')}
+    >
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        className={cn(
+          "group/bubble relative min-w-0 max-w-[85%]",
+          isAgent ? "md:max-w-sm lg:max-w-lg" : "md:max-w-xs lg:max-w-md",
+          isShortText && "min-w-[9rem] sm:min-w-[10rem]"
+        )}
+      >
+        <div
+          data-testid="conversation-message-bubble"
+          style={style || conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)}
+          className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${
+            isAgent
+              ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
+              : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'
+          }`}
+        >
+          {msg.replyTo && (
+            <button
+              type="button"
+              data-testid="conversation-message-quote"
+              disabled={!msg.replyTo.available}
+              onClick={() => {
+                if (msg.replyTo?.available) jumpToQuotedMessage(msg.replyTo.messageId);
+              }}
+              className={cn(
+                'mb-2 block w-full rounded-lg border-l-2 px-2.5 py-2 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 disabled:cursor-default disabled:opacity-70',
+                isAgent ? 'border-blue-100 bg-white/15 text-blue-50 hover:bg-white/20 focus-visible:ring-white' : 'border-violet-400 bg-slate-50 text-slate-600 hover:bg-violet-50 focus-visible:ring-violet-500'
+              )}
+            >
+              <span className="block truncate font-bold">{replyAuthor(msg.replyTo)}</span>
+              <span className="block truncate opacity-90">{replyPreview(msg.replyTo)}</span>
+            </button>
+          )}
+          {isAgent && <p className="mb-1.5 text-xs font-bold text-white">{operatorDisplayName(msg)}</p>}
+          {renderContent()}
+          <div data-testid="conversation-message-metadata" className={`mt-2 flex items-center justify-end gap-1.5 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
+            <span>{msgTime}</span>
+            {receipt && (
+              <span
+                data-testid="conversation-message-receipt"
+                data-status={receipt.status}
+                data-icon={receipt.icon}
+                aria-label={receipt.label}
+                title={receipt.label}
+                className={cn("inline-flex items-center", receipt.tone)}
+              >
+                {receipt.icon === 'clock' && <Clock className="h-3.5 w-3.5" aria-hidden="true" />}
+                {receipt.icon === 'check' && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                {receipt.icon === 'double-check' && <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
+                {receipt.icon === 'alert' && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
+              </span>
+            )}
+          </div>
+        </div>
+        {canReply && (
+          <div
+            className={cn(
+              'mt-1 flex transition-opacity duration-150',
+              isAgent ? 'justify-end' : 'justify-start',
+              hovered
+                ? 'opacity-100 pointer-events-auto visible'
+                : 'opacity-0 pointer-events-none invisible group-hover/bubble:visible group-hover/bubble:opacity-100 group-hover/bubble:pointer-events-auto'
+            )}
+          >
+            <button
+              type="button"
+              data-testid="conversation-reply-action"
+              onClick={() => selectReplyTarget(msg)}
+              className="cursor-pointer select-none text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 rounded px-1"
+            >
+              <Reply className="h-3.5 w-3.5" aria-hidden="true" />Responder
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttendanceLaunchConsumed }: {
   attendanceLaunch: number;
   attendancePhone: string;
@@ -1649,121 +1836,25 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                 }
                 return <>
                   {msgs.map((msg: any, idx: number) => {
-                  if (msg.kind === 'activity') {
-                    return <ConversationActivityEvent key={msg.id ?? `activity-${idx}`} event={msg} />;
-                  }
-                  const isAgent = msg.sender === 'agent' || msg.from === 'agent' || msg.direction === 'outbound' || msg.sender === 'operator' || msg.from === 'operator';
-                  const msgText = msg.text || msg.message || '';
-                  const msgTime = formatConversationTime(msg.timestamp);
-                  const msgType = msg.type || 'text';
-                  const receipt = isAgent ? outboundReceipt(msg.status, msg.pending === true) : null;
-                  const isShortText = msgType === 'text' && msgText.trim().length <= 72;
-                  const messageId = typeof msg.id === 'string' ? msg.id : '';
-                  const canReply = Boolean(messageId) && !msg.pending;
-                  
-                  // Renderização de mídia
-                  const renderContent = () => {
-                    if (msgType === 'image') {
-                      return (
-                        <div className="space-y-2">
-                          <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<Image className="w-5 h-5" />} />
-                          {msgText && !/^\[imagem\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
-                        </div>
-                      );
+                    if (msg.kind === 'activity') {
+                      return <ConversationActivityEvent key={msg.id ?? `activity-${idx}`} event={msg} />;
                     }
-                    if (msgType === 'audio') {
-                      return (
-                        <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<div className="flex items-center gap-2"><Mic className="w-4 h-4" /><span className="text-sm">Mensagem de áudio indisponível</span></div>} />
-                      );
-                    }
-                    if (msgType === 'video') {
-                      return (
-                        <div className="space-y-2">
-                          <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<Video className="w-5 h-5" />} />
-                          {msgText && !/^\[vídeo\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
-                        </div>
-                      );
-                    }
-                    if (msgType === 'document') {
-                      return (
-                        <div className="space-y-2">
-                          <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<div className="flex items-center gap-2"><FileText className="w-4 h-4 flex-shrink-0" /><span className="text-sm">Documento indisponível</span></div>} />
-                          {msgText && !/^\[documento\]$/i.test(msgText) && <p className="whitespace-pre-wrap break-words text-sm">{msgText}</p>}
-                        </div>
-                      );
-                    }
-                    if (msgType === 'sticker') {
-                      return (
-                        <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<div className="flex items-center gap-2"><Smile className="w-4 h-4" /><span className="text-sm">Figurinha indisponível</span></div>} />
-                      );
-                    }
-                    if (msgType === 'location') {
-                      return (
-                        <div className="flex items-center gap-2">
-                          <MapPinIcon className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-sm">Localização</span>
-                        </div>
-                      );
-                    }
-                    if (msgType === 'contact') {
-                      const contactPhone = String(msg.contact?.vcard || '').match(/TEL[^:]*:([^\r\n]+)/i)?.[1]?.replace(/\D/g, '') || '';
-                      return (
-                        <div className="min-w-64 space-y-3">
-                          <div className="flex items-center gap-3"><div className="rounded-full bg-emerald-100 p-2"><User className="h-5 w-5 text-emerald-700" /></div><div><p className="font-semibold">{msg.contact?.name || 'Contato compartilhado'}</p>{contactPhone && <p className="text-xs opacity-70">+{contactPhone}</p>}</div></div>
-                          {contactPhone && <button type="button" onClick={() => {
-                            localStorage.setItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE', contactPhone);
-                            window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'active-attendance', phone: contactPhone } }));
-                          }} className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Iniciar conversa</button>}
-                        </div>
-                      );
-                    }
-                    return <p className="text-sm">{msgText}</p>;
-                  };
-                  
-                  return (
-                    <div key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`} data-message-id={messageId || undefined} ref={node => {
-                      if (!messageId) return;
-                      if (node) messageElementRefs.current.set(messageId, node);
-                      else messageElementRefs.current.delete(messageId);
-                    }} data-testid="conversation-message" className={cn("flex", isAgent ? 'justify-end' : 'justify-start')}>
-                      <div className={cn("group relative min-w-0 max-w-[85%]", isAgent ? "md:max-w-sm lg:max-w-lg" : "md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
-                        <div data-testid="conversation-message-bubble" style={conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)} className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${
-                          isAgent
-                            ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
-                            : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'
-                        }`}>
-                          {msg.replyTo && <button type="button" data-testid="conversation-message-quote" disabled={!msg.replyTo.available} onClick={() => {
-                            if (msg.replyTo?.available) jumpToQuotedMessage(msg.replyTo.messageId);
-                          }} className={cn('mb-2 block w-full rounded-lg border-l-2 px-2.5 py-2 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 disabled:cursor-default disabled:opacity-70',
-                            isAgent ? 'border-blue-100 bg-white/15 text-blue-50 hover:bg-white/20 focus-visible:ring-white' : 'border-violet-400 bg-slate-50 text-slate-600 hover:bg-violet-50 focus-visible:ring-violet-500')}>
-                            <span className="block truncate font-bold">{replyAuthor(msg.replyTo)}</span>
-                            <span className="block truncate opacity-90">{replyPreview(msg.replyTo)}</span>
-                          </button>}
-                          {isAgent && <p className="mb-1.5 text-xs font-bold text-white">{operatorDisplayName(msg)}</p>}
-                          {renderContent()}
-                          <div data-testid="conversation-message-metadata" className={`mt-2 flex items-center justify-end gap-1.5 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
-                            <span>{msgTime}</span>
-                            {receipt && <span data-testid="conversation-message-receipt" data-status={receipt.status} data-icon={receipt.icon} aria-label={receipt.label} title={receipt.label} className={cn("inline-flex items-center", receipt.tone)}>
-                              {receipt.icon === 'clock' && <Clock className="h-3.5 w-3.5" aria-hidden="true" />}
-                              {receipt.icon === 'check' && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
-                              {receipt.icon === 'double-check' && <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
-                              {receipt.icon === 'alert' && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
-                            </span>}
-                          </div>
-                        </div>
-                        {canReply && <div className={cn('mt-1 flex', isAgent ? 'justify-end' : 'justify-start')}>
-                          <button
-                            type="button"
-                            data-testid="conversation-reply-action"
-                            onClick={() => selectReplyTarget(msg)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto cursor-pointer select-none text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 mt-1 flex items-center gap-1"
-                          >
-                            <Reply className="h-3.5 w-3.5" aria-hidden="true" />Responder
-                          </button>
-                        </div>}
-                      </div>
-                    </div>
-                  );
+                    const isAgent = msg.sender === 'agent' || msg.from === 'agent' || msg.direction === 'outbound' || msg.sender === 'operator' || msg.from === 'operator';
+                    return (
+                      <ConversationMessageItem
+                        key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`}
+                        msg={msg}
+                        idx={idx}
+                        isAgent={isAgent}
+                        highlightedMessageId={highlightedMessageId}
+                        messageElementRefs={messageElementRefs}
+                        jumpToQuotedMessage={jumpToQuotedMessage}
+                        conversationBackground={conversationBackground}
+                        style={conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)}
+                        selectedConvId={selectedConv.id}
+                        selectReplyTarget={selectReplyTarget}
+                      />
+                    );
                   })}
                   {indeterminate.length > 0 && <section data-testid="conversation-indeterminate-history" aria-label="Histórico anterior sem horário confirmado" className="space-y-3 border-t border-dashed border-slate-300 pt-4">
                     <h3 className="text-center text-xs font-semibold text-slate-500">Histórico anterior sem horário confirmado</h3>
