@@ -68,6 +68,17 @@ export async function sendText(input: SendTextMessageInput) {
     emitNewMessage(input.clientId, updatedConv, updatedMsg);
     emitConversationUpdated(input.clientId, updatedConv);
 
+    // Sincronização com atendimento humano: silencia o robô por 24h
+    try {
+      const { getPool } = await import("../../../db");
+      await getPool().execute(
+        "UPDATE megadesk_domain_conversations SET ia_active = 0, bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR), updated_at = NOW() WHERE (conversation_id = ? OR phone = ?) AND client_id = ?",
+        [conversation.id, conversation.customerPhone, input.clientId]
+      );
+    } catch {
+      // Non-blocking
+    }
+
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {
     const diagnostic = whatsappProviderDiagnostic(err, "send_text", "provider_request");
@@ -129,6 +140,17 @@ export async function sendMedia(input: SendMediaMessageInput & { conversationId:
     emitNewMessage(input.clientId, updatedConv, updatedMsg);
     emitConversationUpdated(input.clientId, updatedConv);
 
+    // Sincronização com atendimento humano: silencia o robô por 24h
+    try {
+      const { getPool } = await import("../../../db");
+      await getPool().execute(
+        "UPDATE megadesk_domain_conversations SET ia_active = 0, bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR), updated_at = NOW() WHERE (conversation_id = ? OR phone = ?) AND client_id = ?",
+        [conversation.id, conversation.customerPhone, input.clientId]
+      );
+    } catch {
+      // Non-blocking
+    }
+
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {
     const diagnostic = whatsappProviderDiagnostic(err, "send_media", "provider_request");
@@ -172,6 +194,17 @@ export async function sendTemplate(input: SendTemplateMessageInput & { conversat
     if (waMessageId) await updateMessageWaId(input.clientId, message.id, waMessageId, "sent");
 
     await updateConversationLastMessage(conversation.id, input.clientId, content, false);
+
+    // Sincronização com atendimento humano: silencia o robô por 24h
+    try {
+      const { getPool } = await import("../../../db");
+      await getPool().execute(
+        "UPDATE megadesk_domain_conversations SET ia_active = 0, bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR), updated_at = NOW() WHERE (conversation_id = ? OR phone = ?) AND client_id = ?",
+        [conversation.id, conversation.customerPhone, input.clientId]
+      );
+    } catch {
+      // Non-blocking
+    }
 
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {

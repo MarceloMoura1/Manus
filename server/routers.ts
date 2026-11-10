@@ -1142,6 +1142,18 @@ export const appRouter = router({
           conversation.lastMessage = input.message;
           conversation.time = time;
         }
+
+        // Sincronização com atendimento humano (Human Takeover): silencia o robô por 24 horas
+        try {
+          await getPool().execute(
+            `UPDATE megadesk_domain_conversations
+             SET ia_active = 0, bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR), updated_at = NOW()
+             WHERE conversation_id = ? AND client_id = ?`,
+            [input.conversationId, ctx.tenantId]
+          );
+        } catch (botSilenceErr) {
+          console.warn("[HumanTakeover] Falha não bloqueante ao silenciar bot na conversa:", botSilenceErr);
+        }
       } catch (error) {
         throw new TRPCError({
           code: isOutboundOutcomeUncertain(error) ? "CONFLICT" : "BAD_GATEWAY",
