@@ -193,8 +193,8 @@ class TypebotWorkspaceService {
         userId = generateCuid("u");
         await client.query(
           `INSERT INTO "User" (
-            id, name, email, "emailVerified", "createdAt", "updatedAt", "lastActivityAt"
-          ) VALUES ($1, $2, $3, NOW(), NOW(), NOW(), NOW())`,
+            id, name, email, "emailVerified", "createdAt", "updatedAt", "lastActivityAt", "onboardingCategories"
+          ) VALUES ($1, $2, $3, NOW(), NOW(), NOW(), NOW(), '[]'::jsonb)`,
           [userId, cleanUserName, cleanEmail]
         );
       }
