@@ -42,7 +42,11 @@ import {
   handleGetProducts,
   handleGetTickets,
   handleCreateOrUpdateLead,
+  queryErpProducts,
+  queryTicketsByPhone,
+  saveLead,
 } from "./bot.router";
+import { executeHermesErpAction } from "../../hermes-erp-actions";
 
 function createMockResponse() {
   const res: any = {
@@ -148,7 +152,7 @@ describe("Bot Router Handlers", () => {
     expect(res.body).toMatchObject({
       ok: true,
       action: "transfer_to_human",
-      status: "AGUARDANDO_HUMANO",
+      status: "waiting_human",
       conversationId: "conv-123",
     });
 
@@ -251,5 +255,99 @@ describe("Bot Router Handlers", () => {
         email: "joao@exemplo.com",
       },
     });
+  });
+
+  it("queryErpProducts - deve buscar produtos formatados", async () => {
+    mockPoolExecute.mockResolvedValueOnce([
+      [
+        { name: "Cabo de Rede Cat6", price: "45.00", stock_quantity: 10 },
+      ],
+    ]);
+
+    const res = await queryErpProducts("tenant-1", "Cabo");
+    expect(res).toEqual([
+      { name: "Cabo de Rede Cat6", price: 45, inStock: true },
+    ]);
+  });
+
+  it("queryTicketsByPhone - deve retornar chamados formatados", async () => {
+    mockPoolExecute.mockResolvedValueOnce([
+      [
+        {
+          id: "ticket-1",
+          number: 101,
+          title: "Sem internet",
+          status: "open",
+          createdAt: new Date("2026-11-10T00:00:00.000Z"),
+        },
+      ],
+    ]);
+
+    const res = await queryTicketsByPhone("tenant-1", "41999998888");
+    expect(res).toHaveLength(1);
+    expect(res[0].title).toBe("Sem internet");
+    expect(res[0].status).toBe("Aberto");
+  });
+
+  it("saveLead - deve atualizar lead se já existir por telefone", async () => {
+    mockPoolExecute
+      .mockResolvedValueOnce([[{ crm_client_id: "lead-existing-1" }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const res = await saveLead("tenant-1", {
+      name: "Maria Santos",
+      phone: "41999991111",
+      email: "maria@empresa.com",
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.action).toBe("updated");
+    expect(res.lead.crmClientId).toBe("lead-existing-1");
+  });
+
+  it("BotDispatcherService.sendTextMessage - deve enviar via Evolution quando provider for evolution", async () => {
+    mockListWaAccounts.mockResolvedValueOnce([{ provider: "evolution", instance_name: "megadesk-tenant-1" }]);
+    mockEvoSendText.mockResolvedValueOnce({ key: { id: "msg-123" } });
+
+    const dispatcher = new BotDispatcherService();
+    await dispatcher.sendTextMessage({
+      tenantId: "tenant-1",
+      to: "5541999998888",
+      text: "Olá!",
+    });
+
+    expect(mockEvoSendText).toHaveBeenCalledWith("megadesk-tenant-1", "5541999998888", "Olá!");
+  });
+
+  it("executeHermesErpAction - SEND_WHATSAPP_OUTBOUND deve disparar mensagens e registrar conversa", async () => {
+    mockListWaAccounts.mockResolvedValue([{ provider: "evolution", instance_name: "megadesk-tenant-1" }]);
+    mockEvoSendText.mockResolvedValue({ key: { id: "msg-123" } });
+    mockPoolExecute
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const res = await executeHermesErpAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userName: "Marcelo",
+      role: "admin",
+      action: {
+        actionType: "SEND_WHATSAPP_OUTBOUND",
+        args: {
+          recipients: [{ name: "Fornecedor Alfa", phone: "5541999990001" }],
+          message: "Prezado, solicitamos cotação de cabos.",
+          category: "Cotação",
+        },
+      },
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.message).toContain("fornecedores");
+    expect(mockEvoSendText).toHaveBeenCalledWith(
+      "megadesk-tenant-1",
+      "5541999990001",
+      "Prezado, solicitamos cotação de cabos."
+    );
   });
 });

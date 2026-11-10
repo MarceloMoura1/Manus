@@ -12,7 +12,7 @@ const id = z.string().min(1).max(80);
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inv\u00e1lida.");
 
 const listInput = z.object({
-  viewMode: z.enum(["all", "mine", "waiting"]).default("all"),
+  viewMode: z.enum(["all", "mine", "waiting", "bot"]).default("all"),
   status: z.enum(["active", "closed"]).default("active"),
   search: z.string().trim().max(120).default(""),
   dateFrom: calendarDate.optional(),
@@ -203,9 +203,11 @@ export const conversationsRouter = router({
       WHERE u.client_id = c.client_id AND u.user_id = c.assigned_user_id AND u.status = 'active'
         AND u.role IN ('admin','manager','agent')
         AND JSON_CONTAINS(u.permissions_json, JSON_QUOTE('conversations')))`;
-    const activeCondition = input.viewMode === "waiting"
-      ? "c.status = 'bot' AND c.assigned_user_id IS NULL"
-      : `c.status = 'open' AND c.assigned_user_id IS NOT NULL AND ${eligibleOwner}`;
+    const activeCondition = input.viewMode === "bot"
+      ? "c.status = 'bot'"
+      : input.viewMode === "waiting"
+        ? "c.status IN ('bot', 'waiting_human') AND (c.assigned_user_id IS NULL OR c.assigned_user_id = 'bot_system')"
+        : `c.status = 'open' AND c.assigned_user_id IS NOT NULL AND ${eligibleOwner}`;
     const conditions = ["c.client_id = ?", input.status === "closed" ? "c.status = 'closed'" : activeCondition];
     const values: unknown[] = [ctx.tenantId];
     if (input.status === "active" && input.viewMode === "mine") { conditions.push("c.assigned_user_id = ?"); values.push(ctx.operationalUserId); }
@@ -276,7 +278,8 @@ export const conversationsRouter = router({
              AND u.role IN ('admin','manager','agent')
              AND JSON_CONTAINS(u.permissions_json, JSON_QUOTE('conversations')))) AS active,
        SUM(c.status = 'closed') AS closed,
-       SUM(c.status = 'bot' AND c.assigned_user_id IS NULL) AS waiting,
+       SUM(c.status IN ('bot', 'waiting_human') AND (c.assigned_user_id IS NULL OR c.assigned_user_id = 'bot_system')) AS waiting,
+       SUM(c.status = 'bot') AS bot,
        SUM(c.status = 'open' AND c.assigned_user_id = ?) AS mine
        FROM megadesk_domain_conversations c WHERE c.client_id = ?`,
       [ctx.operationalUserId, ctx.tenantId],
@@ -346,13 +349,28 @@ export const conversationsRouter = router({
       await connection.beginTransaction();
       const [result] = await connection.execute(
         `UPDATE megadesk_domain_conversations SET status = 'open', assigned_user_id = ?, assigned_user_name = ?,
-         ia_active = 0, bot_suspended_at = NOW(), updated_at = NOW()
-         WHERE conversation_id = ? AND client_id = ? AND status = 'bot' AND assigned_user_id IS NULL`,
+         ia_active = 0, bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR), updated_at = NOW()
+         WHERE conversation_id = ? AND client_id = ? AND (status IN ('bot', 'waiting_human') OR assigned_user_id IS NULL OR assigned_user_id = 'bot_system')`,
         [user.user_id, user.name, input.conversationId, ctx.tenantId],
       ) as any[];
       if (!result.affectedRows) throw new TRPCError({ code: "CONFLICT", message: "Esta conversa já foi assumida por outra pessoa." });
       await attendanceEvent(connection, ctx.tenantId, input.conversationId, "claimed", user.user_id);
-      await connection.commit(); return { ok: true, assignedUserId: user.user_id, assignedUserName: user.name };
+      await connection.commit();
+
+      try {
+        const { emitOperationalTenantEventAsync } = await import("./modules/whatsapp/socket/whatsapp.socket");
+        await emitOperationalTenantEventAsync(ctx.tenantId, "wa:conversation_updated", {
+          conversation: {
+            id: input.conversationId,
+            status: "open",
+            assignedUserId: user.user_id,
+            assignedUserName: user.name,
+            iaActive: 0,
+          },
+        });
+      } catch {}
+
+      return { ok: true, assignedUserId: user.user_id, assignedUserName: user.name };
     } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
   }),
 

@@ -211,7 +211,7 @@ export type HermesToolType = "READ" | "MUTATION";
 export type HermesPermission = string;
 export type HermesTicketActionType = "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY";
 export type HermesCrmActionType = "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP";
-export type HermesErpActionType = "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE";
+export type HermesErpActionType = "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE" | "SEND_WHATSAPP_OUTBOUND";
 export type HermesActionType = HermesTicketActionType | HermesCrmActionType | HermesErpActionType;
 
 export interface GeminiFunctionDeclaration {
@@ -1291,6 +1291,62 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
   },
   { name: "send_supplier_message", type: "MUTATION", actionType: "SEND_SUPPLIER_MESSAGE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "send_supplier_message", description: "Prepara mensagem a fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, recipientPhone: { type: "STRING" }, messageText: { type: "STRING" } }, required: ["supplierId", "recipientPhone", "messageText"] } }, validateArgs: args => erpActionArgs(args, "message") },
   {
+    name: "send_whatsapp_outbound",
+    type: "MUTATION",
+    actionType: "SEND_WHATSAPP_OUTBOUND",
+    requiredPermissions: ["suppliers", "purchases", "erp", "conversations", "sales", "crm"],
+    declaration: {
+      name: "send_whatsapp_outbound",
+      description: "Dispara mensagens ativas via WhatsApp para múltiplos destinatários (fornecedores ou clientes), mediante aprovação humana obrigatória (HITL).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          recipients: {
+            type: "ARRAY",
+            description: "Lista de destinatários com nome e telefone (obrigatório)",
+            items: {
+              type: "OBJECT",
+              properties: {
+                name: { type: "STRING", description: "Nome do contato ou empresa" },
+                phone: { type: "STRING", description: "Número de telefone ou WhatsApp com DDD" },
+              },
+              required: ["name", "phone"],
+            },
+          },
+          message: {
+            type: "STRING",
+            description: "Texto da mensagem a ser disparada pelo WhatsApp (obrigatório)",
+          },
+          category: {
+            type: "STRING",
+            enum: ["supplier_quote", "customer_followup", "general"],
+            description: "Categoria do disparo (supplier_quote para cotação, customer_followup para clientes, general para geral)",
+          },
+        },
+        required: ["recipients", "message"],
+      },
+    },
+    validateArgs: args => {
+      objectArgs(args);
+      const rawRecipients = args.recipients;
+      if (!Array.isArray(rawRecipients) || rawRecipients.length === 0) {
+        throw new Error("A lista de destinatários deve conter ao menos um contato com nome e telefone.");
+      }
+      const recipients = rawRecipients.map((r, i) => {
+        if (!r || typeof r !== "object") throw new Error(`Destinatário na posição ${i} inválido.`);
+        const item = r as Record<string, unknown>;
+        const name = String(item.name || "").trim();
+        const phone = String(item.phone || "").trim();
+        if (!name) throw new Error(`Nome do destinatário na posição ${i} é obrigatório.`);
+        if (!phone) throw new Error(`Telefone do destinatário na posição ${i} é obrigatório.`);
+        return { name, phone };
+      });
+      const message = stringArg(args, "message", { min: 1, max: 2000 })!;
+      const category = typeof args.category === "string" ? String(args.category).trim() : "general";
+      return { recipients, message, category };
+    },
+  },
+  {
     name: "get_conversations_summary",
     type: "READ",
     requiredPermissions: ["conversations", "chat"],
@@ -1415,6 +1471,11 @@ export function getAuthorizedHermesTool(name: string, permissions: readonly stri
 /** Descrição amigável de uma mutação pendente, usada no card de aprovação humana. */
 export function summarizePendingAction(actionType: HermesActionType, args: Record<string, unknown>): string {
   const name = String(args.name ?? args.legalName ?? "").trim();
+  if (actionType === "SEND_WHATSAPP_OUTBOUND") {
+    const recipients = Array.isArray(args.recipients) ? args.recipients : [];
+    const cat = args.category === "supplier_quote" ? "Cotação para fornecedores" : args.category === "customer_followup" ? "Follow-up de clientes" : "Disparo ativo";
+    return `Disparar mensagem via WhatsApp (${cat}) para ${recipients.length} destinatário(s).`;
+  }
   if (actionType === "CREATE_CLIENT") return `Cadastrar o cliente "${name}"${args.phone ? ` (telefone ${String(args.phone)})` : ""}.`;
   if (actionType === "CREATE_SUPPLIER") return `Cadastrar o fornecedor "${name}".`;
   if (actionType === "UPDATE_SUPPLIER") {

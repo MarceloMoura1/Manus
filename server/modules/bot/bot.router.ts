@@ -66,7 +66,7 @@ export async function handleTypebotWebhook(req: Request, res: Response): Promise
       if (!targetConversationId && phone) {
         const [convRows] = await pool.execute(
           `SELECT conversation_id FROM megadesk_domain_conversations
-           WHERE client_id = ? AND (phone = ? OR phone LIKE ?) AND status IN ('open', 'bot')
+           WHERE client_id = ? AND (phone = ? OR phone LIKE ?) AND status IN ('open', 'bot', 'waiting_human')
            ORDER BY updated_at DESC LIMIT 1`,
           [clientId, phone, `%${phone.slice(-8)}`]
         ) as any[];
@@ -80,7 +80,7 @@ export async function handleTypebotWebhook(req: Request, res: Response): Promise
         // Marca a conversa para atendimento humano e silencia o bot por 24 horas
         await pool.execute(
           `UPDATE megadesk_domain_conversations
-           SET status = 'open',
+           SET status = 'waiting_human',
                assigned_user_id = NULL,
                assigned_user_name = NULL,
                ia_active = 0,
@@ -103,7 +103,7 @@ export async function handleTypebotWebhook(req: Request, res: Response): Promise
         emitOperationalTenantEvent(clientId, "wa:conversation_updated", {
           conversation: {
             id: targetConversationId,
-            status: "AGUARDANDO_HUMANO",
+            status: "waiting_human",
             assignedUserId: null,
             iaActive: 0,
           },
@@ -113,7 +113,7 @@ export async function handleTypebotWebhook(req: Request, res: Response): Promise
       return res.status(200).json({
         ok: true,
         action: "transfer_to_human",
-        status: "AGUARDANDO_HUMANO",
+        status: "waiting_human",
         conversationId: targetConversationId,
         message: "Transbordo para fila humana concluído e bot silenciado.",
       });
@@ -127,6 +127,30 @@ export async function handleTypebotWebhook(req: Request, res: Response): Promise
 }
 
 // ─── 2. TOOLS: CONSULTA DE PRODUTOS/SERVIÇOS ERP ──────────────────────────
+export async function queryErpProducts(clientId: string, search = ""): Promise<Array<{ name: string; price: number; inStock: boolean }>> {
+  const pool = getPool();
+  const searchPattern = `%${search}%`;
+  const [rows] = await pool.execute(
+    `SELECT 
+       p.name,
+       ROUND(COALESCE(p.sale_price_cents, 0) / 100.0, 2) AS price,
+       COALESCE(sb.quantity, 0) AS stock_quantity
+     FROM erp_products p
+     LEFT JOIN erp_stock_balances sb ON sb.client_id = p.client_id AND sb.product_id = p.id
+     WHERE p.client_id = ? AND p.active = 1
+       AND (? = '' OR p.name LIKE ? OR p.sku LIKE ?)
+     ORDER BY p.name ASC
+     LIMIT 25`,
+    [clientId, search, searchPattern, searchPattern]
+  ) as any[];
+
+  return rows.map((r: any) => ({
+    name: String(r.name || ""),
+    price: Number(r.price || 0),
+    inStock: Number(r.stock_quantity || 0) > 0,
+  }));
+}
+
 export async function handleGetProducts(req: Request, res: Response): Promise<Response> {
   try {
     const auth = await resolveTenantAuth(req);
@@ -135,29 +159,7 @@ export async function handleGetProducts(req: Request, res: Response): Promise<Re
     }
 
     const search = String(req.query.search || "").trim();
-    const pool = getPool();
-
-    const searchPattern = `%${search}%`;
-    const [rows] = await pool.execute(
-      `SELECT 
-         p.name,
-         ROUND(COALESCE(p.sale_price_cents, 0) / 100.0, 2) AS price,
-         COALESCE(sb.quantity, 0) AS stock_quantity
-       FROM erp_products p
-       LEFT JOIN erp_stock_balances sb ON sb.client_id = p.client_id AND sb.product_id = p.id
-       WHERE p.client_id = ? AND p.active = 1
-         AND (? = '' OR p.name LIKE ? OR p.sku LIKE ?)
-       ORDER BY p.name ASC
-       LIMIT 25`,
-      [auth.clientId, search, searchPattern, searchPattern]
-    ) as any[];
-
-    const products = rows.map((r: any) => ({
-      name: String(r.name || ""),
-      price: Number(r.price || 0),
-      inStock: Number(r.stock_quantity || 0) > 0,
-    }));
-
+    const products = await queryErpProducts(auth.clientId, search);
     return res.status(200).json(products);
   } catch (error: any) {
     console.error("[BotTools] Erro ao consultar produtos:", error);
@@ -166,6 +168,49 @@ export async function handleGetProducts(req: Request, res: Response): Promise<Re
 }
 
 // ─── 3. TOOLS: CONSULTA DE CHAMADOS (TICKETS) ─────────────────────────────
+export async function queryTicketsByPhone(clientId: string, phoneRaw: string): Promise<Array<{ id: string; number: number; title: string; status: string; statusRaw: string; createdAt: string }>> {
+  const phoneDigits = phoneRaw.replace(/\D/g, "");
+  if (!phoneDigits) return [];
+
+  const pool = getPool();
+  const phoneSuffix = phoneDigits.slice(-8);
+
+  const [rows] = await pool.execute(
+    `SELECT 
+       chamado_id AS id,
+       chamado_number AS number,
+       title,
+       status,
+       created_at AS createdAt
+     FROM megadesk_domain_chamados
+     WHERE client_id = ?
+       AND (
+         customer_phone = ? 
+         OR customer_phone LIKE ?
+         OR REPLACE(REPLACE(REPLACE(REPLACE(customer_phone, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?
+       )
+     ORDER BY chamado_number DESC
+     LIMIT 10`,
+    [clientId, phoneRaw, `%${phoneSuffix}`, `%${phoneSuffix}%`]
+  ) as any[];
+
+  const statusMap: Record<string, string> = {
+    open: "Aberto",
+    in_progress: "Em Andamento",
+    waiting: "Aguardando",
+    closed: "Encerrado",
+  };
+
+  return rows.map((r: any) => ({
+    id: String(r.id),
+    number: Number(r.number),
+    title: String(r.title || "Sem título"),
+    status: statusMap[r.status] || r.status || "Aberto",
+    statusRaw: r.status,
+    createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+  }));
+}
+
 export async function handleGetTickets(req: Request, res: Response): Promise<Response> {
   try {
     const auth = await resolveTenantAuth(req);
@@ -180,44 +225,7 @@ export async function handleGetTickets(req: Request, res: Response): Promise<Res
       return res.status(400).json({ error: "Parâmetro phone é obrigatório." });
     }
 
-    const pool = getPool();
-    const phoneSuffix = phoneDigits.slice(-8);
-
-    const [rows] = await pool.execute(
-      `SELECT 
-         chamado_id AS id,
-         chamado_number AS number,
-         title,
-         status,
-         created_at AS createdAt
-       FROM megadesk_domain_chamados
-       WHERE client_id = ?
-         AND (
-           customer_phone = ? 
-           OR customer_phone LIKE ?
-           OR REPLACE(REPLACE(REPLACE(REPLACE(customer_phone, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?
-         )
-       ORDER BY chamado_number DESC
-       LIMIT 10`,
-      [auth.clientId, phoneRaw, `%${phoneSuffix}`, `%${phoneSuffix}%`]
-    ) as any[];
-
-    const statusMap: Record<string, string> = {
-      open: "Aberto",
-      in_progress: "Em Andamento",
-      waiting: "Aguardando",
-      closed: "Encerrado",
-    };
-
-    const tickets = rows.map((r: any) => ({
-      id: String(r.id),
-      number: Number(r.number),
-      title: String(r.title || "Sem título"),
-      status: statusMap[r.status] || r.status || "Aberto",
-      statusRaw: r.status,
-      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
-    }));
-
+    const tickets = await queryTicketsByPhone(auth.clientId, phoneRaw);
     return res.status(200).json(tickets);
   } catch (error: any) {
     console.error("[BotTools] Erro ao consultar chamados:", error);
@@ -226,6 +234,108 @@ export async function handleGetTickets(req: Request, res: Response): Promise<Res
 }
 
 // ─── 4. TOOLS: CRIAÇÃO / ATUALIZAÇÃO DE LEADS NO CRM ──────────────────────
+export async function saveLead(
+  clientId: string,
+  lead: { name?: string; phone?: string; email?: string; notes?: string }
+): Promise<{ ok: boolean; action: "created" | "updated"; lead: { crmClientId: string; name: string; phone: string; email: string } }> {
+  const name = String(lead.name || "").trim();
+  const phone = String(lead.phone || "").trim();
+  const email = String(lead.email || "").trim();
+  const notes = String(lead.notes || "").trim();
+
+  if (!phone && !name) {
+    throw new Error("Pelo menos o nome ou telefone deve ser fornecido.");
+  }
+
+  const cleanPhone = phone.replace(/\D/g, "");
+  const pool = getPool();
+
+  // Verifica se lead já existe pelo telefone
+  let existingLeadId: string | null = null;
+  let existingNotes = "";
+
+  if (cleanPhone) {
+    const phoneSuffix = cleanPhone.slice(-8);
+    const [existingRows] = await pool.execute(
+      `SELECT crm_client_id, observations FROM megadesk_crm_clients
+       WHERE client_id = ?
+         AND (
+           phone = ? OR whatsapp = ?
+           OR REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?
+           OR REPLACE(REPLACE(REPLACE(REPLACE(whatsapp, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?
+         )
+       LIMIT 1`,
+      [clientId, phone, phone, `%${phoneSuffix}%`, `%${phoneSuffix}%`]
+    ) as any[];
+
+    if (existingRows.length > 0) {
+      existingLeadId = existingRows[0].crm_client_id;
+      existingNotes = existingRows[0].observations || "";
+    }
+  }
+
+  if (existingLeadId) {
+    // Atualiza lead existente
+    const updatedNotes = notes
+      ? (existingNotes ? `${existingNotes}\n[Bot ${new Date().toLocaleDateString('pt-BR')}]: ${notes}` : notes)
+      : existingNotes;
+
+    await pool.execute(
+      `UPDATE megadesk_crm_clients
+       SET company_name = COALESCE(NULLIF(?, ''), company_name),
+           responsible_name = COALESCE(NULLIF(?, ''), responsible_name),
+           email = COALESCE(NULLIF(?, ''), email),
+           observations = ?,
+           updated_at = NOW()
+       WHERE crm_client_id = ? AND client_id = ?`,
+      [name, name, email, updatedNotes, existingLeadId, clientId]
+    );
+
+    return {
+      ok: true,
+      action: "updated",
+      lead: {
+        crmClientId: existingLeadId,
+        name,
+        phone,
+        email,
+      },
+    };
+  }
+
+  // Cria novo lead
+  const newCrmClientId = crypto.randomUUID();
+  const leadName = name || (phone ? `Lead ${phone}` : "Novo Lead Bot");
+
+  await pool.execute(
+    `INSERT INTO megadesk_crm_clients (
+       crm_client_id, client_id, customer_type, company_name, responsible_name,
+       phone, whatsapp, email, observations, origin, status, created_at, updated_at
+     ) VALUES (?, ?, 'person', ?, ?, ?, ?, ?, ?, 'whatsapp', 'lead', NOW(), NOW())`,
+    [
+      newCrmClientId,
+      clientId,
+      leadName,
+      name || "",
+      phone,
+      phone,
+      email,
+      notes ? `[Bot]: ${notes}` : "",
+    ]
+  );
+
+  return {
+    ok: true,
+    action: "created",
+    lead: {
+      crmClientId: newCrmClientId,
+      name: leadName,
+      phone,
+      email,
+    },
+  };
+}
+
 export async function handleCreateOrUpdateLead(req: Request, res: Response): Promise<Response> {
   try {
     const auth = await resolveTenantAuth(req);
@@ -242,93 +352,8 @@ export async function handleCreateOrUpdateLead(req: Request, res: Response): Pro
       return res.status(400).json({ error: "Pelo menos o nome ou telefone deve ser fornecido." });
     }
 
-    const cleanPhone = phone.replace(/\D/g, "");
-    const pool = getPool();
-
-    // Verifica se lead já existe pelo telefone
-    let existingLeadId: string | null = null;
-    let existingNotes = "";
-
-    if (cleanPhone) {
-      const phoneSuffix = cleanPhone.slice(-8);
-      const [existingRows] = await pool.execute(
-        `SELECT crm_client_id, observations FROM megadesk_crm_clients
-         WHERE client_id = ?
-           AND (
-             phone = ? OR whatsapp = ?
-             OR REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?
-             OR REPLACE(REPLACE(REPLACE(REPLACE(whatsapp, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?
-           )
-         LIMIT 1`,
-        [auth.clientId, phone, phone, `%${phoneSuffix}%`, `%${phoneSuffix}%`]
-      ) as any[];
-
-      if (existingRows.length > 0) {
-        existingLeadId = existingRows[0].crm_client_id;
-        existingNotes = existingRows[0].observations || "";
-      }
-    }
-
-    if (existingLeadId) {
-      // Atualiza lead existente
-      const updatedNotes = notes
-        ? (existingNotes ? `${existingNotes}\n[Typebot ${new Date().toLocaleDateString('pt-BR')}]: ${notes}` : notes)
-        : existingNotes;
-
-      await pool.execute(
-        `UPDATE megadesk_crm_clients
-         SET company_name = COALESCE(NULLIF(?, ''), company_name),
-             responsible_name = COALESCE(NULLIF(?, ''), responsible_name),
-             email = COALESCE(NULLIF(?, ''), email),
-             observations = ?,
-             updated_at = NOW()
-         WHERE crm_client_id = ? AND client_id = ?`,
-        [name, name, email, updatedNotes, existingLeadId, auth.clientId]
-      );
-
-      return res.status(200).json({
-        ok: true,
-        action: "updated",
-        lead: {
-          crmClientId: existingLeadId,
-          name,
-          phone,
-          email,
-        },
-      });
-    }
-
-    // Cria novo lead
-    const newCrmClientId = crypto.randomUUID();
-    const leadName = name || (phone ? `Lead ${phone}` : "Novo Lead Typebot");
-
-    await pool.execute(
-      `INSERT INTO megadesk_crm_clients (
-         crm_client_id, client_id, customer_type, company_name, responsible_name,
-         phone, whatsapp, email, observations, origin, status, created_at, updated_at
-       ) VALUES (?, ?, 'person', ?, ?, ?, ?, ?, ?, 'whatsapp', 'lead', NOW(), NOW())`,
-      [
-        newCrmClientId,
-        auth.clientId,
-        leadName,
-        name || "",
-        phone,
-        phone,
-        email,
-        notes ? `[Typebot]: ${notes}` : "",
-      ]
-    );
-
-    return res.status(201).json({
-      ok: true,
-      action: "created",
-      lead: {
-        crmClientId: newCrmClientId,
-        name: leadName,
-        phone,
-        email,
-      },
-    });
+    const result = await saveLead(auth.clientId, { name, phone, email, notes });
+    return res.status(result.action === "created" ? 201 : 200).json(result);
   } catch (error: any) {
     console.error("[BotTools] Erro ao salvar lead:", error);
     return res.status(500).json({ error: "Falha ao registrar lead no CRM." });

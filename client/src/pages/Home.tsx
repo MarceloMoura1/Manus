@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { ModuleTopbar } from "@/components/ModuleTopbar";
-import { validateNewChamado, ValidationError } from "@/lib/validations";
+import { validateNewChamado, ValidationError, validations } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
 import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
@@ -89,6 +89,7 @@ import {
   Ticket,
   Trash2,
   User,
+  UserCheck,
   Zap,
   AlertCircle,
   X,
@@ -554,8 +555,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
   const [attendantScope, setAttendantScope] = React.useState<'all' | 'mine'>(initialConversationFilters.attendantScope);
   const [inboxView, setInboxView] = React.useState<'open' | 'bot' | 'closed'>(initialConversationFilters.inboxView);
   const selectedFilter: 'active' | 'closed' = inboxView === 'closed' ? 'closed' : 'active';
-  const ownerFilter: 'all' | 'mine' | 'waiting' | 'history' = inboxView === 'bot'
-    ? 'waiting'
+  const ownerFilter: 'all' | 'mine' | 'waiting' | 'bot' | 'history' = inboxView === 'bot'
+    ? 'bot'
     : inboxView === 'closed'
       ? 'all'
       : attendantScope;
@@ -756,7 +757,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
 
   const { data: conversationRows, isLoading: conversationsLoading } = trpc.conversations.list.useQuery(
     {
-      viewMode: ownerFilter === 'mine' ? 'mine' : ownerFilter === 'waiting' ? 'waiting' : 'all',
+      viewMode: ((ownerFilter as string) === 'mine' ? 'mine' : (ownerFilter as string) === 'bot' ? 'bot' : (ownerFilter as string) === 'waiting' ? 'waiting' : 'all') as any,
       status: selectedFilter,
       search: debouncedSearchTerm,
       dateFrom: dateFrom || undefined,
@@ -769,7 +770,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
   const shouldSearchClosedConversations = Boolean(debouncedSearchTerm) && selectedFilter !== 'closed';
   const { data: closedSearchRows } = trpc.conversations.list.useQuery(
     {
-      viewMode: ownerFilter === 'mine' ? 'mine' : ownerFilter === 'waiting' ? 'waiting' : 'all',
+      viewMode: 'all',
       status: 'closed',
       search: debouncedSearchTerm,
       dateFrom: dateFrom || undefined,
@@ -1479,26 +1480,29 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                   <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
                     <h3 className="truncate text-sm font-bold text-slate-900 group-data-[theme=dark]:text-slate-100 md:text-base">{selectedConv.name}</h3>
                     <span className={cn(
-                      'hidden flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline',
+                      'hidden flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium sm:inline',
                       selectedConv.status === 'open' ? 'bg-emerald-100 text-emerald-700 group-data-[theme=dark]:bg-emerald-500/20 group-data-[theme=dark]:text-emerald-300' :
-                      selectedConv.status === 'bot' ? 'bg-violet-100 text-violet-700 group-data-[theme=dark]:bg-violet-500/20 group-data-[theme=dark]:text-violet-200' :
+                      selectedConv.status === 'bot' ? 'bg-purple-100 text-purple-700 font-semibold border border-purple-200 group-data-[theme=dark]:bg-purple-500/20 group-data-[theme=dark]:text-purple-200' :
                       'bg-slate-100 text-slate-600 group-data-[theme=dark]:bg-slate-800 group-data-[theme=dark]:text-slate-300'
                     )}>
-                      {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'BOT' : 'Fechada'}
+                      {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'Em Atendimento pelo Bot' : 'Fechada'}
                     </span>
                   </div>
                   <p className="truncate text-xs text-slate-500 group-data-[theme=dark]:text-slate-400">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
-                {selectedConv.status === 'bot' && !selectedConv.assignedUserId && (
+                {(selectedConv.status === 'bot' || selectedConv.status === 'waiting_human' || !selectedConv.assignedUserId) && selectedConv.status !== 'closed' && (
                   <button type="button" onClick={() => claimConversationMutation.mutate({ conversationId: selectedConv.id }, {
                     onSuccess: async () => {
                       await Promise.all([utils.conversations.list.invalidate(), utils.conversations.counts.invalidate()]);
                       showToast('Conversa assumida com sucesso!', 'success');
                     },
                     onError: () => showToast('Não foi possível assumir a conversa', 'error'),
-                  })} className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Assumir</button>
+                  })} className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shadow-sm">
+                    <UserCheck className="h-4 w-4" />
+                    <span>Assumir Conversa</span>
+                  </button>
                 )}
                 <button
                   type="button"
@@ -3785,7 +3789,7 @@ type HermesChatMessage = {
     id: string;
     toolName: string;
     type: "MUTATION";
-    actionType: "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY" | "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP" | "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE";
+    actionType: "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY" | "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP" | "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE" | "SEND_WHATSAPP_OUTBOUND";
     args: Record<string, unknown>;
     status: "PENDING_APPROVAL";
     summary?: string;
@@ -4203,8 +4207,81 @@ function AIAssistantPage() {
               )}
               {msg.pendingActionRequest && (
                 <div className="mt-2 rounded-xl border border-sky-500/40 bg-slate-900/90 p-4 text-xs text-slate-100 shadow-sm">
-                  <p className="font-semibold text-sky-200">Ação sugerida pelo Hermes que requer sua aprovação</p>
+                  <p className="font-semibold text-sky-200">
+                    {msg.pendingActionRequest.actionType === "SEND_WHATSAPP_OUTBOUND" ? "Disparo Ativo de Mensagens via WhatsApp" : "Ação sugerida pelo Hermes que requer sua aprovação"}
+                  </p>
                   <p className="mt-1 text-slate-300">{msg.pendingActionRequest.summary ?? `${msg.pendingActionRequest.actionType.includes("PROPOSAL") ? "Nova Proposta Comercial" : msg.pendingActionRequest.actionType.includes("CLIENT") ? "Proposta de Ação: Cadastro de Cliente" : msg.pendingActionRequest.actionType.includes("PRODUCT") ? "Produto ERP" : msg.pendingActionRequest.actionType.includes("SUPPLIER") ? "Fornecedor" : msg.pendingActionRequest.actionType === "REQUEST_PURCHASE" ? "Pedido de compra" : msg.pendingActionRequest.actionType.includes("SERVICE") ? "Serviço ERP" : msg.pendingActionRequest.toolName.replace(/_/g, " ")}`} — nenhuma alteração foi executada.</p>
+                  {msg.pendingActionRequest.actionType === "SEND_WHATSAPP_OUTBOUND" ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">
+                          WhatsApp Outbound
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {msg.pendingActionRequest.args.category === "supplier_quote"
+                            ? "Cotação para Fornecedores"
+                            : msg.pendingActionRequest.args.category === "customer_followup"
+                              ? "Follow-up de Clientes"
+                              : "Disparo Ativo"}
+                        </span>
+                      </div>
+
+                      {/* Caixa com o texto da mensagem a ser enviada */}
+                      <div className="rounded-lg border border-slate-700/80 bg-slate-950/70 p-3">
+                        <p className="text-[11px] font-semibold text-slate-400 mb-1">Mensagem a ser disparada:</p>
+                        <p className="text-xs text-slate-200 whitespace-pre-wrap font-sans">
+                          {String(msg.pendingActionRequest.args.message || "")}
+                        </p>
+                      </div>
+
+                      {/* Lista de destinatários */}
+                      <div className="rounded-lg border border-slate-700/80 bg-slate-950/70 p-3">
+                        <p className="text-[11px] font-semibold text-slate-400 mb-2">
+                          Destinatários ({Array.isArray(msg.pendingActionRequest.args.recipients) ? msg.pendingActionRequest.args.recipients.length : 0}):
+                        </p>
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {Array.isArray(msg.pendingActionRequest.args.recipients) &&
+                            (msg.pendingActionRequest.args.recipients as Array<{ name?: string; phone?: string }>).map((r, rIdx) => (
+                              <div key={rIdx} className="flex items-center justify-between text-xs bg-slate-900/60 rounded px-2.5 py-1.5 border border-slate-800">
+                                <span className="font-medium text-slate-200">{r.name || "Contato"}</span>
+                                <span className="font-mono text-slate-400 text-[11px]">{validations.formatPhone(r.phone || "")}</span>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+
+                      {msg.actionState === "EXECUTED" && (
+                        <span className="mt-3 inline-block rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-semibold text-emerald-300">
+                          ✓ Mensagens disparadas com sucesso!
+                        </span>
+                      )}
+                      {msg.actionMessage && (
+                        <p className={`mt-3 ${msg.actionState === "FAILED" ? "text-rose-300" : msg.actionState === "EXECUTED" ? "text-emerald-300" : "text-slate-300"}`}>
+                          {msg.actionMessage}
+                        </p>
+                      )}
+                      {!msg.actionState && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            className="bg-emerald-600 text-white hover:bg-emerald-500 font-semibold shadow-sm"
+                            onClick={() => void confirmPendingAction(msg.pendingActionRequest!)}
+                          >
+                            Confirmar e Disparar Mensagens via WhatsApp
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-800"
+                            onClick={() => void cancelPendingAction(msg.pendingActionRequest!)}
+                          >
+                            Cancelar
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                  <>
                   <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-700/80 bg-slate-950/60 p-2.5 text-slate-300">
                     {Object.entries(msg.pendingActionRequest.args).map(([key, value]) => (
                       <div key={key} className="flex items-start justify-between gap-3">
@@ -4239,6 +4316,8 @@ function AIAssistantPage() {
                         Rejeitar/Cancelar
                       </Button>
                     </div>
+                  )}
+                  </>
                   )}
                 </div>
               )}

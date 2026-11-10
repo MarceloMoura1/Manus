@@ -240,5 +240,84 @@ async function runHermesErpAction(input: { tenantId: string; userId: string; use
     if (!result.ok) throw new Error("HERMES_ERP_SUPPLIER_MESSAGE_FAILED");
     return { success: true, message: "Mensagem enviada ao fornecedor.", entityId: required(args, "supplierId") };
   }
+  if (input.action.actionType === "SEND_WHATSAPP_OUTBOUND") {
+    const rawRecipients = Array.isArray(args.recipients) ? args.recipients as Array<{ name?: string; phone?: string }> : [];
+    const messageText = String(args.message || "").trim();
+    if (!rawRecipients.length) throw new Error("A lista de destinatários está vazia.");
+    if (!messageText) throw new Error("O texto da mensagem é obrigatório.");
+
+    const { getPool } = await import("./db");
+    const { botDispatcherService } = await import("./modules/bot/bot-dispatcher.service");
+    const pool = getPool();
+    let sentCount = 0;
+    const sentRecipients: Array<{ name: string; phone: string }> = [];
+
+    for (const r of rawRecipients) {
+      const name = String(r.name || "Contato").trim();
+      const rawPhone = String(r.phone || "").trim();
+      const cleanPhone = rawPhone.replace(/\D/g, "");
+      if (!cleanPhone) continue;
+
+      try {
+        // 1. Despacha mensagem via botDispatcherService (Evolution API do tenant)
+        await botDispatcherService.sendTextMessage({
+          tenantId: input.tenantId,
+          to: cleanPhone,
+          text: messageText,
+          provider: "evolution",
+        });
+
+        // 2. Garante que a conversa existe em megadesk_domain_conversations
+        const [existing] = await pool.execute(
+          `SELECT conversation_id FROM megadesk_domain_conversations
+           WHERE client_id = ? AND (phone = ? OR phone LIKE ?) AND status != 'closed'
+           ORDER BY updated_at DESC LIMIT 1`,
+          [input.tenantId, cleanPhone, `%${cleanPhone.slice(-8)}`]
+        ) as any[];
+
+        let convId = existing?.[0]?.conversation_id;
+        const now = new Date();
+        const timeLabel = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+        if (!convId) {
+          convId = `conv-${randomUUID()}`;
+          await pool.execute(
+            `INSERT INTO megadesk_domain_conversations
+             (conversation_id, client_id, customer_name, phone, company, status, assigned_user_id, assigned_user_name, last_message, last_message_from, time_label, messages_json, unread_count, created_at, updated_at)
+             VALUES (?, ?, ?, ?, '', 'open', ?, ?, ?, 'agent', ?, '[]', 0, NOW(), NOW())`,
+            [convId, input.tenantId, name, cleanPhone, input.userId, input.userName, messageText.substring(0, 255), timeLabel]
+          );
+        } else {
+          await pool.execute(
+            `UPDATE megadesk_domain_conversations
+             SET last_message = ?, last_message_from = 'agent', time_label = ?, updated_at = NOW()
+             WHERE conversation_id = ? AND client_id = ?`,
+            [messageText.substring(0, 255), timeLabel, convId, input.tenantId]
+          );
+        }
+
+        // 3. Grava a mensagem no histórico de mensagens do Atendimento
+        const msgId = `msg-out-${randomUUID()}`;
+        await pool.execute(
+          `INSERT INTO megadesk_domain_conversations_messages
+           (message_id, conversation_id, client_id, provider, integration_id,
+            direction, message_type, sender, sender_user_id, sender_name_snapshot, message, status, timestamp, updated_at)
+           VALUES (?, ?, ?, 'evolution', ?, 'outbound', 'text', 'agent', ?, ?, ?, 'sent', NOW(), NOW())`,
+          [msgId, convId, input.tenantId, `megadesk-${input.tenantId}`, input.userId, input.userName, messageText]
+        );
+
+        sentCount++;
+        sentRecipients.push({ name, phone: cleanPhone });
+      } catch (sendErr) {
+        console.error(`[HermesOutbound] Falha ao enviar para ${cleanPhone}:`, sendErr);
+      }
+    }
+
+    return {
+      success: true,
+      message: `As mensagens foram enviadas com sucesso para os ${sentCount} fornecedores. Deseja que eu já cadastre esses contatos na sua lista de fornecedores do ERP?`,
+      entityId: `outbound-${sentCount}`,
+    };
+  }
   throw new Error("HERMES_ERP_ACTION_NOT_ALLOWED");
 }

@@ -476,7 +476,7 @@ function sessionBoundAssistantUserId(requestedUserId: string, sessionUserEmail: 
 
 const hermesTicketActionTypes = ["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"] as const;
 const hermesCrmActionTypes = ["CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP"] as const;
-const hermesErpActionTypes = ["CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE"] as const;
+const hermesErpActionTypes = ["CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE", "SEND_WHATSAPP_OUTBOUND"] as const;
 const hermesActionTypes = [...hermesTicketActionTypes, ...hermesCrmActionTypes, ...hermesErpActionTypes] as const;
 
 function isHermesTicketAction(actionType: string): actionType is typeof hermesTicketActionTypes[number] {
@@ -494,7 +494,7 @@ function assertAssistantActionPermission(client: MegaClient, userEmail: string, 
       ? ["crm", "clients"]
       : isHermesErpAction(actionType)
         ? actionType === "UPDATE_SERVICE" || actionType === "CREATE_SERVICE" ? ["services", "erp"]
-          : actionType === "CREATE_SUPPLIER" || actionType === "UPDATE_SUPPLIER" || actionType === "REQUEST_PURCHASE" || actionType === "SEND_SUPPLIER_MESSAGE" ? ["suppliers", "purchases", "erp"]
+          : actionType === "CREATE_SUPPLIER" || actionType === "UPDATE_SUPPLIER" || actionType === "REQUEST_PURCHASE" || actionType === "SEND_SUPPLIER_MESSAGE" || actionType === "SEND_WHATSAPP_OUTBOUND" ? ["suppliers", "purchases", "erp", "conversations"]
             : ["products", "inventory", "erp"]
         : ["sales", "crm", "proposals"];
   if (!user.permissions.some(permission => required.includes(permission))) {
@@ -1145,14 +1145,28 @@ export const appRouter = router({
           conversation.time = time;
         }
 
-        // Sincronização com atendimento humano (Human Takeover): silencia o robô por 24 horas
+        // Sincronização com atendimento humano (Human Takeover): assume a conversa e silencia o robô por 24 horas
         try {
           await getPool().execute(
             `UPDATE megadesk_domain_conversations
-             SET ia_active = 0, bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR), updated_at = NOW()
+             SET status = 'open',
+                 assigned_user_id = COALESCE(NULLIF(assigned_user_id, 'bot_system'), ?),
+                 assigned_user_name = COALESCE(assigned_user_name, ?),
+                 ia_active = 0,
+                 bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR),
+                 updated_at = NOW()
              WHERE conversation_id = ? AND client_id = ?`,
-            [input.conversationId, ctx.tenantId]
+            [ctx.operationalUserId, operatorName, input.conversationId, ctx.tenantId]
           );
+          await emitConversationEventBestEffort(ctx.tenantId, "wa:conversation_updated", {
+            conversation: {
+              id: input.conversationId,
+              status: "open",
+              assignedUserId: ctx.operationalUserId,
+              assignedUserName: operatorName,
+              iaActive: 0,
+            },
+          });
         } catch (botSilenceErr) {
           console.warn("[HumanTakeover] Falha não bloqueante ao silenciar bot na conversa:", botSilenceErr);
         }
@@ -1254,6 +1268,32 @@ export const appRouter = router({
             mediaReference }) as Conversation["messages"][number]);
           conversation.lastMessage = summary;
           conversation.time = time;
+        }
+
+        // Sincronização com atendimento humano (Human Takeover) no envio de anexo: silencia o robô por 24 horas
+        try {
+          await getPool().execute(
+            `UPDATE megadesk_domain_conversations
+             SET status = 'open',
+                 assigned_user_id = COALESCE(NULLIF(assigned_user_id, 'bot_system'), ?),
+                 assigned_user_name = COALESCE(assigned_user_name, ?),
+                 ia_active = 0,
+                 bot_suspended_at = DATE_ADD(NOW(), INTERVAL 24 HOUR),
+                 updated_at = NOW()
+             WHERE conversation_id = ? AND client_id = ?`,
+            [ctx.operationalUserId, operatorName, input.conversationId, ctx.tenantId]
+          );
+          await emitConversationEventBestEffort(ctx.tenantId, "wa:conversation_updated", {
+            conversation: {
+              id: input.conversationId,
+              status: "open",
+              assignedUserId: ctx.operationalUserId,
+              assignedUserName: operatorName,
+              iaActive: 0,
+            },
+          });
+        } catch (botSilenceErr) {
+          console.warn("[HumanTakeover] Falha não bloqueante ao silenciar bot após anexo:", botSilenceErr);
         }
       } catch (error) {
         if (error instanceof OutboundPendingPersistenceError) {

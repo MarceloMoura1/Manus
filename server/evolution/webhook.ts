@@ -753,9 +753,9 @@ export async function saveIncomingMessage(
     const activeKey = createHash("sha256").update(`${clientId}\0evolution\0${integrationId}\0${contactId}`).digest("hex");
     // 1. Busca conversa existente pelo telefone
     const [convRows] = await connection.execute(
-      `SELECT conversation_id, messages_json, customer_name
+      `SELECT conversation_id, messages_json, customer_name, status, assigned_user_id, bot_suspended_at
        FROM megadesk_domain_conversations
-       WHERE client_id = ? AND status IN ('open', 'bot')
+       WHERE client_id = ? AND status IN ('open', 'bot', 'in_progress', 'waiting_human')
          AND (active_key = ? OR (active_key IS NULL AND phone IN (?, ?, ?)))
        ORDER BY created_at DESC
        LIMIT 1 FOR UPDATE`,
@@ -781,10 +781,23 @@ export async function saveIncomingMessage(
       return typeof rows[0]?.message_id === "string" ? rows[0].message_id : null;
     };
 
+    let finalConversationId = "";
+    let shouldTriggerBot = false;
+
     if (convRows && convRows.length > 0) {
       // ─── Conversa existente: adiciona mensagem ───────────────────────────
       const conv      = convRows[0];
       const convId    = conv.conversation_id;
+      finalConversationId = convId;
+
+      // Se a conversa já é humana (open, in_progress, waiting_human), não dispara o bot.
+      // Se for bot, verifica se não está com trava de silenciamento de 24h.
+      if (conv.status === "bot") {
+        const isSilenced = conv.bot_suspended_at && new Date(conv.bot_suspended_at) > new Date();
+        if (!isSilenced) {
+          shouldTriggerBot = true;
+        }
+      }
       const replyToMessageId = await resolveReplyToMessageId(convId);
       const inserted = await persistCanonicalMessage(connection, {
         messageId: externalMessageId, externalMessageId, conversationId: convId, clientId,
@@ -811,6 +824,8 @@ export async function saveIncomingMessage(
       // ─── Nova conversa ───────────────────────────────────────────────────
       const customerName = contactName;
       const conversationId = `conv-${randomUUID()}`;
+      finalConversationId = conversationId;
+      shouldTriggerBot = true;
       let publicCode = "";
 
       publicCode = await withPublicCodeRetry(async (candidate) => {
@@ -848,7 +863,10 @@ export async function saveIncomingMessage(
         `UPDATE megadesk_domain_conversations
          SET last_message_from = 'customer',
              unread_count = 1,
-             status = 'bot'
+             status = 'bot',
+             assigned_user_id = 'bot_system',
+             ia_active = 1,
+             bot_suspended_at = NULL
          WHERE conversation_id = ? AND client_id = ?`,
         [conversationId, clientId]
       );
@@ -877,6 +895,25 @@ export async function saveIncomingMessage(
     await connection.commit();
     transactionStarted = false;
     if (committedEvent) await emitToClient(clientId, committedEvent.name, committedEvent.payload);
+
+    // ─── Disparo Cognitivo ao Bot (em background após commit) ───────────────
+    if (shouldTriggerBot && text && text.trim() && payload.type === "text") {
+      setImmediate(async () => {
+        try {
+          const { processCognitiveBotMessage } = await import("../modules/bot/bot-gemini-engine");
+          await processCognitiveBotMessage({
+            tenantId: clientId,
+            conversationId: finalConversationId,
+            phone,
+            text,
+            customerName: contactName,
+          });
+        } catch (botErr) {
+          console.error("[BotEngine] Falha ao processar mensagem cognitiva do bot:", botErr);
+        }
+      });
+    }
+
     return "persisted";
   } catch (err) {
     if (transactionStarted) await connection.rollback().catch(() => undefined);

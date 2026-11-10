@@ -15,9 +15,27 @@ export interface WhatsAppSender {
     text: string,
     provider: "evolution" | "meta_cloud"
   ): Promise<void>;
+  sendTextMessage(options: {
+    tenantId: string;
+    to: string;
+    text: string;
+    provider?: "evolution" | "meta_cloud";
+  }): Promise<void>;
 }
 
 export class BotDispatcherService implements WhatsAppSender {
+  /**
+   * Envia mensagem de texto para o destinatário pelo provedor escolhido (default: evolution).
+   */
+  async sendTextMessage(options: {
+    tenantId: string;
+    to: string;
+    text: string;
+    provider?: "evolution" | "meta_cloud";
+  }): Promise<void> {
+    return this.sendMessage(options.tenantId, options.to, options.text, options.provider || "evolution");
+  }
+
   /**
    * Envia mensagem de texto para o destinatário pelo provedor escolhido.
    */
@@ -95,5 +113,6 @@ export class BotDispatcherService implements WhatsAppSender {
   }
 }
 
-export const botDispatcher: WhatsAppSender = new BotDispatcherService();
+export const botDispatcher: BotDispatcherService = new BotDispatcherService();
+export const botDispatcherService = botDispatcher;
 
