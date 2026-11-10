@@ -104,7 +104,7 @@ export async function deliverBotMessage(input: DeliverBotMessageInput): Promise<
 
   if (media) {
     console.log(`[BotDispatcher] Despachando mídia ${media.type} para tenant=${tenantId} conv=${conversationId} url=${media.url}`);
-    await botDispatcherService.sendMediaMessage({
+    const dispatched = await botDispatcherService.sendMediaMessage({
       tenantId,
       to: phone,
       mediaUrl: media.url,
@@ -117,14 +117,15 @@ export async function deliverBotMessage(input: DeliverBotMessageInput): Promise<
 
     await pool.execute(
       `INSERT INTO megadesk_domain_conversations_messages
-       (message_id, conversation_id, client_id, provider, integration_id,
+       (message_id, conversation_id, client_id, provider, integration_id, external_message_id,
         direction, message_type, sender, sender_name_snapshot, message, media_reference, status, timestamp, updated_at)
-       VALUES (?, ?, ?, 'evolution', ?, 'outbound', ?, 'bot', 'Bot Virtual', ?, ?, 'sent', NOW(), NOW())`,
+       VALUES (?, ?, ?, 'evolution', ?, ?, 'outbound', ?, 'bot', 'Bot Virtual', ?, ?, 'sent', NOW(), NOW())`,
       [
         botMessageId,
         conversationId,
         tenantId,
         `megadesk-${tenantId}`,
+        dispatched?.externalMessageId || null,
         media.type,
         displayMsg,
         JSON.stringify({ url: media.url, kind: media.type, caption: media.caption }),
@@ -156,15 +157,15 @@ export async function deliverBotMessage(input: DeliverBotMessageInput): Promise<
 
   // Envio de Texto
   console.log(`[BotDispatcher] Enviando resposta do bot tenant=${tenantId} conv=${conversationId} chars=${text.length}`);
-  await botDispatcherService.sendTextMessage({ tenantId, to: phone, text, provider: "evolution" });
+  const dispatched = await botDispatcherService.sendTextMessage({ tenantId, to: phone, text, provider: "evolution" });
   console.log(`[BotDispatcher] Resposta entregue à Evolution API tenant=${tenantId} conv=${conversationId}`);
 
   await pool.execute(
     `INSERT INTO megadesk_domain_conversations_messages
-     (message_id, conversation_id, client_id, provider, integration_id,
+     (message_id, conversation_id, client_id, provider, integration_id, external_message_id,
       direction, message_type, sender, sender_name_snapshot, message, status, timestamp, updated_at)
-     VALUES (?, ?, ?, 'evolution', ?, 'outbound', 'text', 'bot', 'Bot Virtual', ?, 'sent', NOW(), NOW())`,
-    [botMessageId, conversationId, tenantId, `megadesk-${tenantId}`, text]
+     VALUES (?, ?, ?, 'evolution', ?, ?, 'outbound', 'text', 'bot', 'Bot Virtual', ?, 'sent', NOW(), NOW())`,
+    [botMessageId, conversationId, tenantId, `megadesk-${tenantId}`, dispatched?.externalMessageId || null, text]
   );
   await pool.execute(
     `UPDATE megadesk_domain_conversations

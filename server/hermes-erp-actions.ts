@@ -260,7 +260,7 @@ async function runHermesErpAction(input: { tenantId: string; userId: string; use
 
       try {
         // 1. Despacha mensagem via botDispatcherService (Evolution API do tenant)
-        await botDispatcherService.sendTextMessage({
+        const dispatched = await botDispatcherService.sendTextMessage({
           tenantId: input.tenantId,
           to: cleanPhone,
           text: messageText,
@@ -300,10 +300,10 @@ async function runHermesErpAction(input: { tenantId: string; userId: string; use
         const msgId = `msg-out-${randomUUID()}`;
         await pool.execute(
           `INSERT INTO megadesk_domain_conversations_messages
-           (message_id, conversation_id, client_id, provider, integration_id,
+           (message_id, conversation_id, client_id, provider, integration_id, external_message_id,
             direction, message_type, sender, sender_user_id, sender_name_snapshot, message, status, timestamp, updated_at)
-           VALUES (?, ?, ?, 'evolution', ?, 'outbound', 'text', 'agent', ?, ?, ?, 'sent', NOW(), NOW())`,
-          [msgId, convId, input.tenantId, `megadesk-${input.tenantId}`, input.userId, input.userName, messageText]
+           VALUES (?, ?, ?, 'evolution', ?, ?, 'outbound', 'text', 'agent', ?, ?, ?, 'sent', NOW(), NOW())`,
+          [msgId, convId, input.tenantId, `megadesk-${input.tenantId}`, dispatched?.externalMessageId || null, input.userId, input.userName, messageText]
         );
 
         sentCount++;

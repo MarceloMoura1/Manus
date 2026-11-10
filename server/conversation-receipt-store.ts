@@ -23,6 +23,7 @@ export type ConversationReceiptPersistenceResult = {
   deferred: boolean;
   zeroMatch: boolean;
   storedStatus: string | null;
+  messageId?: string | null;
 };
 
 export type ConversationReceiptReplayResult = {
@@ -118,12 +119,13 @@ export async function persistOrApplyConversationReceipt(
   const [result] = await executor.execute(MONOTONIC_MESSAGE_UPDATE_SQL, updateValues);
   const affectedRows = Number((result as { affectedRows?: unknown } | null)?.affectedRows ?? 0);
   if (affectedRows > 0) {
-    return { affectedRows, matchedRows: 1, applied: true, deferred: false, zeroMatch: false, storedStatus: input.status };
+    const matched = await findMessageStatus(executor, input).catch(() => null);
+    return { affectedRows, matchedRows: 1, applied: true, deferred: false, zeroMatch: false, storedStatus: input.status, messageId: matched?.messageId ?? null };
   }
 
-  const matched = await findMessageStatus(executor, input);
+  const matched = await findMessageStatus(executor, input).catch(() => null);
   if (matched) {
-    return { affectedRows: 0, matchedRows: 1, applied: false, deferred: false, zeroMatch: false, storedStatus: matched.status };
+    return { affectedRows: 0, matchedRows: 1, applied: false, deferred: false, zeroMatch: false, storedStatus: matched.status, messageId: matched.messageId };
   }
 
   const rank = CONVERSATION_RECEIPT_STATUS_RANK[input.status];

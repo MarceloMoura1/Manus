@@ -17,13 +17,13 @@ export interface WhatsAppSender {
     toPhone: string,
     text: string,
     provider: "evolution" | "meta_cloud"
-  ): Promise<void>;
+  ): Promise<{ externalMessageId?: string } | void>;
   sendTextMessage(options: {
     tenantId: string;
     to: string;
     text: string;
     provider?: "evolution" | "meta_cloud";
-  }): Promise<void>;
+  }): Promise<{ externalMessageId?: string } | void>;
   sendMediaMessage?(options: {
     tenantId: string;
     to: string;
@@ -33,7 +33,7 @@ export interface WhatsAppSender {
     fileName?: string;
     mimeType?: string;
     provider?: "evolution" | "meta_cloud";
-  }): Promise<void>;
+  }): Promise<{ externalMessageId?: string } | void>;
 }
 
 export class BotDispatcherService implements WhatsAppSender {
@@ -45,7 +45,7 @@ export class BotDispatcherService implements WhatsAppSender {
     to: string;
     text: string;
     provider?: "evolution" | "meta_cloud";
-  }): Promise<void> {
+  }): Promise<{ externalMessageId?: string } | void> {
     return this.sendMessage(options.tenantId, options.to, options.text, options.provider || "evolution");
   }
 
@@ -57,7 +57,7 @@ export class BotDispatcherService implements WhatsAppSender {
     toPhone: string,
     text: string,
     provider: "evolution" | "meta_cloud"
-  ): Promise<void> {
+  ): Promise<{ externalMessageId?: string } | void> {
     if (!tenantId || !tenantId.trim()) {
       throw new Error("tenantId é obrigatório para envio de mensagem do bot.");
     }
@@ -74,8 +74,8 @@ export class BotDispatcherService implements WhatsAppSender {
     }
 
     if (provider === "evolution") {
-      await this.sendViaEvolution(tenantId, cleanPhone, text);
-      return;
+      const externalMessageId = await this.sendViaEvolution(tenantId, cleanPhone, text);
+      return { externalMessageId };
     }
 
     if (provider === "meta_cloud") {
@@ -98,7 +98,7 @@ export class BotDispatcherService implements WhatsAppSender {
     fileName?: string;
     mimeType?: string;
     provider?: "evolution" | "meta_cloud";
-  }): Promise<void> {
+  }): Promise<{ externalMessageId?: string } | void> {
     const { tenantId, to, mediaUrl, kind, caption, fileName, mimeType, provider = "evolution" } = options;
 
     if (!tenantId || !tenantId.trim()) throw new Error("tenantId é obrigatório.");
@@ -151,7 +151,7 @@ export class BotDispatcherService implements WhatsAppSender {
       const defaultExt = kind === "audio" ? "ogg" : kind === "image" ? "png" : "mp4";
 
       console.log(`[BotDispatcher] Despachando ${kind} para Evolution API conv instance=${instanceName} phone=${cleanPhone}`);
-      await evoSendAttachment({
+      const ref = await evoSendAttachment({
         instanceName,
         number: cleanPhone,
         kind,
@@ -160,7 +160,7 @@ export class BotDispatcherService implements WhatsAppSender {
         fileName: fileName || `midia-${Date.now()}.${defaultExt}`,
         caption,
       });
-      return;
+      return { externalMessageId: ref?.key?.id };
     }
 
     throw new Error(`Envio de mídia para o provedor ${provider} não suportado.`);
@@ -169,10 +169,11 @@ export class BotDispatcherService implements WhatsAppSender {
   /**
    * Envio via Evolution API (Baileys/QR Code).
    */
-  private async sendViaEvolution(tenantId: string, phone: string, text: string): Promise<void> {
+  private async sendViaEvolution(tenantId: string, phone: string, text: string): Promise<string | undefined> {
     const instanceName = instanceNameFor(tenantId);
     try {
-      await evoSendText(instanceName, phone, text);
+      const ref = await evoSendText(instanceName, phone, text);
+      return ref?.key?.id;
     } catch (error: any) {
       console.error(`[BotDispatcher] Falha ao enviar via Evolution API para tenant=${tenantId}:`, error?.message || error);
       throw error;

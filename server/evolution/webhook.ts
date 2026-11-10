@@ -143,7 +143,9 @@ const EVOLUTION_RECEIPT_STATUS: Record<string, "pending" | "sent" | "delivered" 
   SENT: "sent",
   DELIVERY_ACK: "delivered",
   DELIVERED: "delivered",
+  RECEIPT: "delivered",
   READ: "read",
+  VIEWED: "read",
   PLAYED: "played",
   ERROR: "failed",
   FAILED: "failed",
@@ -199,7 +201,7 @@ export function parseEvolutionMessageStatusUpdates(data: Record<string, any> | R
       item?.update?.key?.id, item?.update?.id, item?.update?.keyId,
     ].find((value): value is string => typeof value === "string"
       && value.trim().length > 0 && value.trim().length <= 180)?.trim();
-    const rawStatus = item?.status ?? item?.update?.status ?? item?.ack ?? item?.update?.ack;
+    const rawStatus = item?.update?.status ?? item?.status ?? item?.update?.ack ?? item?.ack;
     const status = canonicalEvolutionReceiptStatus(rawStatus);
     const providerEventAt = canonicalEvolutionEventTimestamp(
       item?.timestamp ?? item?.messageTimestamp ?? item?.update?.timestamp ?? item?.update?.messageTimestamp,
@@ -377,6 +379,7 @@ export async function handleMessagesUpdate(
       try {
         const receiptPayload = {
           clientId,
+          ...(persistence.messageId ? { messageId: persistence.messageId } : {}),
           externalMessageId: update.externalMessageId,
           status: update.status,
           receivedAt,

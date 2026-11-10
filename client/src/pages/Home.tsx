@@ -337,23 +337,23 @@ const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
 
 function outboundReceipt(status: unknown, pending: boolean): { status: "pending" | "sent" | "delivered" | "read" | "played" | "failed"; label: string; tone: string; icon: "clock" | "check" | "double-check" | "alert" } | null {
   if (pending || String(status ?? "").trim().toLowerCase() === "pending") {
-    return { status: "pending", label: "Enviada", tone: "text-slate-400 dark:text-slate-500", icon: "check" };
+    return { status: "pending", label: "Pendente", tone: "text-slate-400", icon: "check" };
   }
   switch (String(status ?? "").trim().toLowerCase()) {
     case "sent":
     case "server_ack":
     case "1":
     case "2":
-      return { status: "sent", label: "Enviada", tone: "text-slate-400 dark:text-slate-500", icon: "check" };
+      return { status: "sent", label: "Enviada", tone: "text-slate-400", icon: "check" };
     case "delivered":
     case "delivery_ack":
     case "3":
-      return { status: "delivered", label: "Entregue", tone: "text-slate-400 dark:text-slate-500", icon: "double-check" };
+      return { status: "delivered", label: "Entregue", tone: "text-slate-400", icon: "double-check" };
     case "read":
     case "played":
     case "4":
     case "5":
-      return { status: "read", label: "Lida", tone: "text-sky-500 dark:text-sky-400", icon: "double-check" };
+      return { status: "read", label: "Lida", tone: "text-sky-500", icon: "double-check" };
     case "failed":
     case "error":
     case "0":
@@ -896,13 +896,51 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       void utils.conversations.counts.invalidate();
     });
     socket.on('conversation:message', () => { void utils.conversations.list.invalidate(); });
-    socket.on('conversation:receipt', (data: { clientId?: string }) => {
+    socket.on('conversation:receipt', (data: { clientId?: string; messageId?: string; externalMessageId?: string; status?: string }) => {
       if (data?.clientId && data.clientId !== clientId) return;
+      if (data?.externalMessageId || data?.messageId) {
+        utils.conversations.messages.setData(
+          { conversationId: selectedConversation ?? '', limit: 200 },
+          (old: any) => {
+            if (!old?.messages) return old;
+            return {
+              ...old,
+              messages: old.messages.map((m: any) => {
+                const match = (data.messageId && m.id === data.messageId)
+                  || (data.externalMessageId && (m.externalMessageId === data.externalMessageId || m.id === data.externalMessageId));
+                if (match && data.status) {
+                  return { ...m, status: data.status };
+                }
+                return m;
+              }),
+            };
+          }
+        );
+      }
       void utils.conversations.messages.invalidate();
       void utils.conversations.list.invalidate();
     });
-    socket.on('message:status_updated', (data: { clientId?: string }) => {
+    socket.on('message:status_updated', (data: { clientId?: string; messageId?: string; externalMessageId?: string; status?: string }) => {
       if (data?.clientId && data.clientId !== clientId) return;
+      if (data?.externalMessageId || data?.messageId) {
+        utils.conversations.messages.setData(
+          { conversationId: selectedConversation ?? '', limit: 200 },
+          (old: any) => {
+            if (!old?.messages) return old;
+            return {
+              ...old,
+              messages: old.messages.map((m: any) => {
+                const match = (data.messageId && m.id === data.messageId)
+                  || (data.externalMessageId && (m.externalMessageId === data.externalMessageId || m.id === data.externalMessageId));
+                if (match && data.status) {
+                  return { ...m, status: data.status };
+                }
+                return m;
+              }),
+            };
+          }
+        );
+      }
       void utils.conversations.messages.invalidate();
       void utils.conversations.list.invalidate();
     });
@@ -1687,8 +1725,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                       if (!messageId) return;
                       if (node) messageElementRefs.current.set(messageId, node);
                       else messageElementRefs.current.delete(messageId);
-                    }} data-testid="conversation-message" className={cn("group relative flex", isAgent ? 'justify-end' : 'justify-start')}>
-                      <div className={cn("min-w-0 max-w-[85%]", isAgent ? "md:max-w-sm lg:max-w-lg" : "md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
+                    }} data-testid="conversation-message" className={cn("flex", isAgent ? 'justify-end' : 'justify-start')}>
+                      <div className={cn("group relative min-w-0 max-w-[85%]", isAgent ? "md:max-w-sm lg:max-w-lg" : "md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
                         <div data-testid="conversation-message-bubble" style={conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)} className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${
                           isAgent
                             ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
@@ -1706,15 +1744,20 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                           <div data-testid="conversation-message-metadata" className={`mt-2 flex items-center justify-end gap-1.5 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
                             <span>{msgTime}</span>
                             {receipt && <span data-testid="conversation-message-receipt" data-status={receipt.status} data-icon={receipt.icon} aria-label={receipt.label} title={receipt.label} className={cn("inline-flex items-center", receipt.tone)}>
-                              {receipt.icon === 'clock' && <Clock className="h-4 w-4" aria-hidden="true" />}
-                              {receipt.icon === 'check' && <Check className="h-4 w-4" aria-hidden="true" />}
-                              {receipt.icon === 'double-check' && <CheckCheck className="h-4 w-4" aria-hidden="true" />}
-                              {receipt.icon === 'alert' && <AlertCircle className="h-4 w-4" aria-hidden="true" />}
+                              {receipt.icon === 'clock' && <Clock className="h-3.5 w-3.5" aria-hidden="true" />}
+                              {receipt.icon === 'check' && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                              {receipt.icon === 'double-check' && <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
+                              {receipt.icon === 'alert' && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
                             </span>}
                           </div>
                         </div>
                         {canReply && <div className={cn('mt-1 flex', isAgent ? 'justify-end' : 'justify-start')}>
-                          <button type="button" data-testid="conversation-reply-action" onClick={() => selectReplyTarget(msg)} className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-slate-500 opacity-0 group-hover:opacity-100 max-md:opacity-100 focus-visible:opacity-100 transition-opacity duration-150 hover:bg-white hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+                          <button
+                            type="button"
+                            data-testid="conversation-reply-action"
+                            onClick={() => selectReplyTarget(msg)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto cursor-pointer select-none text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 mt-1 flex items-center gap-1"
+                          >
                             <Reply className="h-3.5 w-3.5" aria-hidden="true" />Responder
                           </button>
                         </div>}
