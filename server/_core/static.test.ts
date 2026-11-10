@@ -33,4 +33,17 @@ describe("SPA static cache policy", () => {
     expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-cache");
     expect(res.sendFile).toHaveBeenCalledWith(expect.stringMatching(/index\.html$/));
   });
+
+  it("never serves the SPA for unmatched API or legacy Typebot paths", () => {
+    const app = { use: vi.fn() };
+    serveStatic(app as unknown as Express);
+    const fallback = app.use.mock.calls.find(([route]) => route === "*")?.[1];
+    for (const originalUrl of ["/api/unknown", "/typebot-builder/pt-BR/register"]) {
+      const json = vi.fn();
+      const res = { setHeader: vi.fn(), sendFile: vi.fn(), status: vi.fn(() => ({ json })) };
+      fallback({ originalUrl }, res);
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.sendFile).not.toHaveBeenCalled();
+    }
+  });
 });

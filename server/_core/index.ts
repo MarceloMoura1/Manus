@@ -29,7 +29,7 @@ import { registerProposalTemplateRoutes } from "../modules/crm/proposals/router"
 import { registerSaleDocumentRoutes } from "../modules/erp/sales/documents-http";
 import { registerCrmWebhookIngressRoutes } from "../modules/crm/automations/webhook-ingress";
 import { registerBotRoutes } from "../modules/bot/bot.router";
-import { createTypebotProxyHandler } from "../modules/bot/typebot-proxy";
+import { createLegacyTypebotPathRedirect, createTypebotHostProxy } from "../modules/bot/typebot-proxy";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
 import { createSupplierUploadIngressMiddleware } from "./media-ingress";
 import {
@@ -107,6 +107,11 @@ async function startServer() {
   const server = createServer(app);
   const releaseSha = process.env.MEGADESK_RELEASE_SHA?.trim() || null;
 
+  // ─── Typebot (subdomínios bot./viewer-bot.) ───────────────────────────────
+  // Deve ser o primeiro middleware: requisições desses hosts são repassadas
+  // integralmente ao Typebot e nunca chegam às rotas/SPA do MegaDesk.
+  app.use(createTypebotHostProxy());
+
   app.get("/healthz", (_req, res) => {
     res.status(200).json({
       status: "healthy",
@@ -117,8 +122,8 @@ async function startServer() {
   const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? "0");
   if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0) app.set("trust proxy", trustedProxyHops);
 
-  // ─── Typebot Builder Reverse Proxy ────────────────────────────────────────
-  app.use("/typebot-builder", createTypebotProxyHandler());
+  // ─── Typebot: subcaminho legado redireciona para o subdomínio dedicado ─────
+  app.use("/typebot-builder", createLegacyTypebotPathRedirect());
 
   app.use("/api/trpc", createSupplierUploadIngressMiddleware());
   app.use(express.json({

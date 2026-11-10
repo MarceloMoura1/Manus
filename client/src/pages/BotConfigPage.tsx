@@ -27,7 +27,11 @@ export function BotConfigPage() {
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const builderUrl = '/typebot-builder/';
+  // O Typebot (Next.js sem basePath) roda em subdomínio dedicado; servi-lo sob
+  // /typebot-builder/ fazia a navegação interna cair na SPA do MegaDesk.
+  const builderUrl: string =
+    (import.meta.env.VITE_TYPEBOT_BUILDER_URL as string | undefined)?.replace(/\/+$/, '') ||
+    'https://bot.megadesk.online';
 
   const webhookBaseUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/api/bot`
@@ -324,7 +328,7 @@ export function BotConfigPage() {
                   Carregando Construtor Typebot...
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Conectando ao serviço interno na porta 3002
+                  Conectando a {builderUrl.replace(/^https?:\/\//, '')}
                 </p>
               </div>
             </div>

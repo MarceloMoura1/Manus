@@ -1,82 +1,83 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import http from "node:http";
 import { EventEmitter } from "node:events";
-import { createTypebotProxyHandler } from "./typebot-proxy";
+import {
+  createLegacyTypebotPathRedirect,
+  createTypebotHostProxy,
+  resolveTypebotTarget,
+  rewriteFrameAncestors,
+} from "./typebot-proxy";
 
-describe("Typebot Proxy Middleware", () => {
+describe("Typebot Proxy (subdomínio dedicado)", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
-  it("deve redirecionar /typebot-builder sem barra para /typebot-builder/", () => {
-    const handler = createTypebotProxyHandler();
-    const req: any = { originalUrl: "/typebot-builder" };
-    const res: any = { redirect: vi.fn() };
-
-    handler(req, res);
-
-    expect(res.redirect).toHaveBeenCalledWith(301, "/typebot-builder/");
+  it("resolve apenas os hosts do Typebot", () => {
+    expect(resolveTypebotTarget("bot.megadesk.online")?.name).toBe("builder");
+    expect(resolveTypebotTarget("viewer-bot.megadesk.online")?.name).toBe("viewer");
+    expect(resolveTypebotTarget("app.megadesk.online")).toBeNull();
+    expect(resolveTypebotTarget("")).toBeNull();
   });
 
-  it("deve reescrever cabeçalhos e remover X-Frame-Options", async () => {
-    const handler = createTypebotProxyHandler();
+  it("não intercepta requisições do MegaDesk", () => {
+    const handler = createTypebotHostProxy();
+    const next = vi.fn();
+    const spy = vi.spyOn(http, "request");
+    handler({ headers: { host: "app.megadesk.online" } } as any, {} as any, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(spy).not.toHaveBeenCalled();
+  });
 
-    const mockProxyRes: any = new EventEmitter();
-    mockProxyRes.statusCode = 200;
-    mockProxyRes.headers = {
-      "content-type": "text/html; charset=utf-8",
-      "x-frame-options": "DENY",
-      "content-security-policy": "frame-ancestors 'none'",
-      location: "/signin",
+  it("substitui frame-ancestors preservando as demais diretivas", () => {
+    const out = rewriteFrameAncestors("default-src 'self'; frame-ancestors 'self'; form-action 'self'", "'self' https://app.megadesk.online");
+    expect(out).toBe("default-src 'self'; form-action 'self'; frame-ancestors 'self' https://app.megadesk.online");
+  });
+
+  it("repassa o caminho integral sem reescrita e libera o iframe para o MegaDesk", async () => {
+    const handler = createTypebotHostProxy();
+    const proxyRes: any = new EventEmitter();
+    proxyRes.statusCode = 200;
+    proxyRes.headers = {
+      "content-type": "text/html",
+      "x-frame-options": "SAMEORIGIN",
+      "content-security-policy": "default-src 'self'; frame-ancestors 'self'",
+      location: "/pt-BR/register",
     };
+    proxyRes.pipe = vi.fn();
+    const proxyReq: any = new EventEmitter();
 
-    const mockProxyReq: any = new EventEmitter();
-    mockProxyReq.write = vi.fn();
-    mockProxyReq.end = vi.fn();
-    mockProxyReq.setHeader = vi.fn();
-
-    vi.spyOn(http, "request").mockImplementation((options: any, callback: any) => {
-      expect(options.headers).toMatchObject({
-        host: "127.0.0.1:3002",
-        "x-forwarded-proto": "https",
-        "x-forwarded-host": "app.megadesk.online",
-      });
-      setTimeout(() => {
-        callback(mockProxyRes);
-        mockProxyRes.emit("data", Buffer.from("<head><title>Typebot</title></head><body><script src=\"/_next/static/app.js\"></script></body>"));
-        mockProxyRes.emit("end");
-      }, 5);
-      return mockProxyReq;
+    let captured: any;
+    vi.spyOn(http, "request").mockImplementation((options: any, cb: any) => {
+      captured = options;
+      setTimeout(() => cb(proxyRes), 0);
+      return proxyReq;
     });
 
     const req: any = new EventEmitter();
-    req.originalUrl = "/typebot-builder/signin";
-    req.url = "/signin";
+    req.originalUrl = "/pt-BR/register?x=1";
     req.method = "GET";
-    req.headers = { host: "app.megadesk.online" };
+    req.headers = { host: "bot.megadesk.online" };
     req.pipe = vi.fn();
+    const res: any = { headersSent: false, writeHead: vi.fn() };
 
-    const res: any = {
-      writeHead: vi.fn(),
-      end: vi.fn(),
-      headersSent: false,
-    };
+    handler(req, res, vi.fn());
+    await new Promise((r) => setTimeout(r, 5));
 
-    await new Promise<void>((resolve) => {
-      res.end = vi.fn((html: string) => {
-        expect(res.writeHead).toHaveBeenCalledWith(
-          200,
-          expect.objectContaining({
-            "x-frame-options": "SAMEORIGIN",
-            location: "/typebot-builder/signin",
-          })
-        );
-        expect(html).toContain('<base href="/typebot-builder/">');
-        expect(html).toContain('src="/typebot-builder/_next/static/app.js"');
-        resolve();
-      });
+    expect(captured.path).toBe("/pt-BR/register?x=1");
+    expect(captured.hostname).toBe("typebot-builder");
+    expect(captured.headers).toMatchObject({ host: "bot.megadesk.online", "x-forwarded-proto": "https" });
+    const [status, headers] = res.writeHead.mock.calls[0];
+    expect(status).toBe(200);
+    expect(headers["x-frame-options"]).toBeUndefined();
+    expect(headers.location).toBe("/pt-BR/register");
+    expect(headers["content-security-policy"]).toContain("frame-ancestors 'self' https://app.megadesk.online");
+    expect(proxyRes.pipe).toHaveBeenCalledWith(res);
+  });
 
-      handler(req, res);
-    });
+  it("redireciona o subcaminho legado /typebot-builder para o subdomínio", () => {
+    const res: any = { redirect: vi.fn() };
+    createLegacyTypebotPathRedirect()({ originalUrl: "/typebot-builder/pt-BR/signin" } as any, res);
+    expect(res.redirect).toHaveBeenCalledWith(302, "https://bot.megadesk.online/pt-BR/signin");
   });
 });
