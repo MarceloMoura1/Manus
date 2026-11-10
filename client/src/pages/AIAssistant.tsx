@@ -24,7 +24,7 @@ export function renderInlineMarkdown(text: string): React.ReactNode[] {
   return parts.map((part, idx) => {
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
       return (
-        <strong key={idx} className="font-semibold text-slate-900">
+        <strong key={idx} className="font-semibold text-slate-100">
           {part.slice(2, -2)}
         </strong>
       );
@@ -33,7 +33,7 @@ export function renderInlineMarkdown(text: string): React.ReactNode[] {
       return (
         <code
           key={idx}
-          className="px-1.5 py-0.5 rounded bg-slate-100 text-emerald-800 font-mono text-xs"
+          className="px-1.5 py-0.5 rounded bg-slate-800 text-blue-300 border border-slate-700/60 font-mono text-xs"
         >
           {part.slice(1, -1)}
         </code>
@@ -70,22 +70,22 @@ export function AssistantMarkdown({ content }: { content: string }) {
       if (rows.length > 0) {
         const [header, ...body] = rows;
         elements.push(
-          <div key={`tbl-${i}`} className="my-2 overflow-x-auto rounded-lg border border-slate-200">
+          <div key={`tbl-${i}`} className="my-2 overflow-x-auto rounded-lg border border-slate-800 bg-slate-900/60">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-100 text-slate-700 font-semibold">
+              <thead className="bg-slate-800/90 text-slate-200 font-semibold">
                 <tr>
                   {header.map((cell, cIdx) => (
-                    <th key={cIdx} className="px-3 py-2 border-b border-slate-200">
+                    <th key={cIdx} className="px-3 py-2 border-b border-slate-700">
                       {renderInlineMarkdown(cell)}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-800 text-slate-300">
                 {body.map((row, rIdx) => (
-                  <tr key={rIdx} className="hover:bg-slate-50/70">
+                  <tr key={rIdx} className="hover:bg-slate-800/40">
                     {row.map((cell, cIdx) => (
-                      <td key={cIdx} className="px-3 py-1.5 text-slate-700">
+                      <td key={cIdx} className="px-3 py-1.5 text-slate-300">
                         {renderInlineMarkdown(cell)}
                       </td>
                     ))}
@@ -107,7 +107,7 @@ export function AssistantMarkdown({ content }: { content: string }) {
         i++;
       }
       elements.push(
-        <ul key={`ul-${i}`} className="my-1.5 list-disc pl-5 space-y-1 text-slate-800">
+        <ul key={`ul-${i}`} className="my-1.5 list-disc pl-5 space-y-1 text-slate-200">
           {items.map((item, idx) => (
             <li key={idx}>{renderInlineMarkdown(item)}</li>
           ))}
@@ -120,7 +120,7 @@ export function AssistantMarkdown({ content }: { content: string }) {
     if (/^#{1,3}\s+/.test(trimmed)) {
       const headingText = trimmed.replace(/^#{1,3}\s+/, "");
       elements.push(
-        <h4 key={`h-${i}`} className="font-bold text-slate-900 mt-2 mb-1">
+        <h4 key={`h-${i}`} className="font-bold text-slate-100 mt-2 mb-1">
           {renderInlineMarkdown(headingText)}
         </h4>
       );
@@ -132,7 +132,7 @@ export function AssistantMarkdown({ content }: { content: string }) {
       elements.push(<div key={`br-${i}`} className="h-2" />);
     } else {
       elements.push(
-        <p key={`p-${i}`} className="leading-relaxed">
+        <p key={`p-${i}`} className="text-slate-200 leading-relaxed">
           {renderInlineMarkdown(line)}
         </p>
       );
@@ -645,14 +645,14 @@ export function AIAssistant() {
   return (
     <div
       data-testid="ai-assistant-workspace"
-      className="flex h-[calc(100vh-140px)] min-h-[620px] w-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
+      className="flex h-[calc(100vh-140px)] min-h-[620px] w-full bg-slate-950 dark:bg-[#070d19] rounded-2xl shadow-sm border border-slate-800 overflow-hidden"
     >
       {/* ─── COLUNA ESQUERDA: BARRA LATERAL DE CONVERSAS (THREADS) ─────────── */}
       <aside
         data-testid="ai-threads-sidebar"
         className={`${
-          sidebarOpen ? "w-72 border-r border-slate-200" : "w-0 border-r-0"
-        } transition-all duration-200 bg-slate-900 text-slate-100 flex flex-col flex-shrink-0 overflow-hidden`}
+          sidebarOpen ? "w-72 border-r border-slate-800" : "w-0 border-r-0"
+        } transition-all duration-200 bg-slate-950 dark:bg-[#050914] text-slate-100 flex flex-col flex-shrink-0 overflow-hidden`}
       >
         {/* Botão de destaque no topo: + Nova Conversa */}
         <div className="p-4 border-b border-slate-800">
@@ -661,7 +661,7 @@ export function AIAssistant() {
             data-testid="new-thread-button"
             onClick={() => void handleCreateNewThread()}
             disabled={createThreadMutation.isPending}
-            className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-semibold text-sm shadow-sm transition-all cursor-pointer disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-semibold text-sm shadow-sm transition-all cursor-pointer disabled:opacity-60"
           >
             <Plus className="w-4 h-4" />
             <span>+ Nova Conversa</span>
@@ -679,7 +679,7 @@ export function AIAssistant() {
               data-testid="threads-empty-state"
               className="px-3 py-8 text-center rounded-xl border border-dashed border-slate-800 bg-slate-900/50"
             >
-              <MessageSquare className="w-7 h-7 text-emerald-400/70 mx-auto mb-2" />
+              <MessageSquare className="w-7 h-7 text-blue-400/70 mx-auto mb-2" />
               <p className="text-xs font-medium text-slate-300">Nenhuma conversa ainda</p>
               <p className="text-[11px] text-slate-400 mt-1">
                 Clique em &ldquo;+ Nova Conversa&rdquo; ou envie uma mensagem para começar.
@@ -697,14 +697,14 @@ export function AIAssistant() {
                   onClick={() => setSelectedThreadId(thread.id)}
                   className={`group relative flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-sm transition-all cursor-pointer ${
                     isSelected
-                      ? "bg-emerald-600/20 text-white border border-emerald-500/30 font-medium"
-                      : "text-slate-300 hover:bg-slate-800/80 hover:text-white border border-transparent"
+                      ? "bg-blue-600/20 text-white border border-blue-500/40 font-medium"
+                      : "text-slate-300 hover:bg-slate-900 hover:text-white border border-transparent"
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <MessageSquare
                       className={`w-4 h-4 flex-shrink-0 ${
-                        isSelected ? "text-emerald-400" : "text-slate-400 group-hover:text-slate-300"
+                        isSelected ? "text-blue-400" : "text-slate-500 group-hover:text-slate-400"
                       }`}
                     />
                     {isEditingThis ? (
@@ -718,12 +718,12 @@ export function AIAssistant() {
                           value={editingTitleValue}
                           onChange={(e) => setEditingTitleValue(e.target.value)}
                           autoFocus
-                          className="w-full bg-slate-950 text-white text-xs px-2 py-1 rounded border border-emerald-500 focus:outline-none"
+                          className="w-full bg-slate-950 text-white text-xs px-2 py-1 rounded border border-blue-500 focus:outline-none"
                         />
                         <button
                           type="submit"
                           title="Salvar título"
-                          className="p-1 text-emerald-400 hover:text-emerald-300"
+                          className="p-1 text-blue-400 hover:text-blue-300"
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>
@@ -754,7 +754,7 @@ export function AIAssistant() {
                         data-testid={`rename-thread-${thread.id}`}
                         title="Renomear conversa"
                         onClick={(e) => handleStartRenameSidebar(thread, e)}
-                        className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700/70 transition-colors"
+                        className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
@@ -774,33 +774,25 @@ export function AIAssistant() {
             })
           )}
         </div>
-
-        {/* Rodapé informativo de atalho mãos-livres */}
-        <div className="p-3 border-t border-slate-800 bg-slate-950/60">
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <Volume2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            <span className="truncate">Voz Multimodal • Gemini 3.5 Flash Lite</span>
-          </div>
-        </div>
       </aside>
 
       {/* ─── COLUNA PRINCIPAL: CHAT VIEW ────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
+      <div className="flex-1 flex flex-col min-w-0 bg-slate-950 dark:bg-[#070d19] text-slate-100">
         {/* Cabeçalho da Conversa Ativa */}
-        <header className="flex items-center justify-between px-5 py-3.5 bg-white border-b border-slate-200">
+        <header className="flex items-center justify-between px-5 py-3.5 bg-slate-900/90 dark:bg-[#0b1326] border-b border-slate-800">
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
               data-testid="toggle-threads-sidebar"
               onClick={() => setSidebarOpen((prev) => !prev)}
               title={sidebarOpen ? "Recolher barra lateral" : "Abrir barra lateral"}
-              className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 transition-colors"
+              className="p-2 rounded-xl border border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800 transition-colors"
             >
               <PanelLeft className="w-4 h-4" />
             </button>
 
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-5 h-5 text-emerald-600" />
+            <div className="w-9 h-9 rounded-xl bg-blue-500/15 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-5 h-5 text-blue-400" />
             </div>
 
             <div className="min-w-0">
@@ -816,19 +808,19 @@ export function AIAssistant() {
                       if (e.key === "Escape") setIsEditingHeaderTitle(false);
                     }}
                     autoFocus
-                    className="text-sm font-semibold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg border border-emerald-500 focus:outline-none"
+                    className="text-sm font-semibold text-slate-100 bg-slate-950 px-2.5 py-1 rounded-lg border border-blue-500 focus:outline-none"
                   />
                   <button
                     type="button"
                     onClick={() => void handleSaveRenameHeader()}
-                    className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
+                    className="p-1 text-blue-400 hover:bg-slate-800 rounded"
                   >
                     <Check className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsEditingHeaderTitle(false)}
-                    className="p-1 text-slate-400 hover:bg-slate-100 rounded"
+                    className="p-1 text-slate-400 hover:bg-slate-800 rounded"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -838,7 +830,7 @@ export function AIAssistant() {
                   <h2
                     data-testid="active-thread-title"
                     onClick={handleStartRenameHeader}
-                    className="text-base font-semibold text-slate-900 truncate cursor-pointer hover:text-emerald-700 transition-colors"
+                    className="text-base font-semibold text-slate-100 truncate cursor-pointer hover:text-blue-400 transition-colors"
                     title="Clique para editar o título da conversa"
                   >
                     {activeThread ? activeThread.title : "Assistente IA MegaDesk"}
@@ -848,14 +840,14 @@ export function AIAssistant() {
                       type="button"
                       onClick={handleStartRenameHeader}
                       title="Renomear conversa"
-                      className="text-slate-400 hover:text-slate-600 p-1 rounded"
+                      className="text-slate-400 hover:text-slate-200 p-1 rounded"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
               )}
-              <p className="text-xs text-slate-500 truncate">
+              <p className="text-xs text-slate-400 truncate">
                 Copiloto Multimodal • {session?.company || "Operação Conectada"}
               </p>
             </div>
@@ -865,18 +857,18 @@ export function AIAssistant() {
         {/* Área de Mensagens */}
         <div
           data-testid="ai-messages-timeline"
-          className="flex-1 overflow-y-auto px-6 py-6 space-y-5"
+          className="flex-1 overflow-y-auto px-6 py-6 space-y-5 bg-slate-950 dark:bg-[#070d19] text-slate-100"
         >
           {messages.length === 0 && !isSendingText && !isProcessingAudio ? (
             <div className="flex flex-col items-center justify-center h-full max-w-xl mx-auto text-center py-10 gap-6">
-              <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center shadow-sm">
-                <Sparkles className="w-8 h-8 text-emerald-600" />
+              <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shadow-sm">
+                <Sparkles className="w-8 h-8 text-blue-400" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-slate-900 mb-1.5">
+                <h3 className="text-xl font-bold text-slate-100 mb-1.5">
                   Como posso ajudar sua operação hoje?
                 </h3>
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-slate-400">
                   Envie uma mensagem de texto ou grave um comando de voz pelo microfone para consultar vendas, CRM, chamados ou abrir solicitações em segundos.
                 </p>
               </div>
@@ -889,7 +881,7 @@ export function AIAssistant() {
                       setInput(suggestion);
                       textareaRef.current?.focus();
                     }}
-                    className="text-left px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 hover:border-emerald-400 hover:bg-emerald-50/60 transition-all shadow-xs cursor-pointer"
+                    className="text-left px-4 py-3 rounded-xl border border-slate-800 bg-slate-900/70 text-sm text-slate-200 hover:border-blue-500/60 hover:bg-slate-800/90 transition-all shadow-xs cursor-pointer"
                   >
                     {suggestion}
                   </button>
@@ -909,8 +901,8 @@ export function AIAssistant() {
                   className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}
                 >
                   {!isUser && (
-                    <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-1">
-                      <Bot className="w-4 h-4 text-emerald-700" />
+                    <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center flex-shrink-0 mt-1">
+                      <Bot className="w-4 h-4 text-blue-400" />
                     </div>
                   )}
 
@@ -918,14 +910,14 @@ export function AIAssistant() {
                     <div
                       className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                         isUser
-                          ? "bg-emerald-600 text-white rounded-tr-sm shadow-xs"
-                          : "bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-xs"
+                          ? "bg-blue-600/90 text-white rounded-tr-sm shadow-sm"
+                          : "bg-slate-900/80 dark:bg-slate-900/90 border border-slate-800 rounded-tl-sm text-slate-100 shadow-sm"
                       }`}
                     >
                       {isUser ? (
                         <div className="whitespace-pre-wrap">{msg.content}</div>
                       ) : (
-                        <div className="prose prose-sm prose-slate max-w-none">
+                        <div className="prose prose-sm prose-invert max-w-none">
                           <AssistantMarkdown content={msg.content} />
                         </div>
                       )}
@@ -935,21 +927,21 @@ export function AIAssistant() {
                     {pendingAction && (
                       <div
                         data-testid="hitl-action-card"
-                        className="mt-2.5 rounded-xl border border-sky-500/40 bg-slate-900 p-4 text-xs text-slate-100 shadow-sm"
+                        className="mt-2.5 rounded-xl border border-blue-500/40 bg-slate-900/95 p-4 text-xs text-slate-100 shadow-md"
                       >
-                        <p className="font-semibold text-sky-300">
+                        <p className="font-semibold text-blue-400">
                           Ação preparada pelo Copiloto — Aprovação Humana (HITL)
                         </p>
-                        <p className="mt-1 text-slate-300">
+                        <p className="mt-1 text-slate-200">
                           {pendingAction.summary || `Ação: ${pendingAction.actionType}`}
                         </p>
 
                         {pendingAction.args && typeof pendingAction.args === "object" && (
-                          <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-800 bg-slate-950/70 p-2.5 text-slate-300">
+                          <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-800 bg-slate-950/80 p-2.5 text-slate-300">
                             {Object.entries(pendingAction.args).map(([key, value]) => (
                               <div key={key} className="flex items-start justify-between gap-3">
-                                <dt className="capitalize text-slate-400">{key}</dt>
-                                <dd className="text-right text-slate-100 font-medium">
+                                <dt className="capitalize text-slate-400 font-medium">{key}</dt>
+                                <dd className="text-right text-slate-100 font-semibold">
                                   {typeof value === "object" ? JSON.stringify(value) : String(value)}
                                 </dd>
                               </div>
@@ -963,7 +955,7 @@ export function AIAssistant() {
                               localAction.state === "FAILED"
                                 ? "text-rose-300"
                                 : localAction.state === "EXECUTED"
-                                ? "text-emerald-300"
+                                ? "text-emerald-400"
                                 : "text-slate-300"
                             }`}
                           >
@@ -975,7 +967,7 @@ export function AIAssistant() {
                           <div className="mt-3 flex flex-wrap gap-2">
                             <Button
                               size="sm"
-                              className="bg-emerald-600 text-white hover:bg-emerald-500"
+                              className="bg-blue-600 text-white hover:bg-blue-500 font-semibold shadow-sm"
                               onClick={() => void handleConfirmPendingAction(pendingAction)}
                             >
                               Confirmar e Executar
@@ -983,7 +975,7 @@ export function AIAssistant() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800"
+                              className="border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white"
                               onClick={() => void handleCancelPendingAction(pendingAction)}
                             >
                               Cancelar
@@ -995,8 +987,8 @@ export function AIAssistant() {
                   </div>
 
                   {isUser && (
-                    <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0 mt-1">
-                      <UserIcon className="w-4 h-4 text-slate-600" />
+                    <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0 mt-1">
+                      <UserIcon className="w-4 h-4 text-slate-300" />
                     </div>
                   )}
                 </div>
@@ -1010,10 +1002,10 @@ export function AIAssistant() {
               data-testid="assistant-status-indicator"
               className="flex gap-3 justify-start animate-fade-in"
             >
-              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-1">
-                <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
+              <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center flex-shrink-0 mt-1">
+                <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
               </div>
-              <div className="rounded-2xl px-4 py-3 text-sm bg-white border border-slate-200 text-slate-600 rounded-tl-sm shadow-xs flex items-center gap-2.5">
+              <div className="rounded-2xl px-4 py-3 text-sm bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-sm shadow-xs flex items-center gap-2.5">
                 <span className="font-medium">
                   {isProcessingAudio
                     ? "Processando áudio no Gemini Multimodal..."
@@ -1027,14 +1019,14 @@ export function AIAssistant() {
         </div>
 
         {/* ─── BARRA DE COMPOSIÇÃO INFERIOR (TEXTO + MICROFONE MULTIMODAL) ─── */}
-        <div className="px-6 py-4 bg-white border-t border-slate-200">
+        <div className="px-6 py-4 bg-slate-900/90 dark:bg-[#0b1326] border-t border-slate-800">
           {recordingError && (
-            <div className="mb-3 px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center justify-between">
+            <div className="mb-3 px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-800/80 text-xs text-rose-300 flex items-center justify-between">
               <span>{recordingError}</span>
               <button
                 type="button"
                 onClick={() => setRecordingError(null)}
-                className="text-rose-500 hover:text-rose-700 font-semibold"
+                className="text-rose-400 hover:text-rose-200 font-semibold"
               >
                 Fechar
               </button>
@@ -1045,19 +1037,19 @@ export function AIAssistant() {
             /* Estado Visual Claro de Gravação (Indicador Vermelho Pulsante + Timer + Cancelar/Enviar) */
             <div
               data-testid="audio-recording-bar"
-              className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-rose-50/90 border border-rose-200"
+              className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-rose-950/60 border border-rose-800/80"
             >
               <div className="flex items-center gap-3">
                 <span className="relative flex h-3.5 w-3.5">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-600" />
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500" />
                 </span>
-                <span className="text-sm font-semibold text-rose-800">
+                <span className="text-sm font-semibold text-rose-200">
                   Gravando comando de voz...
                 </span>
                 <span
                   data-testid="recording-timer"
-                  className="font-mono text-sm font-bold text-rose-600 bg-white px-2.5 py-0.5 rounded-md border border-rose-200"
+                  className="font-mono text-sm font-bold text-rose-300 bg-slate-900 px-2.5 py-0.5 rounded-md border border-rose-800"
                 >
                   {formatRecordingDuration(recordingSeconds)}
                 </span>
@@ -1068,7 +1060,7 @@ export function AIAssistant() {
                   type="button"
                   data-testid="cancel-audio-recording"
                   onClick={cancelAudioRecording}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-rose-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                   <span>Cancelar</span>
@@ -1077,7 +1069,7 @@ export function AIAssistant() {
                   type="button"
                   data-testid="send-audio-recording"
                   onClick={finishAndSendAudioRecording}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>Enviar Áudio</span>
@@ -1095,7 +1087,7 @@ export function AIAssistant() {
                 placeholder="Digite sua mensagem ou clique no microfone para falar... (Enter envia, Shift+Enter quebra linha)"
                 rows={1}
                 disabled={isSendingText || isProcessingAudio}
-                className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                className="flex-1 resize-none rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-slate-950 transition-all"
                 style={{ maxHeight: "140px", overflowY: "auto" }}
               />
 
@@ -1106,7 +1098,7 @@ export function AIAssistant() {
                 onClick={() => void startAudioRecording()}
                 disabled={isSendingText || isProcessingAudio}
                 title="Gravar comando de voz (Microfone)"
-                className="w-11 h-11 rounded-xl border border-slate-200 bg-slate-100 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-600 text-slate-700 flex items-center justify-center transition-all flex-shrink-0 cursor-pointer disabled:opacity-50"
+                className="w-11 h-11 rounded-xl border border-slate-800 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-500/50 hover:text-rose-400 text-slate-300 flex items-center justify-center transition-all flex-shrink-0 cursor-pointer disabled:opacity-50"
               >
                 <Mic className="w-5 h-5" />
               </button>
@@ -1118,7 +1110,7 @@ export function AIAssistant() {
                 onClick={() => void handleSendText()}
                 disabled={!input.trim() || isSendingText || isProcessingAudio}
                 title="Enviar mensagem"
-                className="w-11 h-11 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 text-white flex items-center justify-center transition-all flex-shrink-0 cursor-pointer"
+                className="w-11 h-11 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-all flex-shrink-0 cursor-pointer"
               >
                 {isSendingText ? (
                   <Loader2 className="w-4 h-4 animate-spin" />

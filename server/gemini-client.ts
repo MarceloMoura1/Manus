@@ -280,7 +280,12 @@ export interface PendingActionRequest {
   summary: string;
 }
 
-type PendingActionOwner = { clientId: string; userId: string };
+type PendingActionOwner = {
+  clientId: string;
+  userId: string;
+  userEmail?: string;
+  operationalUserId?: string;
+};
 type StoredPendingAction = PendingActionRequest & PendingActionOwner & {
   expiresAt: number;
   state: "PENDING_APPROVAL" | "EXECUTING";
@@ -1534,13 +1539,29 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function beginPendingHermesAction(input: { actionId: string; actionType: HermesActionType; payload: Record<string, unknown>; clientId: string; userId: string }) {
+export function beginPendingHermesAction(input: {
+  actionId: string;
+  actionType: HermesActionType;
+  payload: Record<string, unknown>;
+  clientId: string;
+  userId: string;
+  userEmail?: string;
+  operationalUserId?: string;
+}) {
   const stored = pendingActions.get(input.actionId);
   if (!stored || stored.expiresAt <= Date.now()) {
     pendingActions.delete(input.actionId);
     throw new Error("Ação pendente ausente ou expirada; solicite uma nova ação ao Hermes.");
   }
-  if (stored.state !== "PENDING_APPROVAL" || stored.clientId !== input.clientId || stored.userId !== input.userId || stored.actionType !== input.actionType) {
+  const isSameClient = stored.clientId === input.clientId;
+  const isSameUser =
+    stored.userId === input.userId ||
+    (Boolean(stored.userEmail) && (stored.userEmail === input.userId || stored.userEmail === input.userEmail)) ||
+    (Boolean(stored.operationalUserId) && (stored.operationalUserId === input.userId || stored.operationalUserId === input.operationalUserId)) ||
+    (Boolean(input.userEmail) && stored.userId === input.userEmail) ||
+    (Boolean(input.operationalUserId) && stored.userId === input.operationalUserId);
+
+  if (stored.state !== "PENDING_APPROVAL" || !isSameClient || !isSameUser || stored.actionType !== input.actionType) {
     throw new Error("Ação pendente não pertence à sessão autenticada.");
   }
   const tool = HERMES_TOOL_REGISTRY.find(item => item.name === stored.toolName && item.actionType === input.actionType);
@@ -1560,13 +1581,28 @@ export function releasePendingHermesAction(actionId: string): void {
   if (stored?.state === "EXECUTING") stored.state = "PENDING_APPROVAL";
 }
 
-export function cancelPendingHermesAction(input: { actionId: string; actionType: HermesActionType; clientId: string; userId: string }): void {
+export function cancelPendingHermesAction(input: {
+  actionId: string;
+  actionType: HermesActionType;
+  clientId: string;
+  userId: string;
+  userEmail?: string;
+  operationalUserId?: string;
+}): void {
   const stored = pendingActions.get(input.actionId);
   if (!stored || stored.expiresAt <= Date.now()) {
     pendingActions.delete(input.actionId);
     throw new Error("Ação pendente ausente ou expirada.");
   }
-  if (stored.state !== "PENDING_APPROVAL" || stored.clientId !== input.clientId || stored.userId !== input.userId || stored.actionType !== input.actionType) {
+  const isSameClient = stored.clientId === input.clientId;
+  const isSameUser =
+    stored.userId === input.userId ||
+    (Boolean(stored.userEmail) && (stored.userEmail === input.userId || stored.userEmail === input.userEmail)) ||
+    (Boolean(stored.operationalUserId) && (stored.operationalUserId === input.userId || stored.operationalUserId === input.operationalUserId)) ||
+    (Boolean(input.userEmail) && stored.userId === input.userEmail) ||
+    (Boolean(input.operationalUserId) && stored.userId === input.operationalUserId);
+
+  if (stored.state !== "PENDING_APPROVAL" || !isSameClient || !isSameUser || stored.actionType !== input.actionType) {
     throw new Error("Ação pendente não pertence à sessão autenticada.");
   }
   pendingActions.delete(input.actionId);

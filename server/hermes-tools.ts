@@ -10,6 +10,8 @@ import {
 export interface HermesToolContext {
   clientId: string;
   userId?: string;
+  userEmail?: string;
+  operationalUserId?: string;
   pool?: any;
   userPermissions?: readonly string[];
 }
@@ -239,7 +241,12 @@ export function createHermesTools(context: HermesToolContext) {
               description: finalDescription,
               priority: mappedPriority,
             },
-            { clientId: context.clientId, userId: context.userId || "operator" },
+            {
+              clientId: context.clientId,
+              userId: context.userEmail || context.userId || context.operationalUserId || "operator",
+              userEmail: context.userEmail,
+              operationalUserId: context.operationalUserId,
+            },
           );
         }
 

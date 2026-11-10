@@ -169,6 +169,30 @@ export class AssistantThreadsRepository {
       .set(updates)
       .where(eq(megadeskAiThreads.id, threadId));
   }
+
+  async updateMessageContent(
+    messageId: string,
+    content: string,
+    toolInvocations?: unknown
+  ): Promise<MegadeskAiMessage | null> {
+    const db = getDb();
+    const updateData: Record<string, unknown> = { content };
+    if (toolInvocations !== undefined) {
+      updateData.toolInvocations = toolInvocations;
+    }
+    await db
+      .update(megadeskAiMessages)
+      .set(updateData)
+      .where(eq(megadeskAiMessages.id, messageId));
+
+    const rows = await db
+      .select()
+      .from(megadeskAiMessages)
+      .where(eq(megadeskAiMessages.id, messageId))
+      .limit(1);
+
+    return rows[0] ?? null;
+  }
 }
 
 export const assistantThreadsRepository = new AssistantThreadsRepository();

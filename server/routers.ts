@@ -2123,7 +2123,13 @@ export const appRouter = router({
         const client = getReleasedClientOrThrow(ctx.tenantId, "ai-assistant");
         const user = assertAssistantActionPermission(client, userId, input.actionType);
         try {
-          const pending = beginPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
+          const pending = beginPendingHermesAction({
+            ...input,
+            clientId: ctx.tenantId,
+            userId,
+            userEmail: ctx.userEmail?.trim().toLowerCase(),
+            operationalUserId: ctx.operationalUserId?.trim().toLowerCase(),
+          });
           const tool = getAuthorizedHermesTool(pending.toolName, user.permissions);
           if (!tool || tool.type !== "MUTATION" || tool.actionType !== pending.actionType) {
             throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui permissão para executar esta ação." });
@@ -2192,7 +2198,13 @@ export const appRouter = router({
         const client = getReleasedClientOrThrow(ctx.tenantId, "ai-assistant");
         assertAssistantActionPermission(client, userId, input.actionType);
         try {
-          cancelPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
+          cancelPendingHermesAction({
+            ...input,
+            clientId: ctx.tenantId,
+            userId,
+            userEmail: ctx.userEmail?.trim().toLowerCase(),
+            operationalUserId: ctx.operationalUserId?.trim().toLowerCase(),
+          });
           const cancelMsg = "❌ Ação cancelada pelo usuário.";
           const currentHistory = await loadConversationHistory(ctx.tenantId, userId);
           const updatedHistory = [...currentHistory, { role: "assistant" as const, content: cancelMsg, timestamp: Date.now() }].slice(-50);

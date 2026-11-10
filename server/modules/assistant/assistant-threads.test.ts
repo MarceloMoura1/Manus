@@ -105,6 +105,20 @@ class MockAssistantThreadsRepository extends AssistantThreadsRepository {
     }
   }
 
+  async updateMessageContent(
+    messageId: string,
+    content: string,
+    toolInvocations?: unknown
+  ): Promise<MegadeskAiMessage | null> {
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (!msg) return null;
+    msg.content = content;
+    if (toolInvocations !== undefined) {
+      msg.toolInvocations = toolInvocations;
+    }
+    return { ...msg };
+  }
+
   // Helpers de teste
   getRawThreads() {
     return this.threads;
@@ -137,7 +151,9 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
       });
       expect(identity).toEqual({
         tenantId: "tenant-acme",
-        userId: "user-op-1",
+        userId: "user@acme.com",
+        userEmail: "user@acme.com",
+        operationalUserId: "user-op-1",
       });
     });
 
@@ -148,6 +164,8 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
       expect(identity).toEqual({
         tenantId: "main",
         userId: "admin@megadesk.online",
+        userEmail: "admin@megadesk.online",
+        operationalUserId: undefined,
       });
     });
 
@@ -332,9 +350,9 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
   });
 
   describe("sendThreadAudioMessage (Multimodal Voice Transcription & Execution)", () => {
-    it("persists voice user message, passes multimodal file part to Gemini and saves assistant response", async () => {
+    it("persists voice user message, extracts real transcription and saves assistant response", async () => {
       mockAiGenerate.mockResolvedValueOnce({
-        text: "Entendi seu áudio! Temos 5 chamados abertos hoje.",
+        text: `[Transcrição: "Quantos chamados estão abertos hoje?"]\n\nEntendi seu áudio! Temos 5 chamados abertos hoje.`,
       });
 
       const caller = router.createCaller({
@@ -352,7 +370,8 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
       });
 
       expect(result.userMessage.role).toBe("user");
-      expect(result.userMessage.content).toBe("🎤 [Mensagem de voz enviada]");
+      expect(result.userMessage.content).toBe("🎤 Quantos chamados estão abertos hoje?");
+      expect(result.transcription).toBe("Quantos chamados estão abertos hoje?");
       expect(result.assistantMessage.role).toBe("assistant");
       expect(result.assistantMessage.content).toBe("Entendi seu áudio! Temos 5 chamados abertos hoje.");
 
@@ -371,6 +390,60 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
         mediaType: "audio/webm",
         mimeType: "audio/webm",
       });
+
+      // Verifica se o título da thread foi atualizado com a transcrição real
+      const threadMessages = await caller.getThreadMessages({ threadId: thread.id });
+      expect(threadMessages.thread.title).toBe("Quantos chamados estão abertos hoje?");
+    });
+  });
+
+  describe("HITL Action Session Validation", () => {
+    it("validates session ownership flexibly across userEmail and operationalUserId", async () => {
+      const {
+        createPendingActionRequest,
+        beginPendingHermesAction,
+        HERMES_TOOL_REGISTRY,
+      } = await import("../../gemini-client");
+
+      const ticketTool = HERMES_TOOL_REGISTRY.find((t) => t.name === "create_ticket")!;
+
+      // Ação criada com operationalUserId e userEmail
+      const pending = createPendingActionRequest(
+        ticketTool,
+        {
+          customer: "Mecânica Silva",
+          title: "Troca de óleo urgente",
+          description: "Troca de óleo urgente",
+          priority: "urgent",
+        },
+        {
+          clientId: "tenant-oficina",
+          userId: "operador@oficina.com",
+          userEmail: "operador@oficina.com",
+          operationalUserId: "user-op-123",
+        }
+      );
+
+      expect(pending.id).toBeDefined();
+
+      // Confirmação vinda com o userEmail
+      const begunWithEmail = beginPendingHermesAction({
+        actionId: pending.id,
+        actionType: "CREATE_TICKET",
+        payload: {
+          customer: "Mecânica Silva",
+          title: "Troca de óleo urgente",
+          description: "Troca de óleo urgente",
+          priority: "urgent",
+        },
+        clientId: "tenant-oficina",
+        userId: "operador@oficina.com",
+        userEmail: "operador@oficina.com",
+        operationalUserId: "user-op-123",
+      });
+
+      expect(begunWithEmail.state).toBe("EXECUTING");
+      expect(begunWithEmail.actionType).toBe("CREATE_TICKET");
     });
   });
 

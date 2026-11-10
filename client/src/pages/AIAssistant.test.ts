@@ -77,4 +77,11 @@ describe("AIAssistant Multi-Chat & Multimodal Voice UI", () => {
     expect(aiAssistantSource).toContain('data-testid="hitl-action-card"');
     expect(aiAssistantSource).toContain("Confirmar e Executar");
   });
+
+  it("removes footer model label and enforces native dark theme styling", () => {
+    expect(aiAssistantSource).not.toContain("Voz Multimodal • Gemini 3.5 Flash Lite");
+    expect(aiAssistantSource).toContain("bg-slate-950 dark:bg-[#070d19]");
+    expect(aiAssistantSource).toContain("bg-blue-600/90 text-white");
+    expect(aiAssistantSource).toContain("bg-slate-900/80 dark:bg-slate-900/90");
+  });
 });

@@ -22,14 +22,20 @@ export const CANONICAL_GEMINI_MODEL = "gemini-3.5-flash-lite";
 export interface AssistantSessionIdentity {
   tenantId: string;
   userId: string;
+  userEmail?: string;
+  operationalUserId?: string;
 }
 
 export function resolveAssistantIdentity(ctx: any): AssistantSessionIdentity {
   // 1. Sessão Operacional MegaDesk
-  if (ctx?.tenantId && (ctx?.operationalUserId || ctx?.userEmail)) {
+  if (ctx?.tenantId && (ctx?.userEmail || ctx?.operationalUserId)) {
+    const userEmail = ctx.userEmail ? String(ctx.userEmail).trim().toLowerCase() : undefined;
+    const operationalUserId = ctx.operationalUserId ? String(ctx.operationalUserId).trim().toLowerCase() : undefined;
     return {
       tenantId: String(ctx.tenantId).trim(),
-      userId: String(ctx.operationalUserId || ctx.userEmail).trim().toLowerCase(),
+      userId: (userEmail || operationalUserId)!,
+      userEmail,
+      operationalUserId,
     };
   }
 
@@ -37,9 +43,12 @@ export function resolveAssistantIdentity(ctx: any): AssistantSessionIdentity {
   if (ctx?.user) {
     const adminId = ctx.user.email || ctx.user.openId || (ctx.user.id ? String(ctx.user.id) : null);
     if (adminId) {
+      const email = ctx.user.email ? String(ctx.user.email).trim().toLowerCase() : undefined;
       return {
         tenantId: ctx.user.clientId ? String(ctx.user.clientId).trim() : "main",
         userId: adminId.trim().toLowerCase(),
+        userEmail: email,
+        operationalUserId: ctx.user.id ? String(ctx.user.id).trim().toLowerCase() : undefined,
       };
     }
   }
@@ -49,6 +58,8 @@ export function resolveAssistantIdentity(ctx: any): AssistantSessionIdentity {
     return {
       tenantId: String(ctx.assistantIdentity.tenantId).trim(),
       userId: String(ctx.assistantIdentity.userId).trim().toLowerCase(),
+      userEmail: ctx.assistantIdentity.userEmail ? String(ctx.assistantIdentity.userEmail).trim().toLowerCase() : undefined,
+      operationalUserId: ctx.assistantIdentity.operationalUserId ? String(ctx.assistantIdentity.operationalUserId).trim().toLowerCase() : undefined,
     };
   }
 
@@ -183,7 +194,8 @@ export function createAssistantThreadsRouter(
     sendThreadMessage: isolatedProcedure
       .input(sendThreadMessageSchema)
       .mutation(async ({ ctx, input }) => {
-        const { tenantId, userId } = resolveAssistantIdentity(ctx);
+        const identity = resolveAssistantIdentity(ctx);
+        const { tenantId, userId } = identity;
         const thread = await repo.getThread(tenantId, userId, input.threadId);
         if (!thread) {
           throw new TRPCError({
@@ -230,7 +242,12 @@ export function createAssistantThreadsRouter(
         try {
           const google = createGoogleGenerativeAI({ apiKey });
           const targetModel = process.env.GEMINI_MODEL || CANONICAL_GEMINI_MODEL;
-          const tenantTools = createHermesTools({ clientId: tenantId, userId });
+          const tenantTools = createHermesTools({
+            clientId: tenantId,
+            userId,
+            userEmail: identity.userEmail,
+            operationalUserId: identity.operationalUserId,
+          });
 
           const systemInstruction = `Você é o Copiloto de Inteligência Artificial da plataforma MegaDesk.
 Atue como um assessor executivo e operacional ágil, estruturado, acolhedor e focado em resolver as necessidades do usuário em português do Brasil.
@@ -275,7 +292,8 @@ Seja direto e prático nas respostas sem prolixidade mecânica.`;
     sendThreadAudioMessage: isolatedProcedure
       .input(sendThreadAudioMessageSchema)
       .mutation(async ({ ctx, input }) => {
-        const { tenantId, userId } = resolveAssistantIdentity(ctx);
+        const identity = resolveAssistantIdentity(ctx);
+        const { tenantId, userId } = identity;
         const thread = await repo.getThread(tenantId, userId, input.threadId);
         if (!thread) {
           throw new TRPCError({
@@ -287,11 +305,11 @@ Seja direto e prático nas respostas sem prolixidade mecânica.`;
         const cleanBase64 = stripAudioDataUrlPrefix(input.audioBase64);
         const normalizedMimeType = (input.mimeType || "audio/webm").trim();
 
-        // 1. Salva a mensagem do usuário indicando o envio de áudio
+        // 1. Salva a mensagem do usuário indicando inicialmente o envio de áudio
         const userMessage = await repo.saveMessage(
           input.threadId,
           "user",
-          "🎤 [Mensagem de voz enviada]",
+          "🎤 [Processando áudio...]",
           { type: "audio", mimeType: normalizedMimeType }
         );
 
@@ -313,6 +331,7 @@ Seja direto e prático nas respostas sem prolixidade mecânica.`;
           return {
             userMessage,
             assistantMessage,
+            transcription: null,
           };
         }
 
@@ -344,10 +363,21 @@ Seja direto e prático nas respostas sem prolixidade mecânica.`;
         try {
           const google = createGoogleGenerativeAI({ apiKey });
           const targetModel = process.env.GEMINI_MODEL || CANONICAL_GEMINI_MODEL;
-          const tenantTools = createHermesTools({ clientId: tenantId, userId });
+          const tenantTools = createHermesTools({
+            clientId: tenantId,
+            userId,
+            userEmail: identity.userEmail,
+            operationalUserId: identity.operationalUserId,
+          });
 
           const systemInstruction = `Você é o Copiloto Multimodal de Inteligência Artificial da plataforma MegaDesk.
-O usuário enviou um comando ou pergunta por voz. Ouça o áudio com atenção, execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, chamados ou preparar abertura de chamado) e responda de forma clara, estruturada e direta em português do Brasil.`;
+O usuário enviou um comando ou pergunta por voz.
+REGRA OBRIGATÓRIA DE TRANSCRIÇÃO:
+Na PRIMEIRA LINHA da sua resposta final em texto, você DEVE transcrever exatamente o que o usuário falou no áudio no seguinte formato exato:
+[Transcrição: "texto falado pelo usuário"]
+
+Após essa primeira linha, pule uma linha e forneça a sua resposta natural ou resultado da execução das ferramentas ao usuário.
+Execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, chamados ou preparar abertura de chamado) e responda de forma clara, estruturada e direta em português do Brasil.`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),
@@ -357,11 +387,32 @@ O usuário enviou um comando ou pergunta por voz. Ouça o áudio com atenção, 
             stopWhen: isStepCount(5),
           });
 
+          let rawText = aiResult.text?.trim() || "";
+          let transcription = "";
+          const match = rawText.match(/\[Transcrição:\s*["“]?([^"”\]]+)["”]?\]/i);
+          if (match && match[1]) {
+            transcription = match[1].trim();
+            rawText = rawText.replace(/\[Transcrição:\s*["“]?[^"”\]]+["”]?\]\s*/i, "").trim();
+          }
+
           const toolMetadata = extractToolMetadata(aiResult);
           const pendingReq = toolMetadata?.pendingActionRequest as any;
           const replyText =
-            aiResult.text?.trim() ||
-            (pendingReq?.summary ? `Preparei a ação solicitada por voz para sua aprovação: ${pendingReq.summary}` : "Áudio processado, mas não foi possível gerar uma resposta em texto.");
+            rawText ||
+            (pendingReq?.summary ? `Preparei a ação solicitada por voz para sua aprovação: ${pendingReq.summary}` : "Áudio processado com sucesso.");
+
+          // Atualiza a mensagem do usuário no banco com a transcrição real
+          const userDisplayContent = transcription ? `🎤 ${transcription}` : "🎤 [Mensagem de voz enviada]";
+          const updatedUserMessage = await repo.updateMessageContent(
+            userMessage.id,
+            userDisplayContent,
+            { type: "audio", mimeType: normalizedMimeType, transcription: transcription || null }
+          );
+
+          if (transcription) {
+            const autoTitle = transcription.length > 40 ? `${transcription.slice(0, 37)}...` : transcription;
+            await repo.touchThread(input.threadId, autoTitle);
+          }
 
           const assistantMessage = await repo.saveMessage(
             input.threadId,
@@ -371,8 +422,9 @@ O usuário enviou um comando ou pergunta por voz. Ouça o áudio com atenção, 
           );
 
           return {
-            userMessage,
+            userMessage: updatedUserMessage ?? userMessage,
             assistantMessage,
+            transcription: transcription || null,
           };
         } catch (error: any) {
           console.error(`[AssistantThreadsRouter] Erro ao processar áudio no Gemini thread=${input.threadId}:`, error);
@@ -381,6 +433,7 @@ O usuário enviou um comando ou pergunta por voz. Ouça o áudio com atenção, 
           return {
             userMessage,
             assistantMessage,
+            transcription: null,
           };
         }
       }),
