@@ -4,6 +4,7 @@ import {
   createAssistantThreadsRouter,
   resolveAssistantIdentity,
   CANONICAL_GEMINI_MODEL,
+  buildToneInstruction,
 } from "./assistant-threads.router";
 import { AssistantThreadsRepository } from "./repository";
 import {
@@ -447,49 +448,116 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
     });
   });
 
-  describe("Quick Voice Hands-Free Shortcut (processQuickVoiceRequest)", () => {
-    it("automatically creates 'Operações do Dia' thread and returns speechResponse", async () => {
+  describe("Assistant Settings & Tone Customization", () => {
+    it("builds the correct tone instruction for pratico, formal, and direto", () => {
+      expect(buildToneInstruction("pratico")).toContain("postura prática, colaborativa e direta");
+      expect(buildToneInstruction("formal")).toContain("postura corporativa, profissional, polida e técnica");
+      expect(buildToneInstruction("direto")).toContain("postura ultra-concisa");
+      expect(buildToneInstruction()).toContain("postura prática, colaborativa e direta");
+    });
+
+    it("injects custom tone instruction into system prompt during sendThreadMessage", async () => {
+      process.env.GEMINI_API_KEY = "test-mock-key";
+      const router = createAssistantThreadsRouter(mockRepo, mockAiGenerate);
+      const caller = router.createCaller({
+        tenantId: "tenant-teste",
+        userEmail: "user@teste.com",
+      } as any);
+
+      const thread = await mockRepo.createThread("tenant-teste", "user@teste.com", "Conversa Teste");
+
       mockAiGenerate.mockResolvedValueOnce({
-        text: "Chamado #1042 aberto com sucesso para a Mecânica Silva.",
+        text: "Resposta formal e estruturada.",
       });
 
-      const res = await processQuickVoiceRequest(
-        {
-          tenantId: "tenant-oficina",
-          userId: "mecanico@oficina.com",
-          audioBase64: "UklGRiQAAABXQVZFZm10IBAAAAABAAEA",
-          mimeType: "audio/ogg",
+      await caller.sendThreadMessage({
+        threadId: thread.id,
+        content: "Por favor, elabore um sumário executivo.",
+        settings: {
+          tone: "formal",
+          hitlRequired: true,
+          handsFreeAudio: false,
+          autoTranscribe: true,
         },
-        mockRepo,
-        mockAiGenerate
-      );
-
-      expect(res.success).toBe(true);
-      expect(res.speechResponse).toBe("Chamado #1042 aberto com sucesso para a Mecânica Silva.");
-      expect(res.threadId).toBeDefined();
-
-      const threads = await mockRepo.listThreads("tenant-oficina", "mecanico@oficina.com");
-      expect(threads.length).toBe(1);
-      expect(threads[0].title).toBe(DAILY_OPERATIONS_THREAD_TITLE);
-
-      // Segunda chamada reutiliza a mesma thread "Operações do Dia"
-      mockAiGenerate.mockResolvedValueOnce({
-        text: "Faturamento do dia atualizado.",
       });
-      const res2 = await processQuickVoiceRequest(
-        {
-          tenantId: "tenant-oficina",
-          userId: "mecanico@oficina.com",
-          text: "Qual o faturamento de hoje?",
-        },
-        mockRepo,
-        mockAiGenerate
-      );
 
-      expect(res2.success).toBe(true);
-      expect(res2.threadId).toBe(res.threadId);
-      const threadsAfter = await mockRepo.listThreads("tenant-oficina", "mecanico@oficina.com");
-      expect(threadsAfter.length).toBe(1);
+      expect(mockAiGenerate).toHaveBeenCalled();
+      const lastCall = mockAiGenerate.mock.calls[mockAiGenerate.mock.calls.length - 1][0];
+      expect(lastCall.system).toContain("postura corporativa, profissional, polida e técnica");
+    });
+
+    it("respects autoTranscribe=false by not updating user message with speech text", async () => {
+      process.env.GEMINI_API_KEY = "test-mock-key";
+      const router = createAssistantThreadsRouter(mockRepo, mockAiGenerate);
+      const caller = router.createCaller({
+        tenantId: "tenant-teste",
+        userEmail: "user@teste.com",
+      } as any);
+
+      const thread = await mockRepo.createThread("tenant-teste", "user@teste.com", "Nova Conversa");
+
+      mockAiGenerate.mockResolvedValueOnce({
+        text: '[Transcrição: "Consultar estoque de cabos"]\nTemos 50 unidades disponíveis.',
+      });
+
+      const result = await caller.sendThreadAudioMessage({
+        threadId: thread.id,
+        audioBase64: "UklGRiQAAABXQVZFZm10IBAAAAABAAEA",
+        mimeType: "audio/webm",
+        settings: {
+          tone: "direto",
+          hitlRequired: true,
+          handsFreeAudio: false,
+          autoTranscribe: false,
+        },
+      });
+
+      expect(result.userMessage.content).toBe("🎤 [Mensagem de voz enviada]");
+      expect(result.assistantMessage.content).toBe("Temos 50 unidades disponíveis.");
+    });
+
+    it("supports hitlRequired=false in createHermesTools for direct ticket execution", async () => {
+      const { createHermesTools } = await import("../../hermes-tools");
+      const mockTicketExecutor = vi.fn().mockResolvedValue({
+        entityId: 777,
+        status: "created",
+      });
+
+      const mockPool = {
+        execute: vi.fn().mockResolvedValue([
+          [
+            {
+              crmClientId: "crm-1",
+              companyName: "Empresa Alfa",
+              responsibleName: "Carlos Silva",
+              phone: "11999998888",
+              status: "ativo",
+            },
+          ],
+        ]),
+      };
+
+      const tools = createHermesTools({
+        clientId: "tenant-1",
+        userId: "user-1",
+        pool: mockPool,
+        hitlRequired: false,
+        executeTicketAction: mockTicketExecutor,
+      });
+
+      const ticketTool = tools.solicitar_abertura_chamado;
+      expect(ticketTool).toBeDefined();
+
+      const result = await ticketTool.execute({
+        termoCliente: "Empresa Alfa",
+        assunto: "Manutenção Preventiva de TI",
+        prioridade: "media",
+      });
+
+      expect(result.status).toBe("executado_direto");
+      expect(result.ticketNumber).toBe(777);
+      expect(result.pendingActionRequest).toBeUndefined();
+      expect(mockTicketExecutor).toHaveBeenCalled();
     });
   });
 });

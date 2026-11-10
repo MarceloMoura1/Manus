@@ -357,11 +357,25 @@ export function extractPendingActionFromMessage(msg: ThreadMessage): any | null 
   return null;
 }
 
+export interface AIAssistantSettings {
+  tone: "pratico" | "formal" | "direto";
+  hitlRequired: boolean;
+  handsFreeAudio: boolean;
+  autoTranscribe: boolean;
+}
+
+const DEFAULT_ASSISTANT_SETTINGS: AIAssistantSettings = {
+  tone: "pratico",
+  hitlRequired: true,
+  handsFreeAudio: false,
+  autoTranscribe: true,
+};
+
 export function AIAssistant() {
   const SESSION_KEY = "megadesk_session_v1";
   const THEME_KEY = "megadesk_ai_theme";
   const ROUTINES_KEY = "megadesk_ai_routines";
-  const SETTINGS_KEY = "megadesk_ai_settings";
+  const SETTINGS_KEY = "megadesk_ai_assistant_settings";
 
   const [session] = useState<any>(() => {
     try {
@@ -415,7 +429,7 @@ export function AIAssistant() {
       proactiveSuggestions: true,
       autoQueueTickets: true,
       nightMessage:
-        "Olá! Nosso expediente encerrou por hoje. Deixe sua solicitação ou placa do veículo que nossa equipe atenderá na primeira hora da manhã.",
+        "Olá! Nosso expediente encerrou por hoje. Deixe sua solicitação que nossa equipe atenderá na primeira hora da manhã.",
     };
   });
   const [routinesSaved, setRoutinesSaved] = useState<boolean>(false);
@@ -430,21 +444,33 @@ export function AIAssistant() {
     }
   };
 
-  // Estado das Configurações do Assistente
-  const [settingsConfig, setSettingsConfig] = useState(() => {
+  // Estado das Configurações do Assistente (Persistência real no localStorage)
+  const [settingsConfig, setSettingsConfig] = useState<AIAssistantSettings>(() => {
     try {
       const stored = localStorage.getItem(SETTINGS_KEY);
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return {
+          tone: (parsed.tone === "formal" || parsed.tone === "direto") ? parsed.tone : "pratico",
+          hitlRequired: parsed.hitlRequired !== false,
+          handsFreeAudio: Boolean(parsed.handsFreeAudio || parsed.handsFreeVoice),
+          autoTranscribe: parsed.autoTranscribe !== false && parsed.autoTranscription !== false,
+        };
+      }
+      const legacy = localStorage.getItem("megadesk_ai_settings");
+      if (legacy) {
+        const parsed = JSON.parse(legacy);
+        return {
+          tone: (parsed.voiceTone === "formal" || parsed.voiceTone === "direto") ? parsed.voiceTone : "pratico",
+          hitlRequired: parsed.requireHitl !== false,
+          handsFreeAudio: Boolean(parsed.handsFreeVoice),
+          autoTranscribe: parsed.autoTranscription !== false,
+        };
+      }
     } catch {
       // ignore
     }
-    return {
-      voiceTone: "pratico",
-      detailLevel: "balanceado",
-      requireHitl: true,
-      handsFreeVoice: false,
-      autoTranscription: true,
-    };
+    return DEFAULT_ASSISTANT_SETTINGS;
   });
   const [settingsSaved, setSettingsSaved] = useState<boolean>(false);
 
@@ -679,6 +705,12 @@ export function AIAssistant() {
       await sendMessageMutation.mutateAsync({
         threadId: targetThreadId,
         content: text,
+        settings: {
+          tone: settingsConfig.tone,
+          hitlRequired: settingsConfig.hitlRequired,
+          handsFreeAudio: settingsConfig.handsFreeAudio,
+          autoTranscribe: settingsConfig.autoTranscribe,
+        },
       });
       await trpcUtils?.assistantThreads?.getThreadMessages?.invalidate?.({ threadId: targetThreadId });
     } catch (err) {
@@ -782,6 +814,12 @@ export function AIAssistant() {
             threadId: targetThreadId,
             audioBase64: base64Audio,
             mimeType: recordedMime.split(";")[0] || "audio/webm",
+            settings: {
+              tone: settingsConfig.tone,
+              hitlRequired: settingsConfig.hitlRequired,
+              handsFreeAudio: settingsConfig.handsFreeAudio,
+              autoTranscribe: settingsConfig.autoTranscribe,
+            },
           });
           await trpcUtils?.assistantThreads?.getThreadMessages?.invalidate?.({ threadId: targetThreadId });
         } catch (err) {
@@ -1546,9 +1584,9 @@ export function AIAssistant() {
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
                 <div>
-                  <p className="text-sm font-semibold text-slate-100">Status Operacional: Modo Oficina Ativa</p>
+                  <p className="text-sm font-semibold text-slate-100">Status Operacional: Modo Expediente Ativo</p>
                   <p className="text-xs text-slate-400">
-                    Atendimento ágil em tempo real com acesso pleno a consultas de peças, CRM e chamados.
+                    Atendimento ágil em tempo real com acesso pleno a consultas, CRM e chamados.
                   </p>
                 </div>
               </div>
@@ -1558,12 +1596,12 @@ export function AIAssistant() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Modo Oficina Ativa */}
+              {/* Modo Expediente Ativo */}
               <div className="rounded-2xl border border-blue-500/30 bg-slate-900/40 p-5 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Sun className="w-4 h-4 text-amber-400" />
-                    <h4 className="font-semibold text-slate-100 text-sm">Modo Oficina Ativa</h4>
+                    <h4 className="font-semibold text-slate-100 text-sm">Modo Expediente Ativo</h4>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800">
                     08:00 às 18:00
@@ -1592,7 +1630,7 @@ export function AIAssistant() {
                 </div>
 
                 <p className="text-xs text-slate-400">
-                  Respostas instantâneas para consulta de preços, estoque, histórico de manutenções e abertura de OS.
+                  Respostas instantâneas para consulta de preços, serviços, cadastros e abertura de solicitações.
                 </p>
 
                 <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
@@ -1602,7 +1640,7 @@ export function AIAssistant() {
                     onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, proactiveSuggestions: e.target.checked }))}
                     className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500"
                   />
-                  <span>Permitir sugestões proativas (revisões pendentes, peças correlatas)</span>
+                  <span>Permitir sugestões proativas (itens complementares, rotinas de follow-up)</span>
                 </label>
               </div>
 
@@ -1683,7 +1721,7 @@ export function AIAssistant() {
                 <h3 className="text-xl font-bold text-slate-100">Configurações do Assistente IA</h3>
               </div>
               <p className="text-sm text-slate-400">
-                Ajuste a postura do modelo, nível de detalhamento e mecanismos de segurança para a operação.
+                Ajuste a postura do modelo e mecanismos de segurança para a operação.
               </p>
             </div>
 
@@ -1696,48 +1734,22 @@ export function AIAssistant() {
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
-                    { id: "pratico", label: "Prático / Oficina", desc: "Direto, focado em agilidade e vocabulário automotivo." },
-                    { id: "formal", label: "Formal / Corporativo", desc: "Polido, ideal para relatórios gerenciais e clientes B2B." },
-                    { id: "direto", label: "Direto / Conciso", desc: "Ultra-sintético, sem introduções ou despedidas." },
+                    { id: "pratico", label: "Prático / Operacional", desc: "Ágil, direto e focado na rotina diária de atendimento e operações." },
+                    { id: "formal", label: "Formal / Corporativo", desc: "Polido, técnico e estruturado, ideal para gestão e empresas B2B." },
+                    { id: "direto", label: "Direto / Conciso", desc: "Ultra-sintético, focado em dados e respostas sem introduções ou despedidas." },
                   ].map((tone) => (
                     <div
                       key={tone.id}
                       data-testid={`tone-option-${tone.id}`}
-                      onClick={() => setSettingsConfig((prev: any) => ({ ...prev, voiceTone: tone.id }))}
+                      onClick={() => setSettingsConfig((prev) => ({ ...prev, tone: tone.id as any }))}
                       className={`cursor-pointer p-3.5 rounded-xl border text-xs transition-all ${
-                        settingsConfig.voiceTone === tone.id
+                        settingsConfig.tone === tone.id
                           ? "border-blue-500 bg-blue-600/10 text-white ring-1 ring-blue-500"
                           : "border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700"
                       }`}
                     >
                       <p className="font-semibold mb-1 text-slate-100">{tone.label}</p>
                       <p className="text-[11px] text-slate-400 leading-snug">{tone.desc}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Nível de Detalhamento */}
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 space-y-3">
-                <h4 className="font-semibold text-slate-100 text-sm">Nível de Detalhe das Respostas</h4>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { id: "resumido", label: "Resumido", desc: "1 a 2 linhas principais." },
-                    { id: "balanceado", label: "Balanceado", desc: "Equilíbrio entre contexto e brevidade." },
-                    { id: "detalhado", label: "Completo", desc: "Explicação técnica com tabelas e itens." },
-                  ].map((level) => (
-                    <div
-                      key={level.id}
-                      data-testid={`detail-option-${level.id}`}
-                      onClick={() => setSettingsConfig((prev: any) => ({ ...prev, detailLevel: level.id }))}
-                      className={`cursor-pointer p-3 rounded-xl border text-xs transition-all ${
-                        settingsConfig.detailLevel === level.id
-                          ? "border-blue-500 bg-blue-600/10 text-white ring-1 ring-blue-500"
-                          : "border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700"
-                      }`}
-                    >
-                      <p className="font-semibold mb-0.5 text-slate-100">{level.label}</p>
-                      <p className="text-[10px] text-slate-400">{level.desc}</p>
                     </div>
                   ))}
                 </div>
@@ -1754,21 +1766,21 @@ export function AIAssistant() {
                   </div>
                   <input
                     type="checkbox"
-                    checked={settingsConfig.requireHitl}
-                    onChange={(e) => setSettingsConfig((prev: any) => ({ ...prev, requireHitl: e.target.checked }))}
+                    checked={settingsConfig.hitlRequired}
+                    onChange={(e) => setSettingsConfig((prev) => ({ ...prev, hitlRequired: e.target.checked }))}
                     className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
                   />
                 </label>
 
                 <label className="flex items-center justify-between gap-4 cursor-pointer text-xs text-slate-300">
                   <div>
-                    <span className="font-medium text-slate-100 block">Modo Mãos-Livres na Oficina (Áudio)</span>
-                    <span className="text-slate-400 text-[11px]">Permite leitura em voz alta e comandos de voz rápidos via microfone.</span>
+                    <span className="font-medium text-slate-100 block">Modo Mãos-Livres (Áudio &amp; Campo)</span>
+                    <span className="text-slate-400 text-[11px]">Permite comandos de voz ágeis para operações externas ou de balcão.</span>
                   </div>
                   <input
                     type="checkbox"
-                    checked={settingsConfig.handsFreeVoice}
-                    onChange={(e) => setSettingsConfig((prev: any) => ({ ...prev, handsFreeVoice: e.target.checked }))}
+                    checked={settingsConfig.handsFreeAudio}
+                    onChange={(e) => setSettingsConfig((prev) => ({ ...prev, handsFreeAudio: e.target.checked }))}
                     className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
                   />
                 </label>
@@ -1780,8 +1792,8 @@ export function AIAssistant() {
                   </div>
                   <input
                     type="checkbox"
-                    checked={settingsConfig.autoTranscription}
-                    onChange={(e) => setSettingsConfig((prev: any) => ({ ...prev, autoTranscription: e.target.checked }))}
+                    checked={settingsConfig.autoTranscribe}
+                    onChange={(e) => setSettingsConfig((prev) => ({ ...prev, autoTranscribe: e.target.checked }))}
                     className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4"
                   />
                 </label>

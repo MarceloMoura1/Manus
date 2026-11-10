@@ -116,4 +116,26 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
   it("removes footer model label and enforces native dark theme styling", () => {
     expect(aiAssistantSource).not.toContain("Voz Multimodal • Gemini 3.5 Flash Lite");
   });
+
+  it("generalizes voice tones beyond automotive niche and removes redundant detail level", () => {
+    // 3 generalized tone options
+    expect(aiAssistantSource).toContain("Prático / Operacional");
+    expect(aiAssistantSource).toContain("Formal / Corporativo");
+    expect(aiAssistantSource).toContain("Direto / Conciso");
+    expect(aiAssistantSource).not.toContain("Prático / Oficina");
+
+    // Detail level removed
+    expect(aiAssistantSource).not.toContain("Nível de Detalhe das Respostas");
+
+    // Generalized operational controls
+    expect(aiAssistantSource).toContain("Modo Mãos-Livres (Áudio &amp; Campo)");
+    expect(aiAssistantSource).toContain("Aprovação Humana Obrigatória (HITL)");
+    expect(aiAssistantSource).toContain("Auto-Transcrição em Tempo Real");
+
+    // Persistence key and sending settings to backend
+    expect(aiAssistantSource).toContain("megadesk_ai_assistant_settings");
+    expect(aiAssistantSource).toContain("tone: settingsConfig.tone");
+    expect(aiAssistantSource).toContain("hitlRequired: settingsConfig.hitlRequired");
+    expect(aiAssistantSource).toContain("autoTranscribe: settingsConfig.autoTranscribe");
+  });
 });

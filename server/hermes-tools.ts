@@ -6,6 +6,7 @@ import {
   HERMES_TOOL_REGISTRY,
   type PendingActionRequest,
 } from "./gemini-client";
+import { executeHermesTicketAction } from "./hermes-ticket-actions";
 
 export interface HermesToolContext {
   clientId: string;
@@ -14,6 +15,8 @@ export interface HermesToolContext {
   operationalUserId?: string;
   pool?: any;
   userPermissions?: readonly string[];
+  hitlRequired?: boolean;
+  executeTicketAction?: typeof executeHermesTicketAction;
 }
 
 export function normalizeText(value: string): string {
@@ -231,6 +234,42 @@ export function createHermesTools(context: HermesToolContext) {
         const finalDescription = descricaoDetalhada?.trim() || assunto.trim();
 
         const ticketTool = HERMES_TOOL_REGISTRY.find((t) => t.name === "create_ticket");
+
+        // Se HITL não for obrigatório, executa a mutação diretamente
+        if (context.hitlRequired === false) {
+          try {
+            const actorUserId = context.userEmail || context.userId || context.operationalUserId || "operator";
+            const ticketExecutor = context.executeTicketAction ?? executeHermesTicketAction;
+            const directResult = await ticketExecutor({
+              clientId: context.clientId,
+              actorUserId,
+              action: {
+                actionType: "CREATE_TICKET",
+                args: {
+                  customer: resolvedCustomer,
+                  title: assunto.trim(),
+                  description: finalDescription,
+                  priority: mappedPriority,
+                },
+              },
+              resolveAssignee: async () => null,
+            });
+
+            return {
+              success: true,
+              status: "executado_direto",
+              cliente: resolvedCustomer,
+              assunto: assunto.trim(),
+              descricao: finalDescription,
+              prioridade: mappedPriority,
+              ticketNumber: directResult?.entityId,
+              message: `Chamado nº ${directResult?.entityId ?? ""} criado com sucesso para ${resolvedCustomer}.`,
+            };
+          } catch (err: any) {
+            console.warn("[HermesTools] Falha na execução direta sem HITL, preparando pendente:", err);
+          }
+        }
+
         let pendingActionRequest: PendingActionRequest | undefined;
         if (ticketTool) {
           pendingActionRequest = createPendingActionRequest(

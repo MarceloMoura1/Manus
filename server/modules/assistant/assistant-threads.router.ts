@@ -19,6 +19,18 @@ import {
 
 export const CANONICAL_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
+export function buildToneInstruction(tone?: "pratico" | "formal" | "direto"): string {
+  switch (tone) {
+    case "formal":
+      return "Adote uma postura corporativa, profissional, polida e técnica na formulação das respostas.";
+    case "direto":
+      return "Adote uma postura ultra-concisa. Seja direto ao ponto, priorize dados e tabelas, omitindo saudações ou despedidas desnecessárias.";
+    case "pratico":
+    default:
+      return "Adote uma postura prática, colaborativa e direta, focada na agilidade da rotina operacional.";
+  }
+}
+
 export interface AssistantSessionIdentity {
   tenantId: string;
   userId: string;
@@ -242,16 +254,19 @@ export function createAssistantThreadsRouter(
         try {
           const google = createGoogleGenerativeAI({ apiKey });
           const targetModel = process.env.GEMINI_MODEL || CANONICAL_GEMINI_MODEL;
+          const hitlRequired = input.settings?.hitlRequired ?? true;
           const tenantTools = createHermesTools({
             clientId: tenantId,
             userId,
             userEmail: identity.userEmail,
             operationalUserId: identity.operationalUserId,
+            hitlRequired,
           });
 
+          const toneInstruction = buildToneInstruction(input.settings?.tone);
           const systemInstruction = `Você é o Copiloto de Inteligência Artificial da plataforma MegaDesk.
 Atue como um assessor executivo e operacional ágil, estruturado, acolhedor e focado em resolver as necessidades do usuário em português do Brasil.
-Seja direto e prático nas respostas sem prolixidade mecânica.`;
+${toneInstruction}`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),
@@ -363,15 +378,20 @@ Seja direto e prático nas respostas sem prolixidade mecânica.`;
         try {
           const google = createGoogleGenerativeAI({ apiKey });
           const targetModel = process.env.GEMINI_MODEL || CANONICAL_GEMINI_MODEL;
+          const hitlRequired = input.settings?.hitlRequired ?? true;
+          const autoTranscribe = input.settings?.autoTranscribe ?? true;
           const tenantTools = createHermesTools({
             clientId: tenantId,
             userId,
             userEmail: identity.userEmail,
             operationalUserId: identity.operationalUserId,
+            hitlRequired,
           });
 
+          const toneInstruction = buildToneInstruction(input.settings?.tone);
           const systemInstruction = `Você é o Copiloto Multimodal de Inteligência Artificial da plataforma MegaDesk.
 O usuário enviou um comando ou pergunta por voz.
+${toneInstruction}
 REGRA OBRIGATÓRIA DE TRANSCRIÇÃO:
 Na PRIMEIRA LINHA da sua resposta final em texto, você DEVE transcrever exatamente o que o usuário falou no áudio no seguinte formato exato:
 [Transcrição: "texto falado pelo usuário"]
@@ -401,15 +421,17 @@ Execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, c
             rawText ||
             (pendingReq?.summary ? `Preparei a ação solicitada por voz para sua aprovação: ${pendingReq.summary}` : "Áudio processado com sucesso.");
 
-          // Atualiza a mensagem do usuário no banco com a transcrição real
-          const userDisplayContent = transcription ? `🎤 ${transcription}` : "🎤 [Mensagem de voz enviada]";
+          // Atualiza a mensagem do usuário no banco (se autoTranscribe for true grava a transcrição real, senão preserva áudio)
+          const userDisplayContent = (autoTranscribe && transcription)
+            ? `🎤 ${transcription}`
+            : "🎤 [Mensagem de voz enviada]";
           const updatedUserMessage = await repo.updateMessageContent(
             userMessage.id,
             userDisplayContent,
-            { type: "audio", mimeType: normalizedMimeType, transcription: transcription || null }
+            { type: "audio", mimeType: normalizedMimeType, transcription: autoTranscribe ? (transcription || null) : null }
           );
 
-          if (transcription) {
+          if (autoTranscribe && transcription) {
             const autoTitle = transcription.length > 40 ? `${transcription.slice(0, 37)}...` : transcription;
             await repo.touchThread(input.threadId, autoTitle);
           }

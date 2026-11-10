@@ -25,9 +25,19 @@ export const getThreadMessagesSchema = z.object({
 
 export type GetThreadMessagesInput = z.infer<typeof getThreadMessagesSchema>;
 
+export const assistantSettingsSchema = z.object({
+  tone: z.enum(["pratico", "formal", "direto"]).default("pratico"),
+  hitlRequired: z.boolean().default(true),
+  handsFreeAudio: z.boolean().default(false),
+  autoTranscribe: z.boolean().default(true),
+});
+
+export type AssistantSettingsInput = z.infer<typeof assistantSettingsSchema>;
+
 export const sendThreadMessageSchema = z.object({
   threadId: z.string().trim().min(1, "threadId é obrigatório"),
   content: z.string().trim().min(1, "Mensagem não pode ser vazia").max(10000, "Mensagem muito longa"),
+  settings: assistantSettingsSchema.optional(),
 });
 
 export type SendThreadMessageInput = z.infer<typeof sendThreadMessageSchema>;
@@ -36,6 +46,7 @@ export const sendThreadAudioMessageSchema = z.object({
   threadId: z.string().trim().min(1, "threadId é obrigatório"),
   audioBase64: z.string().trim().min(1, "Áudio não pode ser vazio"),
   mimeType: z.string().trim().min(1, "mimeType é obrigatório").default("audio/webm"),
+  settings: assistantSettingsSchema.optional(),
 });
 
 export type SendThreadAudioMessageInput = z.infer<typeof sendThreadAudioMessageSchema>;
