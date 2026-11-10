@@ -30,6 +30,7 @@ import { registerSaleDocumentRoutes } from "../modules/erp/sales/documents-http"
 import { registerCrmWebhookIngressRoutes } from "../modules/crm/automations/webhook-ingress";
 import { registerBotRoutes } from "../modules/bot/bot.router";
 import { createLegacyTypebotPathRedirect, createTypebotHostProxy } from "../modules/bot/typebot-proxy";
+export { typebotWorkspaceService } from "../modules/bot/typebot-workspace.service";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
 import { createSupplierUploadIngressMiddleware } from "./media-ingress";
 import {
