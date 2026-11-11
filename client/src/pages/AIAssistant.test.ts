@@ -149,4 +149,34 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
     expect(aiAssistantSource).toContain("temp-");
     expect(aiAssistantSource).toContain("setLocalMessages");
   });
+
+  it("redesigns routines tab into rich autonomous agent orchestrator with presets, configured routines and execution logs", () => {
+    // Header
+    expect(aiAssistantSource).toContain("Automações &amp; Rotinas do Assistente IA");
+    expect(aiAssistantSource).toContain("+ Criar Nova Rotina");
+
+    // Presets with 1-click activation
+    expect(aiAssistantSource).toContain("📋 Briefing Matinal: O que tenho que fazer hoje?");
+    expect(aiAssistantSource).toContain("⏱️ Radar de Clientes Parados (Follow-up 48h)");
+    expect(aiAssistantSource).toContain("📊 Fechamento e Pendências do Dia");
+    expect(aiAssistantSource).toContain("Ativar com 1 Clique");
+
+    // Configured routines list & immediate execution
+    expect(aiAssistantSource).toContain("Rotinas Configuradas");
+    expect(aiAssistantSource).toContain("▶️ Executar Agora");
+    expect(aiAssistantSource).toContain("handleToggleRoutineActive");
+    expect(aiAssistantSource).toContain("handleDeleteRoutine");
+
+    // History and summary modal
+    expect(aiAssistantSource).toContain("Histórico de Últimas Execuções");
+    expect(aiAssistantSource).toContain("Visualizar Resumo");
+    expect(aiAssistantSource).toContain("logSummaryModal");
+
+    // tRPC integration
+    expect(aiAssistantSource).toContain("trpc.assistantRoutines.listRoutines.useQuery");
+    expect(aiAssistantSource).toContain("trpc.assistantRoutines.upsertRoutine.useMutation");
+    expect(aiAssistantSource).toContain("trpc.assistantRoutines.toggleRoutineActive.useMutation");
+    expect(aiAssistantSource).toContain("trpc.assistantRoutines.deleteRoutine.useMutation");
+    expect(aiAssistantSource).toContain("trpc.assistantRoutines.runRoutineNow.useMutation");
+  });
 });

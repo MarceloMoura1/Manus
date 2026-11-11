@@ -34,6 +34,7 @@ import { createLegacyTypebotPathRedirect, createTypebotHostProxy } from "../modu
 import { createTypebotStorageProxy } from "../modules/bot/typebot-storage-proxy";
 export { typebotWorkspaceService } from "../modules/bot/typebot-workspace.service";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
+import { startRoutineScheduler, stopRoutineScheduler } from "../modules/assistant";
 import { createSupplierUploadIngressMiddleware } from "./media-ingress";
 import {
   assertDisposableRuntimeConfig,
@@ -253,6 +254,7 @@ async function startServer() {
       }
 
       try {
+        stopRoutineScheduler();
         clearTenantConnections();
         await closePool();
         console.log("[Server] Pool de conexões MySQL encerrado com sucesso.");
@@ -270,6 +272,7 @@ async function startServer() {
   const listenHost = process.env.HOST?.trim();
   const onListening = () => {
     if (shouldStartTicketAttachmentReconciler()) startTicketAttachmentReconciler();
+    startRoutineScheduler();
     const displayHost = listenHost || "localhost";
     console.log(`\nMegaDesk rodando em http://${displayHost}:${port}`);
     console.log(`Admin:  http://${displayHost}:${port}/admin\n`);

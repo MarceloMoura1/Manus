@@ -59,6 +59,26 @@ export class AssistantThreadsRepository {
     return thread;
   }
 
+  async getOrCreateDailyOperationsThread(tenantId: string, userId: string): Promise<MegadeskAiThread> {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(megadeskAiThreads)
+      .where(
+        and(
+          eq(megadeskAiThreads.tenantId, tenantId),
+          eq(megadeskAiThreads.userId, userId),
+          eq(megadeskAiThreads.title, "Operações do Dia")
+        )
+      )
+      .limit(1);
+
+    if (rows[0]) {
+      return rows[0];
+    }
+    return this.createThread(tenantId, userId, "Operações do Dia");
+  }
+
   async renameThread(
     tenantId: string,
     userId: string,

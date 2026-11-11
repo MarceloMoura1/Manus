@@ -19,6 +19,17 @@ import {
   Sun,
   Moon,
   CheckCircle2,
+  Play,
+  Calendar,
+  AlertCircle,
+  Eye,
+  RefreshCw,
+  Zap,
+  ArrowRight,
+  TrendingUp,
+  FileText,
+  ChevronRight,
+  Bell,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -413,35 +424,263 @@ export function AIAssistant() {
   // Aba Ativa (Typebot style)
   const [activeTab, setActiveTab] = useState<AIAssistantTab>("chat");
 
-  // Estado das Rotinas Operacionais
-  const [routinesConfig, setRoutinesConfig] = useState(() => {
-    try {
-      const stored = localStorage.getItem(ROUTINES_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch {
-      // ignore
-    }
-    return {
-      startDayTime: "08:00",
-      endDayTime: "18:00",
-      startNightTime: "18:01",
-      endNightTime: "07:59",
-      proactiveSuggestions: true,
-      autoQueueTickets: true,
-      nightMessage:
-        "Olá! Nosso expediente encerrou por hoje. Deixe sua solicitação que nossa equipe atenderá na primeira hora da manhã.",
-    };
+  // ─── Rotinas Autônomas (tRPC) ───────────────────────────────────────────────
+  const routinesQuery = trpc.assistantRoutines.listRoutines.useQuery(undefined, {
+    refetchOnWindowFocus: false,
   });
-  const [routinesSaved, setRoutinesSaved] = useState<boolean>(false);
 
-  const handleSaveRoutines = () => {
+  const upsertRoutineMutation = trpc.assistantRoutines.upsertRoutine.useMutation({
+    onSuccess: () => {
+      routinesQuery.refetch();
+      setIsRoutineModalOpen(false);
+      setEditingRoutine(null);
+    },
+  });
+
+  const toggleRoutineMutation = trpc.assistantRoutines.toggleRoutineActive.useMutation({
+    onSuccess: () => {
+      routinesQuery.refetch();
+    },
+  });
+
+  const deleteRoutineMutation = trpc.assistantRoutines.deleteRoutine.useMutation({
+    onSuccess: () => {
+      routinesQuery.refetch();
+    },
+  });
+
+  const runRoutineMutation = trpc.assistantRoutines.runRoutineNow.useMutation();
+
+  const [runningRoutineId, setRunningRoutineId] = useState<string | null>(null);
+  const [isRoutineModalOpen, setIsRoutineModalOpen] = useState<boolean>(false);
+  const [editingRoutine, setEditingRoutine] = useState<any | null>(null);
+  const [logSummaryModal, setLogSummaryModal] = useState<{
+    title: string;
+    date: string;
+    status: string;
+    summary: string;
+  } | null>(null);
+
+  const [routineToast, setRoutineToast] = useState<{
+    title: string;
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
+
+  const [routineForm, setRoutineForm] = useState({
+    id: undefined as string | undefined,
+    title: "",
+    triggerType: "morning_briefing" as "morning_briefing" | "stale_leads" | "eod_summary" | "custom",
+    promptInstruction: "",
+    scheduleTime: "08:30",
+    scheduleDays: ["seg", "ter", "qua", "qui", "sex"] as string[],
+    actionTarget: "chat_thread" as "chat_thread" | "internal_notification" | "whatsapp",
+    isActive: true,
+  });
+
+  const ROUTINE_PRESETS = [
+    {
+      triggerType: "morning_briefing" as const,
+      title: "📋 Briefing Matinal: O que tenho que fazer hoje?",
+      description: "Varre chamados urgentes, leads sem retorno e orçamentos abertos para entregar a lista de prioridades do dia.",
+      scheduleTime: "08:30",
+      scheduleDays: ["seg", "ter", "qua", "qui", "sex"],
+      promptInstruction: "Consulte os chamados em aberto com SLA prioritário, os clientes que enviaram mensagem e aguardam retorno há mais de 24h e as propostas em negociação pendentes. Monte um resumo executivo direto e acionável com o título '📋 O QUE TEMOS PARA HOJE' contendo prioridades, alertas urgentes e lista de ação imediata.",
+      actionTarget: "chat_thread" as const,
+    },
+    {
+      triggerType: "stale_leads" as const,
+      title: "⏱️ Radar de Clientes Parados (Follow-up 48h)",
+      description: "Identifica negociações e mensagens sem interação há 2 dias e lista quem precisa ser contatado hoje.",
+      scheduleTime: "11:00",
+      scheduleDays: ["seg", "ter", "qua", "qui", "sex"],
+      promptInstruction: "Analise os contatos do CRM e conversas recentes. Identifique clientes, leads ou propostas sem interação recente (há mais de 48h) e gere uma lista priorizada com o título '⏱️ RADAR DE FOLLOW-UP (48H)' destacando quem precisa ser contatado hoje, telefone/canal e motivo do follow-up.",
+      actionTarget: "chat_thread" as const,
+    },
+    {
+      triggerType: "eod_summary" as const,
+      title: "📊 Fechamento e Pendências do Dia",
+      description: "Gera o balanço de faturamento, chamados concluídos e o que ficou acumulado para o próximo turno.",
+      scheduleTime: "18:00",
+      scheduleDays: ["seg", "ter", "qua", "qui", "sex"],
+      promptInstruction: "Consulte o faturamento e vendas registradas no dia, os chamados fechados e os que continuam em andamento ou pendentes. Monte um relatório executivo com o título '📊 FECHAMENTO E PENDÊNCIAS DO DIA' contendo balanço geral, conquistas do turno e pendências prioritárias para amanhã.",
+      actionTarget: "chat_thread" as const,
+    },
+  ];
+
+  const WEEKDAYS = [
+    { key: "seg", label: "Seg" },
+    { key: "ter", label: "Ter" },
+    { key: "qua", label: "Qua" },
+    { key: "qui", label: "Qui" },
+    { key: "sex", label: "Sex" },
+    { key: "sab", label: "Sáb" },
+    { key: "dom", label: "Dom" },
+  ];
+
+  const handleOpenCreateModal = () => {
+    setRoutineForm({
+      id: undefined,
+      title: "📋 Briefing Matinal: O que tenho que fazer hoje?",
+      triggerType: "morning_briefing",
+      promptInstruction: "Consulte os chamados em aberto com SLA prioritário, os clientes que enviaram mensagem e aguardam retorno há mais de 24h e as propostas em negociação pendentes. Monte um resumo executivo direto e acionável com o título '📋 O QUE TEMOS PARA HOJE' contendo prioridades, alertas urgentes e lista de ação imediata.",
+      scheduleTime: "08:30",
+      scheduleDays: ["seg", "ter", "qua", "qui", "sex"],
+      actionTarget: "chat_thread",
+      isActive: true,
+    });
+    setEditingRoutine(null);
+    setIsRoutineModalOpen(true);
+  };
+
+  const handleOpenEditModal = (routine: any) => {
+    setRoutineForm({
+      id: routine.id,
+      title: routine.title,
+      triggerType: routine.triggerType,
+      promptInstruction: routine.promptInstruction,
+      scheduleTime: routine.scheduleTime,
+      scheduleDays: Array.isArray(routine.scheduleDays) ? routine.scheduleDays : ["seg", "ter", "qua", "qui", "sex"],
+      actionTarget: routine.actionTarget || "chat_thread",
+      isActive: routine.isActive,
+    });
+    setEditingRoutine(routine);
+    setIsRoutineModalOpen(true);
+  };
+
+  const handleSaveRoutineForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!routineForm.title.trim()) return;
     try {
-      localStorage.setItem(ROUTINES_KEY, JSON.stringify(routinesConfig));
-      setRoutinesSaved(true);
-      setTimeout(() => setRoutinesSaved(false), 3000);
-    } catch {
-      // ignore
+      await upsertRoutineMutation.mutateAsync({
+        id: routineForm.id,
+        title: routineForm.title.trim(),
+        triggerType: routineForm.triggerType,
+        promptInstruction: routineForm.promptInstruction.trim(),
+        scheduleTime: routineForm.scheduleTime,
+        scheduleDays: routineForm.scheduleDays,
+        actionTarget: routineForm.actionTarget,
+        isActive: routineForm.isActive,
+      });
+      setRoutineToast({
+        title: routineForm.id ? "Rotina Atualizada!" : "Rotina Criada!",
+        message: `A rotina "${routineForm.title}" foi salva com sucesso.`,
+        type: "success",
+      });
+      setTimeout(() => setRoutineToast(null), 4000);
+    } catch (err: any) {
+      setRoutineToast({
+        title: "Erro ao Salvar",
+        message: err?.message || "Não foi possível salvar a rotina.",
+        type: "error",
+      });
+      setTimeout(() => setRoutineToast(null), 5000);
     }
+  };
+
+  const handleToggleRoutineActive = async (id: string, currentActive: boolean) => {
+    try {
+      await toggleRoutineMutation.mutateAsync({
+        id,
+        isActive: !currentActive,
+      });
+      setRoutineToast({
+        title: !currentActive ? "Rotina Ativada" : "Rotina Pausada",
+        message: !currentActive ? "A rotina executará nos horários programados." : "A rotina foi pausada e não executará automaticamente.",
+        type: "success",
+      });
+      setTimeout(() => setRoutineToast(null), 4000);
+    } catch (err: any) {
+      setRoutineToast({
+        title: "Erro",
+        message: err?.message || "Falha ao alterar status da rotina.",
+        type: "error",
+      });
+      setTimeout(() => setRoutineToast(null), 5000);
+    }
+  };
+
+  const handleDeleteRoutine = async (id: string, title: string) => {
+    if (!window.confirm(`Tem certeza que deseja excluir a rotina "${title}"?`)) return;
+    try {
+      await deleteRoutineMutation.mutateAsync({ id });
+      setRoutineToast({
+        title: "Rotina Excluída",
+        message: `A rotina "${title}" foi removida.`,
+        type: "success",
+      });
+      setTimeout(() => setRoutineToast(null), 4000);
+    } catch (err: any) {
+      setRoutineToast({
+        title: "Erro ao Excluir",
+        message: err?.message || "Não foi possível excluir a rotina.",
+        type: "error",
+      });
+      setTimeout(() => setRoutineToast(null), 5000);
+    }
+  };
+
+  const handleActivatePreset = async (preset: typeof ROUTINE_PRESETS[0]) => {
+    try {
+      await upsertRoutineMutation.mutateAsync({
+        title: preset.title,
+        triggerType: preset.triggerType,
+        promptInstruction: preset.promptInstruction,
+        scheduleTime: preset.scheduleTime,
+        scheduleDays: preset.scheduleDays,
+        actionTarget: preset.actionTarget,
+        isActive: true,
+      });
+      setRoutineToast({
+        title: "Rotina Ativada com 1 Clique!",
+        message: `A rotina "${preset.title}" foi programada com sucesso para as ${preset.scheduleTime}.`,
+        type: "success",
+      });
+      setTimeout(() => setRoutineToast(null), 4000);
+    } catch (err: any) {
+      setRoutineToast({
+        title: "Erro",
+        message: err?.message || "Não foi possível ativar o preset.",
+        type: "error",
+      });
+      setTimeout(() => setRoutineToast(null), 5000);
+    }
+  };
+
+  const handleRunRoutineNow = async (routine: any) => {
+    try {
+      setRunningRoutineId(routine.id);
+      const result = await runRoutineMutation.mutateAsync({ id: routine.id });
+      routinesQuery.refetch();
+      threadsQuery.refetch();
+      setLogSummaryModal({
+        title: routine.title,
+        date: "Executado Agora",
+        status: result.status === "success" ? "Sucesso" : "Aviso",
+        summary: result.outputSummary,
+      });
+      setRoutineToast({
+        title: "Rotina Executada!",
+        message: `A rotina "${routine.title}" foi concluída. Resumo salvo na thread 'Operações do Dia'.`,
+        type: "success",
+      });
+      setTimeout(() => setRoutineToast(null), 4000);
+    } catch (err: any) {
+      setRoutineToast({
+        title: "Falha na Execução",
+        message: err?.message || "Erro ao processar rotina.",
+        type: "error",
+      });
+      setTimeout(() => setRoutineToast(null), 5000);
+    } finally {
+      setRunningRoutineId(null);
+    }
+  };
+
+  const isPresetActive = (triggerType: string) => {
+    return routinesQuery.data?.routines?.some(
+      (r: any) => r.triggerType === triggerType && r.isActive
+    );
   };
 
   // Estado das Configurações do Assistente (Persistência real no localStorage)
@@ -1645,146 +1884,297 @@ export function AIAssistant() {
 
         {/* ─── ABA 3: ROTINAS OPERACIONAIS & HORÁRIOS ───────────────────────── */}
         {activeTab === "routines" && (
-          <div data-testid="routines-tab-view" className="flex-1 overflow-y-auto p-8 space-y-6 max-w-4xl mx-auto w-full">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Clock className={`w-5 h-5 ${currentTheme.accentText}`} />
-                <h3 className="text-xl font-bold text-slate-100">Rotinas Operacionais &amp; Horários</h3>
-              </div>
-              <p className="text-sm text-slate-400">
-                Configure os turnos operacionais do Copiloto IA para ajustar as respostas automáticas de acordo com o expediente.
-              </p>
-            </div>
-
-            {/* Banner de Status Atual */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
-                <div>
-                  <p className="text-sm font-semibold text-slate-100">Status Operacional: Modo Expediente Ativo</p>
-                  <p className="text-xs text-slate-400">
-                    Atendimento ágil em tempo real com acesso pleno a consultas, CRM e chamados.
-                  </p>
-                </div>
-              </div>
-              <span className="text-xs font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-800/80 px-2.5 py-1 rounded-full">
-                Turno Diurno
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Modo Expediente Ativo */}
-              <div className="rounded-2xl border border-blue-500/30 bg-slate-900/40 p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sun className="w-4 h-4 text-amber-400" />
-                    <h4 className="font-semibold text-slate-100 text-sm">Modo Expediente Ativo</h4>
+          <div data-testid="routines-tab-view" className="flex-1 overflow-y-auto p-8 space-y-8 max-w-5xl mx-auto w-full">
+            {/* A. CABEÇALHO DO PAINEL */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 ${currentTheme.accentText}`}>
+                    <Zap className="w-5 h-5" />
                   </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800">
-                    08:00 às 18:00
-                  </span>
+                  <h3 className="text-xl font-bold text-slate-100">Automações &amp; Rotinas do Assistente IA</h3>
                 </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-400 mb-1 block">Horário de Início</label>
-                    <input
-                      type="time"
-                      value={routinesConfig.startDayTime}
-                      onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, startDayTime: e.target.value }))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 mb-1 block">Horário de Término</label>
-                    <input
-                      type="time"
-                      value={routinesConfig.endDayTime}
-                      onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, endDayTime: e.target.value }))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <p className="text-xs text-slate-400">
-                  Respostas instantâneas para consulta de preços, serviços, cadastros e abertura de solicitações.
+                <p className="text-sm text-slate-400">
+                  Programe a IA para executar tarefas, cruzar dados e preparar o trabalho sem exigir ação humana.
                 </p>
-
-                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
-                  <input
-                    type="checkbox"
-                    checked={routinesConfig.proactiveSuggestions}
-                    onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, proactiveSuggestions: e.target.checked }))}
-                    className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span>Permitir sugestões proativas (itens complementares, rotinas de follow-up)</span>
-                </label>
               </div>
 
-              {/* Modo Noturno */}
-              <div className="rounded-2xl border border-indigo-500/30 bg-slate-900/40 p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Moon className="w-4 h-4 text-indigo-400" />
-                    <h4 className="font-semibold text-slate-100 text-sm">Modo Noturno (Triagem)</h4>
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-800">
-                    18:01 às 07:59
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-400 mb-1 block">Horário de Início</label>
-                    <input
-                      type="time"
-                      value={routinesConfig.startNightTime}
-                      onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, startNightTime: e.target.value }))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 mb-1 block">Horário de Término</label>
-                    <input
-                      type="time"
-                      value={routinesConfig.endNightTime}
-                      onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, endNightTime: e.target.value }))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Mensagem de Triagem Noturna</label>
-                  <textarea
-                    rows={2}
-                    value={routinesConfig.nightMessage}
-                    onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, nightMessage: e.target.value }))}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 resize-none"
-                  />
-                </div>
-
-                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={routinesConfig.autoQueueTickets}
-                    onChange={(e) => setRoutinesConfig((prev: any) => ({ ...prev, autoQueueTickets: e.target.checked }))}
-                    className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span>Enfileirar chamado para triagem no primeiro horário da manhã</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-2">
               <Button
                 type="button"
-                data-testid="save-routines-btn"
-                onClick={handleSaveRoutines}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-sm cursor-pointer"
+                onClick={handleOpenCreateModal}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2 shrink-0 cursor-pointer"
               >
-                {routinesSaved ? "✓ Rotinas Salvas!" : "Salvar Rotinas & Horários"}
+                <Plus className="w-4 h-4" />
+                <span>+ Criar Nova Rotina</span>
               </Button>
+            </div>
+
+            {/* B. PRESETS PRONTOS (CARDS ATIVÁVEIS EM 1 CLIQUE) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <h4 className="text-sm font-semibold text-slate-200">Rotinas Prontas de Alto Valor (Presets)</h4>
+                </div>
+                <span className="text-[11px] text-slate-500">Ativação instantânea em 1 clique</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {ROUTINE_PRESETS.map((preset) => {
+                  const active = isPresetActive(preset.triggerType);
+                  return (
+                    <div
+                      key={preset.triggerType}
+                      className={`flex flex-col justify-between rounded-2xl border p-5 transition-all ${
+                        active
+                          ? "border-emerald-500/40 bg-emerald-950/20 shadow-sm"
+                          : "border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/70"
+                      }`}
+                    >
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-slate-800/80 text-blue-300 border border-slate-700/60">
+                            🕒 {preset.scheduleTime} (Seg a Sex)
+                          </span>
+                          {active && (
+                            <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3 h-3" /> Ativo
+                            </span>
+                          )}
+                        </div>
+                        <h5 className="text-sm font-bold text-slate-100">{preset.title}</h5>
+                        <p className="text-xs text-slate-400 leading-relaxed">{preset.description}</p>
+                      </div>
+
+                      <div className="pt-4 mt-2 border-t border-slate-800/60 flex items-center justify-between">
+                        {active ? (
+                          <span className="text-xs text-emerald-400 font-medium">Programado e Ativo</span>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleActivatePreset(preset)}
+                            className="w-full bg-blue-600/90 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-sm cursor-pointer"
+                          >
+                            Ativar com 1 Clique
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* C. LISTA DE ROTINAS CONFIGURADAS (TABELA / CARDS) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-blue-400" />
+                  <h4 className="text-sm font-semibold text-slate-200">Rotinas Configuradas</h4>
+                  <span className="text-xs text-slate-500 font-mono">({routinesQuery.data?.routines?.length || 0})</span>
+                </div>
+                {routinesQuery.isFetching && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
+              </div>
+
+              {routinesQuery.isLoading ? (
+                <div className="p-8 text-center text-xs text-slate-500 rounded-2xl border border-slate-800 bg-slate-900/30">
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-blue-400" />
+                  Carregando rotinas configuradas...
+                </div>
+              ) : !routinesQuery.data?.routines || routinesQuery.data.routines.length === 0 ? (
+                <div className="p-8 text-center rounded-2xl border border-dashed border-slate-800 bg-slate-900/20 space-y-2">
+                  <Clock className="w-8 h-8 mx-auto text-slate-600" />
+                  <p className="text-sm font-semibold text-slate-300">Nenhuma rotina personalizada cadastrada ainda</p>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    Ative um dos presets acima com 1 clique ou clique em "+ Criar Nova Rotina" para definir agendamentos sob medida.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {routinesQuery.data.routines.map((routine: any) => {
+                    const days = Array.isArray(routine.scheduleDays) ? routine.scheduleDays : [];
+                    const isRunning = runningRoutineId === routine.id;
+
+                    return (
+                      <div
+                        key={routine.id}
+                        className={`rounded-2xl border p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                          routine.isActive
+                            ? "border-slate-800 bg-slate-900/50 hover:border-slate-700/80 hover:bg-slate-900/70"
+                            : "border-slate-800/50 bg-slate-950/40 opacity-70"
+                        }`}
+                      >
+                        <div className="space-y-2 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-bold text-slate-100">{routine.title}</span>
+                            <span
+                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                routine.isActive
+                                  ? "bg-emerald-950/80 text-emerald-400 border border-emerald-800/60"
+                                  : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}
+                            >
+                              {routine.isActive ? "Ativo" : "Pausado"}
+                            </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                              🕒 {routine.scheduleTime}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-900/60">
+                              Canal: {routine.actionTarget === "whatsapp" ? "WhatsApp" : routine.actionTarget === "internal_notification" ? "Notificação" : "Chat (Operações do Dia)"}
+                            </span>
+                          </div>
+
+                          {/* Badges dos dias da semana */}
+                          <div className="flex items-center gap-1">
+                            {WEEKDAYS.map((w) => {
+                              const isDaySelected = days.includes(w.key);
+                              return (
+                                <span
+                                  key={w.key}
+                                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                                    isDaySelected
+                                      ? "bg-blue-600/30 text-blue-200 border border-blue-500/50 font-semibold"
+                                      : "bg-slate-950 text-slate-600 border border-slate-900"
+                                  }`}
+                                >
+                                  {w.label}
+                                </span>
+                              );
+                            })}
+                            {routine.lastRunAt && (
+                              <span className="text-[11px] text-slate-500 ml-2">
+                                Última execução: {new Date(routine.lastRunAt).toLocaleDateString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Ações da rotina */}
+                        <div className="flex flex-wrap items-center gap-2 sm:self-center shrink-0">
+                          {/* Botão Executar Agora */}
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={isRunning}
+                            onClick={() => handleRunRoutineNow(routine)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            {isRunning ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Executando...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-3.5 h-3.5 fill-current" />
+                                <span>▶️ Executar Agora</span>
+                              </>
+                            )}
+                          </Button>
+
+                          {/* Switch de Ativar/Desativar */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRoutineActive(routine.id, routine.isActive)}
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                              routine.isActive
+                                ? "bg-amber-950/30 border-amber-800/60 text-amber-300 hover:bg-amber-950/60"
+                                : "bg-emerald-950/30 border-emerald-800/60 text-emerald-300 hover:bg-emerald-950/60"
+                            }`}
+                            title={routine.isActive ? "Pausar rotina" : "Ativar rotina"}
+                          >
+                            {routine.isActive ? "Pausar" : "Ativar"}
+                          </button>
+
+                          {/* Editar */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(routine)}
+                            className="p-1.5 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer"
+                            title="Editar rotina"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Excluir */}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRoutine(routine.id, routine.title)}
+                            className="p-1.5 rounded-lg border border-slate-800 bg-slate-900/60 text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 hover:border-rose-800/50 cursor-pointer"
+                            title="Excluir rotina"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* E. HISTÓRICO DE ÚLTIMAS EXECUÇÕES */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-purple-400" />
+                <h4 className="text-sm font-semibold text-slate-200">Histórico de Últimas Execuções</h4>
+              </div>
+
+              {!routinesQuery.data?.recentLogs || routinesQuery.data.recentLogs.length === 0 ? (
+                <div className="p-4 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-xs text-slate-500">
+                  Nenhuma execução recente registrada ainda. Ao disparar uma rotina, o resumo executivo constará aqui.
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden divide-y divide-slate-800/70">
+                  {routinesQuery.data.recentLogs.slice(0, 5).map((log: any) => {
+                    const routine = routinesQuery.data?.routines?.find((r: any) => r.id === log.routineId);
+                    const routineTitle = routine?.title || "Rotina Autônoma";
+
+                    return (
+                      <div key={log.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-800/30 transition-colors">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-slate-200">{routineTitle}</span>
+                            <span
+                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                log.status === "success"
+                                  ? "bg-emerald-950/80 text-emerald-400 border border-emerald-800/60"
+                                  : log.status === "warning"
+                                  ? "bg-amber-950/80 text-amber-400 border border-amber-800/60"
+                                  : "bg-rose-950/80 text-rose-400 border border-rose-800/60"
+                              }`}
+                            >
+                              {log.status === "success" ? "Sucesso" : log.status === "warning" ? "Aviso" : "Erro"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            {new Date(log.createdAt).toLocaleString("pt-BR")}
+                          </p>
+                        </div>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setLogSummaryModal({
+                              title: routineTitle,
+                              date: new Date(log.createdAt).toLocaleString("pt-BR"),
+                              status: log.status === "success" ? "Sucesso" : "Aviso",
+                              summary: log.outputSummary || "Sem resumo disponível.",
+                            });
+                          }}
+                          className="border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 shrink-0 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Visualizar Resumo</span>
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1887,6 +2277,240 @@ export function AIAssistant() {
                 {settingsSaved ? "✓ Configurações Salvas!" : "Salvar Configurações"}
               </Button>
             </div>
+          </div>
+        )}
+
+        {/* MODAL: CRIAR / EDITAR ROTINA */}
+        {isRoutineModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+            <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/50">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-blue-400" />
+                  <h3 className="text-base font-semibold text-slate-100">
+                    {routineForm.id ? "Editar Rotina Autônoma" : "Criar Nova Rotina Autônoma"}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsRoutineModalOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveRoutineForm} className="flex-1 overflow-y-auto p-6 space-y-4">
+                {/* Nome da rotina */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Nome da Rotina</label>
+                  <input
+                    type="text"
+                    required
+                    value={routineForm.title}
+                    onChange={(e) => setRoutineForm((prev) => ({ ...prev, title: e.target.value }))}
+                    placeholder="Ex: 📋 Briefing Matinal: O que tenho que fazer hoje?"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Tipo de rotina */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Tipo de Rotina</label>
+                  <select
+                    value={routineForm.triggerType}
+                    onChange={(e) => {
+                      const newType = e.target.value as any;
+                      const preset = ROUTINE_PRESETS.find((p) => p.triggerType === newType);
+                      setRoutineForm((prev) => ({
+                        ...prev,
+                        triggerType: newType,
+                        title: preset?.title || prev.title,
+                        promptInstruction: preset?.promptInstruction || prev.promptInstruction,
+                        scheduleTime: preset?.scheduleTime || prev.scheduleTime,
+                      }));
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="morning_briefing">📋 Briefing Matinal (Prioridades do Dia)</option>
+                    <option value="stale_leads">⏱️ Radar de Clientes Parados (Follow-up 48h)</option>
+                    <option value="eod_summary">📊 Fechamento e Pendências do Dia</option>
+                    <option value="custom">⚙️ Tarefa Personalizada (Prompt Livre)</option>
+                  </select>
+                </div>
+
+                {/* Se Personalizada: Textarea */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-300">
+                      Instrução para a Inteligência Artificial
+                    </label>
+                    <span className="text-[11px] text-slate-500">Gemini 3.5 Flash Lite</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    required
+                    value={routineForm.promptInstruction}
+                    onChange={(e) => setRoutineForm((prev) => ({ ...prev, promptInstruction: e.target.value }))}
+                    placeholder="Descreva exatamente o que o Gemini deve analisar e produzir..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+                  />
+                </div>
+
+                {/* Horário de execução e canal de saída */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Horário de Execução</label>
+                    <input
+                      type="time"
+                      required
+                      value={routineForm.scheduleTime}
+                      onChange={(e) => setRoutineForm((prev) => ({ ...prev, scheduleTime: e.target.value }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Canal de Saída</label>
+                    <select
+                      value={routineForm.actionTarget}
+                      onChange={(e) => setRoutineForm((prev) => ({ ...prev, actionTarget: e.target.value as any }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="chat_thread">💬 Chat do Copiloto (Operações do Dia)</option>
+                      <option value="internal_notification">🔔 Notificação Interna</option>
+                      <option value="whatsapp">📱 WhatsApp Executivo</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Checkboxes de dias da semana */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 mb-2 block">Dias da Semana</label>
+                  <div className="flex flex-wrap gap-2">
+                    {WEEKDAYS.map((w) => {
+                      const isChecked = routineForm.scheduleDays.includes(w.key);
+                      return (
+                        <button
+                          key={w.key}
+                          type="button"
+                          onClick={() => {
+                            setRoutineForm((prev) => {
+                              const exists = prev.scheduleDays.includes(w.key);
+                              const newDays = exists
+                                ? prev.scheduleDays.filter((d) => d !== w.key)
+                                : [...prev.scheduleDays, w.key];
+                              return {
+                                ...prev,
+                                scheduleDays: newDays.length > 0 ? newDays : [w.key],
+                              };
+                            });
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                            isChecked
+                              ? "bg-blue-600 text-white shadow-sm"
+                              : "bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200"
+                          }`}
+                        >
+                          {w.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <input
+                    type="checkbox"
+                    id="routine-active-checkbox"
+                    checked={routineForm.isActive}
+                    onChange={(e) => setRoutineForm((prev) => ({ ...prev, isActive: e.target.checked }))}
+                    className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="routine-active-checkbox" className="text-xs text-slate-300 cursor-pointer">
+                    Ativar rotina imediatamente após salvar
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-800">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsRoutineModalOpen(false)}
+                    className="border-slate-700 bg-transparent text-slate-300 hover:bg-slate-800 text-xs px-4 py-2 rounded-xl"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={upsertRoutineMutation.isPending}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2 rounded-xl shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    {upsertRoutineMutation.isPending ? "Salvando..." : "Salvar Rotina"}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: VISUALIZAR RESUMO DE EXECUÇÃO */}
+        {logSummaryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+            <div className="relative w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/70">
+                <div>
+                  <h3 className="text-base font-bold text-slate-100">{logSummaryModal.title}</h3>
+                  <p className="text-xs text-slate-400">
+                    {logSummaryModal.date} • Status: <span className="text-emerald-400 font-semibold">{logSummaryModal.status}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLogSummaryModal(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-3 leading-relaxed text-slate-200">
+                <AssistantMarkdown content={logSummaryModal.summary} />
+              </div>
+
+              <div className="flex justify-end px-6 py-3 border-t border-slate-800 bg-slate-950/70">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setLogSummaryModal(null)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-4 py-2 rounded-lg cursor-pointer"
+                >
+                  Fechar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TOAST DE FEEDBACK DE ROTINA */}
+        {routineToast && (
+          <div className="fixed bottom-6 right-6 z-50 flex items-start gap-3 p-4 rounded-xl border border-slate-700 bg-slate-900/95 backdrop-blur shadow-2xl max-w-md animate-in fade-in slide-in-from-bottom-3">
+            {routineToast.type === "success" ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-rose-400 mt-0.5 shrink-0" />
+            )}
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-slate-100">{routineToast.title}</p>
+              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">{routineToast.message}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRoutineToast(null)}
+              className="text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
       </div>

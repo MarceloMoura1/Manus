@@ -48,7 +48,7 @@ import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
 import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whatsapp.socket";
 import { classifyAssistantFailure } from "./assistant-error";
 import { hermesRouter } from "./modules/admin/hermes";
-import { assistantThreadsRouter } from "./modules/assistant";
+import { assistantThreadsRouter, assistantRoutinesRouter } from "./modules/assistant";
 import { botTrpcRouter } from "./modules/bot/bot.router";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
 import { executeHermesCrmAction } from "./hermes-crm-actions";
@@ -555,6 +555,7 @@ export const appRouter = router({
   conversas: conversasRouter,
   bot: botTrpcRouter,
   assistantThreads: assistantThreadsRouter,
+  assistantRoutines: assistantRoutinesRouter,
   admin: router({
     hermes: hermesRouter,
   }),
@@ -2018,6 +2019,13 @@ export const appRouter = router({
     getThreadMessages: assistantThreadsRouter._def.procedures.getThreadMessages,
     sendThreadMessage: assistantThreadsRouter._def.procedures.sendThreadMessage,
     sendThreadAudioMessage: assistantThreadsRouter._def.procedures.sendThreadAudioMessage,
+
+    // ── Rotinas Autônomas do Copiloto ──
+    listRoutines: assistantRoutinesRouter._def.procedures.listRoutines,
+    upsertRoutine: assistantRoutinesRouter._def.procedures.upsertRoutine,
+    toggleRoutineActive: assistantRoutinesRouter._def.procedures.toggleRoutineActive,
+    deleteRoutine: assistantRoutinesRouter._def.procedures.deleteRoutine,
+    runRoutineNow: assistantRoutinesRouter._def.procedures.runRoutineNow,
 
     chat: publicProcedure
       .input(z.object({

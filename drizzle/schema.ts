@@ -4622,3 +4622,48 @@ export const megadeskAiMessages = mysqlTable(
 
 export type MegadeskAiMessage = typeof megadeskAiMessages.$inferSelect;
 export type MegadeskAiMessageInsert = typeof megadeskAiMessages.$inferInsert;
+
+export const megadeskAiRoutines = mysqlTable(
+  "megadesk_ai_routines",
+  {
+    id: varchar("id", { length: 255 }).primaryKey().notNull(),
+    tenantId: varchar("tenant_id", { length: 255 }).notNull(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    scheduleTime: varchar("schedule_time", { length: 10 }).notNull(),
+    scheduleDays: json("schedule_days").$type<string[]>().notNull(),
+    triggerType: varchar("trigger_type", { length: 50 }).notNull(),
+    promptInstruction: text("prompt_instruction").notNull(),
+    actionTarget: varchar("action_target", { length: 50 }).default("chat_thread").notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    lastRunAt: timestamp("last_run_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    index("idx_ai_routines_tenant_active").on(table.tenantId, table.isActive),
+  ]
+);
+
+export type MegadeskAiRoutine = typeof megadeskAiRoutines.$inferSelect;
+export type MegadeskAiRoutineInsert = typeof megadeskAiRoutines.$inferInsert;
+
+export const megadeskAiRoutineLogs = mysqlTable(
+  "megadesk_ai_routine_logs",
+  {
+    id: varchar("id", { length: 255 }).primaryKey().notNull(),
+    routineId: varchar("routine_id", { length: 255 })
+      .notNull()
+      .references(() => megadeskAiRoutines.id, { onDelete: "cascade" }),
+    tenantId: varchar("tenant_id", { length: 255 }).notNull(),
+    status: mysqlEnum("status", ["success", "warning", "error"]).notNull(),
+    outputSummary: text("output_summary"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  table => [
+    index("idx_ai_routine_logs_routine_created").on(table.routineId, table.createdAt),
+  ]
+);
+
+export type MegadeskAiRoutineLog = typeof megadeskAiRoutineLogs.$inferSelect;
+export type MegadeskAiRoutineLogInsert = typeof megadeskAiRoutineLogs.$inferInsert;
