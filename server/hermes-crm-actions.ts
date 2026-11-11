@@ -10,6 +10,10 @@ import { canWriteErp } from "./modules/erp/contracts";
 import type { HermesCrmActionType } from "./gemini-client";
 import type { OperationalRole } from "./modules/erp/contracts";
 import { formatHermesError, friendlyFieldName, sanitizeHermesPayload } from "./hermes-sanitize";
+import { BotDispatcherService } from "./modules/bot/bot-dispatcher.service";
+import { normalizeContactPhone } from "../shared/contact-phone";
+import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whatsapp.socket";
+import { generateConversationPublicCode } from "./conversation-public-code";
 
 export type HermesCrmAction = { actionType: HermesCrmActionType; args: Record<string, unknown> };
 type Identity = { clientId: string; userId: string; userName: string; role: OperationalRole };
@@ -409,5 +413,173 @@ async function runHermesCrmAction(input: {
     });
     return { success: true, message: `Proposta enviada por WhatsApp para ${phone}.`, entityId: proposalId };
   }
+  if (input.action.actionType === "SEND_WHATSAPP_MESSAGE") {
+    const recipient = String(args.clientName ?? args.recipient ?? "").trim();
+    let rawPhone = String(args.phone ?? "").trim();
+    const message = String(args.messageContent ?? args.message ?? "").trim();
+    if (!message) throw new Error("Mensagem vazia.");
+
+    if (!rawPhone && recipient) {
+      const pool = getPool();
+      const normRec = recipient.toLowerCase();
+      const [rows] = await pool.execute(
+        `SELECT phone, whatsapp FROM megadesk_crm_clients
+         WHERE client_id = ? AND (LOWER(company_name) = ? OR LOWER(responsible_name) = ? OR phone = ?)
+         LIMIT 1`,
+        [input.tenantId, normRec, normRec, recipient]
+      ) as any[];
+      if (Array.isArray(rows) && rows.length > 0) {
+        rawPhone = String(rows[0].phone || rows[0].whatsapp || "");
+      }
+    }
+
+    const norm = normalizeContactPhone(rawPhone || recipient);
+    if (norm.status !== "valid" || !norm.value) {
+      throw new Error("Contato não possui número de telefone válido registrado.");
+    }
+
+    return executeSendWhatsAppMessage({
+      tenantId: input.tenantId,
+      recipient: recipient || norm.value,
+      phone: norm.value,
+      message,
+      senderUserId: input.userId,
+      senderName: input.userName,
+    });
+  }
   throw new Error("HERMES_CRM_ACTION_NOT_ALLOWED");
+}
+
+export interface ExecuteSendWhatsAppMessageInput {
+  tenantId: string;
+  recipient: string;
+  phone: string;
+  message: string;
+  senderUserId?: string;
+  senderName?: string;
+}
+
+export async function executeSendWhatsAppMessage(input: ExecuteSendWhatsAppMessageInput): Promise<{
+  success: true;
+  message: string;
+  entityId: string;
+}> {
+  const norm = normalizeContactPhone(input.phone);
+  if (norm.status !== "valid" || !norm.value) {
+    throw new Error("Contato não possui número de telefone válido registrado.");
+  }
+  const cleanPhone = norm.value;
+  const pool = getPool();
+
+  const botDispatcherService = new BotDispatcherService();
+  const dispatchResult = await botDispatcherService.sendTextMessage({
+    tenantId: input.tenantId,
+    to: cleanPhone,
+    text: input.message,
+    provider: "evolution",
+  });
+  const externalMessageId = dispatchResult?.externalMessageId || `msg-${randomUUID()}`;
+
+  // Busca conversa existente para o telefone
+  const [existingConvRows] = await pool.execute(
+    `SELECT conversation_id, messages_json FROM megadesk_domain_conversations
+     WHERE client_id = ? AND (phone = ? OR phone = ?)
+     ORDER BY updated_at DESC LIMIT 1`,
+    [input.tenantId, cleanPhone, cleanPhone.replace(/^55/, "")]
+  ) as any[];
+
+  let conversationId = "";
+  let messages: any[] = [];
+  const now = new Date();
+  const messageId = `msg-${randomUUID()}`;
+  const legacyMessage = {
+    id: messageId,
+    externalMessageId,
+    from: "agent",
+    direction: "outbound",
+    type: "text",
+    text: input.message,
+    timestamp: now.toISOString(),
+    status: "sent",
+  };
+
+  if (Array.isArray(existingConvRows) && existingConvRows.length > 0) {
+    conversationId = existingConvRows[0].conversation_id;
+    try {
+      messages = JSON.parse(existingConvRows[0].messages_json || "[]");
+    } catch {
+      messages = [];
+    }
+    messages.push(legacyMessage);
+
+    await pool.execute(
+      `UPDATE megadesk_domain_conversations
+       SET messages_json = ?, last_message = ?, last_message_from = 'agent', updated_at = NOW()
+       WHERE conversation_id = ? AND client_id = ?`,
+      [JSON.stringify(messages), input.message.substring(0, 255), conversationId, input.tenantId]
+    );
+  } else {
+    conversationId = `conv-${randomUUID()}`;
+    messages = [legacyMessage];
+    const publicCode = generateConversationPublicCode(now);
+    await pool.execute(
+      `INSERT INTO megadesk_domain_conversations
+       (conversation_id, client_id, public_code, origin, channel, provider, integration_id,
+        customer_name, phone, company, status, last_message, last_message_from, time_label,
+        messages_json, unread_count, opened_at)
+       VALUES (?, ?, ?, 'outbound', 'whatsapp', 'evolution', ?, ?, ?, '', 'open', ?, 'agent', ?, ?, 0, NOW())`,
+      [
+        conversationId,
+        input.tenantId,
+        publicCode,
+        `megadesk-${input.tenantId}`,
+        input.recipient || "Contato",
+        cleanPhone,
+        input.message.substring(0, 255),
+        now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        JSON.stringify(messages),
+      ]
+    );
+  }
+
+  // Persistir em megadesk_domain_conversations_messages
+  await pool.execute(
+    `INSERT INTO megadesk_domain_conversations_messages
+     (message_id, conversation_id, client_id, external_message_id, provider, integration_id,
+      direction, message_type, sender_user_id, sender_name_snapshot, sender, message, timestamp, status)
+     VALUES (?, ?, ?, ?, 'evolution', ?, 'outbound', 'text', ?, ?, 'agent', ?, NOW(), 'sent')`,
+    [
+      messageId,
+      conversationId,
+      input.tenantId,
+      externalMessageId,
+      `megadesk-${input.tenantId}`,
+      input.senderUserId || "system",
+      input.senderName || "Assistente IA",
+      input.message,
+    ]
+  );
+
+  // Emite eventos de Socket.IO para atualizar o módulo de Atendimento em tempo real
+  try {
+    await emitOperationalTenantEventAsync(input.tenantId, "conversation:message", {
+      clientId: input.tenantId,
+      conversationId,
+      message: legacyMessage,
+    });
+    await emitOperationalTenantEventAsync(input.tenantId, "conversation_updated", {
+      clientId: input.tenantId,
+      conversationId,
+      lastMessage: input.message,
+      updatedAt: now.toISOString(),
+    });
+  } catch (err) {
+    console.warn("[executeSendWhatsAppMessage] Falha ao emitir socket realtime:", err);
+  }
+
+  return {
+    success: true,
+    message: `Mensagem enviada com sucesso para ${input.recipient} via WhatsApp.`,
+    entityId: conversationId,
+  };
 }

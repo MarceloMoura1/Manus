@@ -266,7 +266,8 @@ export function createAssistantThreadsRouter(
           const toneInstruction = buildToneInstruction(input.settings?.tone);
           const systemInstruction = `Você é o Copiloto de Inteligência Artificial da plataforma MegaDesk.
 Atue como um assessor executivo e operacional ágil, estruturado, acolhedor e focado em resolver as necessidades do usuário em português do Brasil.
-${toneInstruction}`;
+${toneInstruction}
+Você tem acesso a ferramentas operacionais para consultar chamados, vendas, dados no CRM, abrir chamados e enviar mensagens via WhatsApp (send_whatsapp_message) para clientes ou números informados.`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),
@@ -284,6 +285,10 @@ ${toneInstruction}`;
             for (const tr of toolMetadata.toolResults as any[]) {
               if (tr?.output?.status === "executado_direto" && tr?.output?.ticketNumber) {
                 directMessage = `Criei o chamado #${tr.output.ticketNumber} com o assunto "${tr.output.assunto || ""}" para o cliente ${tr.output.cliente || ""}.`;
+                break;
+              }
+              if (tr?.output?.status === "executado_direto" && tr?.output?.recipient) {
+                directMessage = `Mensagem enviada com sucesso para ${tr.output.recipient} via WhatsApp.`;
                 break;
               }
             }
@@ -409,7 +414,7 @@ Na PRIMEIRA LINHA da sua resposta final em texto, você DEVE transcrever exatame
 [Transcrição: "texto falado pelo usuário"]
 
 Após essa primeira linha, pule uma linha e forneça a sua resposta natural ou resultado da execução das ferramentas ao usuário.
-Execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, chamados ou preparar abertura de chamado) e responda de forma clara, estruturada e direta em português do Brasil.`;
+Execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, chamados, preparar abertura de chamado ou enviar mensagem via WhatsApp) e responda de forma clara, estruturada e direta em português do Brasil.`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),
@@ -435,6 +440,10 @@ Execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, c
             for (const tr of toolMetadata.toolResults as any[]) {
               if (tr?.output?.status === "executado_direto" && tr?.output?.ticketNumber) {
                 directMessage = `Criei o chamado #${tr.output.ticketNumber} com o assunto "${tr.output.assunto || ""}" para o cliente ${tr.output.cliente || ""}.`;
+                break;
+              }
+              if (tr?.output?.status === "executado_direto" && tr?.output?.recipient) {
+                directMessage = `Mensagem enviada com sucesso para ${tr.output.recipient} via WhatsApp.`;
                 break;
               }
             }

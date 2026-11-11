@@ -7,6 +7,8 @@ import {
   type PendingActionRequest,
 } from "./gemini-client";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
+import { executeSendWhatsAppMessage } from "./hermes-crm-actions";
+import { normalizeContactPhone } from "../shared/contact-phone";
 
 export interface HermesToolContext {
   clientId: string;
@@ -17,6 +19,7 @@ export interface HermesToolContext {
   userPermissions?: readonly string[];
   hitlRequired?: boolean;
   executeTicketAction?: typeof executeHermesTicketAction;
+  executeWhatsAppAction?: typeof executeSendWhatsAppMessage;
 }
 
 export function normalizeText(value: string): string {
@@ -88,6 +91,12 @@ export const solicitarAberturaChamadoParameters = z.object({
   assunto: z.string().describe("Problema relatado, resumo ou motivo do chamado"),
   descricaoDetalhada: z.string().optional().describe("Detalhes técnicos adicionais se informados pelo usuário"),
   prioridade: z.enum(["baixa", "media", "alta", "urgente"]).default("media"),
+});
+
+export const sendWhatsappMessageParameters = z.object({
+  recipient: z.string().describe("Nome do cliente/contato no CRM ou número de telefone direto"),
+  phone: z.string().optional().describe("Número formatado se já identificado"),
+  message: z.string().describe("O conteúdo da mensagem de texto a ser enviada"),
 });
 
 export const consultarCrmParameters = z.object({
@@ -186,6 +195,7 @@ export function createHermesTools(context: HermesToolContext) {
   const canTickets = permissions.length === 0 || permissions.some((p) => p === "tickets" || p === "support");
   const canCrm = permissions.length === 0 || permissions.some((p) => p === "crm" || p === "sales");
   const canSales = permissions.length === 0 || permissions.some((p) => p === "sales" || p === "erp" || p === "erp-sales");
+  const canWhatsApp = permissions.length === 0 || permissions.some((p) => p === "conversations" || p === "whatsapp" || p === "crm" || p === "sales");
 
   const tools: Record<string, any> = {};
 
@@ -561,6 +571,139 @@ export function createHermesTools(context: HermesToolContext) {
     });
     (crmToolDef as any).parameters = consultarCrmParameters;
     tools.consultar_crm = crmToolDef;
+  }
+
+  if (canWhatsApp) {
+    const whatsappToolDef = tool({
+      description: "Envia mensagem de texto via WhatsApp para um cliente ou contato.",
+      inputSchema: sendWhatsappMessageParameters,
+      execute: async ({ recipient, phone, message }) => {
+        const cleanRecipient = recipient.trim();
+        const cleanMessage = message.trim();
+        if (!cleanMessage) {
+          return {
+            success: false,
+            message: "A mensagem não pode ser vazia.",
+          };
+        }
+
+        let resolvedPhone: string | null = null;
+        let displayName = cleanRecipient;
+
+        // 1. Se passou telefone explícito, tenta normalizar
+        if (phone && phone.trim()) {
+          const directNorm = normalizeContactPhone(phone.trim());
+          if (directNorm.status === "valid" && directNorm.value) {
+            resolvedPhone = directNorm.value;
+          }
+        }
+
+        // 2. Se não achou telefone, busca no CRM
+        if (!resolvedPhone && pool) {
+          try {
+            const resolution = await resolveClientInCRM(pool, context.clientId, cleanRecipient);
+            if (resolution.status === "found" && resolution.data) {
+              displayName = resolution.customerName || cleanRecipient;
+              const crmCandidate = String((resolution.data as any).phone || (resolution.data as any).whatsapp || "");
+              const crmNorm = normalizeContactPhone(crmCandidate);
+              if (crmNorm.status === "valid" && crmNorm.value) {
+                resolvedPhone = crmNorm.value;
+              }
+            } else if (resolution.status === "ambiguous") {
+              return {
+                success: false,
+                status: "cliente_ambiguo",
+                opcoes: resolution.options,
+                message: `Localizei mais de um contato com esse nome: ${resolution.options.map((o) => `[${o}]`).join(" e ")}. Para qual deles deseja enviar a mensagem?`,
+              };
+            }
+          } catch {}
+        }
+
+        // 3. Se ainda não achou, tenta normalizar o próprio recipient como telefone direto
+        if (!resolvedPhone) {
+          const recNorm = normalizeContactPhone(cleanRecipient);
+          if (recNorm.status === "valid" && recNorm.value) {
+            resolvedPhone = recNorm.value;
+          }
+        }
+
+        // Se ainda não temos um telefone válido
+        if (!resolvedPhone) {
+          return {
+            success: false,
+            status: "telefone_invalido",
+            message: "Contato não possui número de telefone válido registrado.",
+          };
+        }
+
+        const whatsappTool = HERMES_TOOL_REGISTRY.find((t) => t.name === "send_whatsapp_message");
+
+        // Se HITL não for obrigatório, executa diretamente
+        if (context.hitlRequired === false) {
+          try {
+            const actorUserId = context.operationalUserId || context.userEmail || context.userId || "operator";
+            const actorName = context.userEmail || "Assistente IA";
+            const whatsappExecutor = context.executeWhatsAppAction ?? executeSendWhatsAppMessage;
+            await whatsappExecutor({
+              tenantId: context.clientId,
+              recipient: displayName,
+              phone: resolvedPhone,
+              message: cleanMessage,
+              senderUserId: actorUserId,
+              senderName: actorName,
+            });
+
+            return {
+              success: true,
+              status: "executado_direto",
+              recipient: displayName,
+              phone: resolvedPhone,
+              message: "Mensagem enviada com sucesso pelo WhatsApp.",
+            };
+          } catch (err: any) {
+            console.error("[HermesTools] Erro ao executar envio direto de WhatsApp:", err);
+            return {
+              success: false,
+              status: "erro_execucao",
+              message: `Não foi possível enviar a mensagem pelo WhatsApp: ${err?.message || "Erro desconhecido"}.`,
+            };
+          }
+        }
+
+        // HITL obrigatório: gera PendingActionRequest
+        let pendingActionRequest: PendingActionRequest | undefined;
+        if (whatsappTool) {
+          pendingActionRequest = createPendingActionRequest(
+            whatsappTool,
+            {
+              recipient: displayName,
+              clientName: displayName,
+              phone: resolvedPhone,
+              message: cleanMessage,
+              messageContent: cleanMessage,
+            },
+            {
+              clientId: context.clientId,
+              userId: context.userEmail || context.userId || context.operationalUserId || "operator",
+              userEmail: context.userEmail,
+              operationalUserId: context.operationalUserId,
+            },
+          );
+        }
+
+        return {
+          success: true,
+          status: "preparado",
+          recipient: displayName,
+          phone: resolvedPhone,
+          message: `Preparei a mensagem para ${displayName}. Confirme o card para disparar.`,
+          pendingActionRequest,
+        };
+      },
+    });
+    (whatsappToolDef as any).parameters = sendWhatsappMessageParameters;
+    tools.send_whatsapp_message = whatsappToolDef;
   }
 
   return tools;

@@ -210,7 +210,7 @@ export interface ChatResult {
 export type HermesToolType = "READ" | "MUTATION";
 export type HermesPermission = string;
 export type HermesTicketActionType = "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY";
-export type HermesCrmActionType = "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP";
+export type HermesCrmActionType = "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP" | "SEND_WHATSAPP_MESSAGE";
 export type HermesErpActionType = "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE" | "SEND_WHATSAPP_OUTBOUND";
 export type HermesActionType = HermesTicketActionType | HermesCrmActionType | HermesErpActionType;
 
@@ -1352,6 +1352,34 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     },
   },
   {
+    name: "send_whatsapp_message",
+    type: "MUTATION",
+    actionType: "SEND_WHATSAPP_MESSAGE",
+    requiredPermissions: ["conversations", "whatsapp", "crm", "sales"],
+    declaration: {
+      name: "send_whatsapp_message",
+      description: "Envia mensagem de texto via WhatsApp para um cliente ou contato.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          recipient: { type: "STRING", description: "Nome do cliente ou número de telefone direto" },
+          phone: { type: "STRING", description: "Número de telefone formatado se disponível" },
+          message: { type: "STRING", description: "Conteúdo da mensagem a ser enviada" },
+        },
+        required: ["recipient", "message"],
+      },
+    },
+    validateArgs: args => {
+      objectArgs(args);
+      const recipient = String(args.recipient ?? args.clientName ?? "").trim();
+      const message = String(args.message ?? args.messageContent ?? "").trim();
+      const phone = typeof args.phone === "string" ? args.phone.trim() : undefined;
+      if (!recipient) throw new Error("Informe o destinatário da mensagem.");
+      if (!message) throw new Error("Informe o texto da mensagem.");
+      return { recipient, clientName: recipient, message, messageContent: message, ...(phone ? { phone } : {}) };
+    },
+  },
+  {
     name: "get_conversations_summary",
     type: "READ",
     requiredPermissions: ["conversations", "chat"],
@@ -1480,6 +1508,12 @@ export function summarizePendingAction(actionType: HermesActionType, args: Recor
     const recipients = Array.isArray(args.recipients) ? args.recipients : [];
     const cat = args.category === "supplier_quote" ? "Cotação para fornecedores" : args.category === "customer_followup" ? "Follow-up de clientes" : "Disparo ativo";
     return `Disparar mensagem via WhatsApp (${cat}) para ${recipients.length} destinatário(s).`;
+  }
+  if (actionType === "SEND_WHATSAPP_MESSAGE") {
+    const dest = String(args.clientName ?? args.recipient ?? "destinatário").trim();
+    const phone = args.phone ? ` (${String(args.phone)})` : "";
+    const msg = String(args.messageContent ?? args.message ?? "").trim();
+    return `Enviar mensagem via WhatsApp para ${dest}${phone}: "${msg}"`;
   }
   if (actionType === "CREATE_CLIENT") return `Cadastrar o cliente "${name}"${args.phone ? ` (telefone ${String(args.phone)})` : ""}.`;
   if (actionType === "CREATE_SUPPLIER") return `Cadastrar o fornecedor "${name}".`;

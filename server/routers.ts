@@ -495,7 +495,7 @@ function sessionBoundAssistantUserId(requestedUserId: string, sessionUserEmail: 
 }
 
 const hermesTicketActionTypes = ["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"] as const;
-const hermesCrmActionTypes = ["CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP"] as const;
+const hermesCrmActionTypes = ["CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP", "SEND_WHATSAPP_MESSAGE"] as const;
 const hermesErpActionTypes = ["CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE", "SEND_WHATSAPP_OUTBOUND"] as const;
 const hermesActionTypes = [...hermesTicketActionTypes, ...hermesCrmActionTypes, ...hermesErpActionTypes] as const;
 
@@ -510,13 +510,15 @@ function assertAssistantActionPermission(client: MegaClient, userEmail: string, 
   const user = assertClientUserPermission(client, "ai-assistant", userEmail);
   const required = isHermesTicketAction(actionType)
     ? ["tickets", "support"]
-    : actionType === "CREATE_CLIENT" || actionType === "UPDATE_CLIENT" || actionType === "ADD_CLIENT_TIMELINE"
-      ? ["crm", "clients"]
-      : isHermesErpAction(actionType)
-        ? actionType === "UPDATE_SERVICE" || actionType === "CREATE_SERVICE" ? ["services", "erp"]
-          : actionType === "CREATE_SUPPLIER" || actionType === "UPDATE_SUPPLIER" || actionType === "REQUEST_PURCHASE" || actionType === "SEND_SUPPLIER_MESSAGE" || actionType === "SEND_WHATSAPP_OUTBOUND" ? ["suppliers", "purchases", "erp", "conversations"]
-            : ["products", "inventory", "erp"]
-        : ["sales", "crm", "proposals"];
+    : actionType === "SEND_WHATSAPP_MESSAGE"
+      ? ["conversations", "whatsapp", "crm", "sales"]
+      : actionType === "CREATE_CLIENT" || actionType === "UPDATE_CLIENT" || actionType === "ADD_CLIENT_TIMELINE"
+        ? ["crm", "clients"]
+        : isHermesErpAction(actionType)
+          ? actionType === "UPDATE_SERVICE" || actionType === "CREATE_SERVICE" ? ["services", "erp"]
+            : actionType === "CREATE_SUPPLIER" || actionType === "UPDATE_SUPPLIER" || actionType === "REQUEST_PURCHASE" || actionType === "SEND_SUPPLIER_MESSAGE" || actionType === "SEND_WHATSAPP_OUTBOUND" ? ["suppliers", "purchases", "erp", "conversations"]
+              : ["products", "inventory", "erp"]
+          : ["sales", "crm", "proposals"];
   if (!user.permissions.some(permission => required.includes(permission))) {
     audit("MegaDesk", `Usuário ${user.email} sem permissão operacional para ${actionType} no Hermes`, client.clientId, false);
     throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui permissão para executar esta ação neste módulo." });

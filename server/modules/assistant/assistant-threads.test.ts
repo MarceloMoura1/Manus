@@ -559,6 +559,122 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
       expect(result.pendingActionRequest).toBeUndefined();
       expect(mockTicketExecutor).toHaveBeenCalled();
     });
+
+    it("prepares send_whatsapp_message with pendingActionRequest when hitlRequired is true", async () => {
+      const { createHermesTools } = await import("../../hermes-tools");
+      const mockPool = {
+        execute: vi.fn().mockResolvedValue([
+          [
+            {
+              crmClientId: "crm-1",
+              companyName: "FaYerS",
+              responsibleName: "Felipe Yers",
+              phone: "11988887777",
+              status: "ativo",
+            },
+          ],
+        ]),
+      };
+
+      const tools = createHermesTools({
+        clientId: "tenant-1",
+        userId: "user-1",
+        pool: mockPool,
+        hitlRequired: true,
+      });
+
+      const whatsappTool = tools.send_whatsapp_message;
+      expect(whatsappTool).toBeDefined();
+
+      const result = await whatsappTool.execute({
+        recipient: "FaYerS",
+        message: "Olá, seu orçamento está pronto!",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.status).toBe("preparado");
+      expect(result.phone).toBe("5511988887777");
+      expect(result.pendingActionRequest).toBeDefined();
+      expect(result.pendingActionRequest.actionType).toBe("SEND_WHATSAPP_MESSAGE");
+      expect(result.pendingActionRequest.summary).toContain("FaYerS");
+      expect(result.pendingActionRequest.summary).toContain("Olá, seu orçamento está pronto!");
+    });
+
+    it("executes send_whatsapp_message directly when hitlRequired is false", async () => {
+      const { createHermesTools } = await import("../../hermes-tools");
+      const mockWhatsAppExecutor = vi.fn().mockResolvedValue({
+        success: true,
+        message: "Mensagem enviada com sucesso para FaYerS via WhatsApp.",
+        entityId: "conv-123",
+      });
+
+      const mockPool = {
+        execute: vi.fn().mockResolvedValue([
+          [
+            {
+              crmClientId: "crm-1",
+              companyName: "FaYerS",
+              responsibleName: "Felipe Yers",
+              phone: "11988887777",
+              status: "ativo",
+            },
+          ],
+        ]),
+      };
+
+      const tools = createHermesTools({
+        clientId: "tenant-1",
+        userId: "user-1",
+        pool: mockPool,
+        hitlRequired: false,
+        executeWhatsAppAction: mockWhatsAppExecutor,
+      });
+
+      const whatsappTool = tools.send_whatsapp_message;
+      expect(whatsappTool).toBeDefined();
+
+      const result = await whatsappTool.execute({
+        recipient: "FaYerS",
+        message: "Aviso importante de entrega.",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.status).toBe("executado_direto");
+      expect(result.phone).toBe("5511988887777");
+      expect(result.pendingActionRequest).toBeUndefined();
+      expect(mockWhatsAppExecutor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: "tenant-1",
+          recipient: "FaYerS",
+          phone: "5511988887777",
+          message: "Aviso importante de entrega.",
+        })
+      );
+    });
+
+    it("returns error when recipient has no valid phone", async () => {
+      const { createHermesTools } = await import("../../hermes-tools");
+      const mockPool = {
+        execute: vi.fn().mockResolvedValue([[]]),
+      };
+
+      const tools = createHermesTools({
+        clientId: "tenant-1",
+        userId: "user-1",
+        pool: mockPool,
+        hitlRequired: false,
+      });
+
+      const whatsappTool = tools.send_whatsapp_message;
+      const result = await whatsappTool.execute({
+        recipient: "Cliente Desconhecido",
+        message: "Olá!",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("telefone_invalido");
+      expect(result.message).toContain("não possui número de telefone válido");
+    });
   });
 });
 
