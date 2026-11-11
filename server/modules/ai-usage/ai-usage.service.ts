@@ -99,6 +99,25 @@ export async function ensureAiUsageLogsTable(): Promise<void> {
         KEY \`idx_ai_usage_tenant_user\` (\`tenant_id\`, \`user_id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    try {
+      await pool.execute(`
+        ALTER TABLE \`megadesk_domain_clients\`
+        ADD COLUMN \`ai_monthly_token_limit\` int DEFAULT 1000000;
+      `);
+    } catch {
+      // Coluna já existente ou permissão restrita
+    }
+
+    try {
+      await pool.execute(`
+        ALTER TABLE \`megadesk_domain_clients\`
+        ADD COLUMN \`ai_cycle_renewal_date\` timestamp NULL;
+      `);
+    } catch {
+      // Coluna já existente ou permissão restrita
+    }
+
     tableEnsured = true;
   } catch (err) {
     console.warn("[AiUsageService] Aviso ao verificar tabela megadesk_ai_usage_logs:", err);
