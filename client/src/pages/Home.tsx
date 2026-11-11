@@ -111,6 +111,7 @@ import {
   Phone as PhoneIcon,
   Paperclip,
   Reply,
+  LogOut,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -2983,7 +2984,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
       {/* Tabela de Chamados */}
       <div className="overflow-hidden rounded-[14px] border border-slate-200/80 bg-white">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto w-full touch-pan-x">
         <table className="w-full min-w-[1080px] table-fixed">
           <colgroup>
             <col className="w-[6%]" />
@@ -4605,6 +4606,19 @@ function NotificationsPage() {
 
 
 
+function getActiveModuleName(active: RouteId): string {
+  if (active === "conversations" || active === "active-attendance") return "Atendimento";
+  if (active === "tickets") return "Chamados";
+  if (active === "tracking") return "Rastreamento";
+  if (active.startsWith("crm-")) return "CRM";
+  if (active.startsWith("erp-")) return "ERP";
+  if (active === "ai-assistant") return "Assistente IA";
+  if (active === "whatsapp-config") return "WhatsApp";
+  if (active === "settings" || active === "admin-settings") return "Configurações";
+  if (active === "notifications") return "Notificações";
+  return "Home";
+}
+
 function Shell() {
   const { theme, toggleTheme } = useTheme();
   const [active, setActive] = useState<RouteId>(() => {
@@ -4641,6 +4655,7 @@ function Shell() {
   const [session, setSession] = useState<MegaDeskSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const sidebarRef = React.useRef<HTMLDivElement>(null);
   const sidebarTriggerRef = React.useRef<HTMLButtonElement>(null);
   const mainContentRef = React.useRef<HTMLElement>(null);
@@ -4714,6 +4729,7 @@ function Shell() {
     setActive(targetRoute);
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
+      setMobileDrawerOpen(false);
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     }
   }, []);
@@ -5069,18 +5085,61 @@ function Shell() {
 
       {/* Main Content */}
       <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", active.startsWith("erp-") && "bg-background text-foreground", active === "ai-assistant" && "bg-slate-950 text-slate-100")}>
+        {/* Mobile Topbar */}
+        <header
+          data-testid="mobile-topbar"
+          className="sticky top-0 z-40 flex h-14 w-full shrink-0 items-center justify-between border-b border-slate-800 bg-slate-950/95 px-4 text-white backdrop-blur md:hidden pt-[env(safe-area-inset-top)]"
+        >
+          {/* Canto Esquerdo: Botão Menu */}
+          <button
+            type="button"
+            data-testid="mobile-menu-trigger"
+            onClick={() => {
+              setSidebarOpen(true);
+              setMobileDrawerOpen(true);
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+            aria-label="Abrir menu de navegação"
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+
+          {/* Centro: Logo Compacto + Módulo Ativo */}
+          <div className="flex items-center gap-2 min-w-0">
+            <Zap className="h-5 w-5 text-blue-400 shrink-0" />
+            <span className="font-bold text-base tracking-tight whitespace-nowrap">MegaDesk</span>
+            <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-blue-300 border border-slate-700/60 truncate max-w-[120px]">
+              {getActiveModuleName(active)}
+            </span>
+          </div>
+
+          {/* Canto Direito: Avatar do Usuário */}
+          <button
+            type="button"
+            data-testid="mobile-user-avatar"
+            onClick={() => {
+              setSidebarOpen(true);
+              setMobileDrawerOpen(true);
+            }}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-tr from-purple-600 to-blue-500 text-xs font-bold text-white shadow-xs ring-2 ring-slate-800"
+            title={session.userName || session.userEmail}
+          >
+            {(session.userName || session.userEmail || "U").slice(0, 1).toUpperCase()}
+          </button>
+        </header>
+
         <ShellTopbarBoundary active={active} mode={shellLayout.moduleTopbar}>
             <ModuleTopbar
             ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : active.startsWith("crm-") ? "Módulos do CRM" : "Ações da página"}
             activeItemId={active.startsWith("erp-") ? erpSection : active.startsWith("crm-") ? crmSection : undefined}
             items={active.startsWith("erp-") ? erpTopbarItems : active.startsWith("crm-") ? crmTopbarItems : []}
-            leading={<button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
+            leading={<button ref={sidebarTriggerRef} type="button" onClick={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
             />
         </ShellTopbarBoundary>
 
         {/* Content */}
         <main ref={mainContentRef} tabIndex={-1} className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col",
+          "flex min-h-0 min-w-0 flex-1 flex-col pb-16 md:pb-0",
           active.startsWith("erp-")
             ? "overflow-y-auto bg-background p-4 text-foreground sm:p-8"
             : shellLayout.mainContentClassName,
@@ -5094,7 +5153,7 @@ function Shell() {
               setAttendanceIntent(current => consumeAttendanceLaunchIntent(current, launch));
             }}
           />}
-          {active === "tickets" && <TicketsPage onOpenMobileMenu={() => setSidebarOpen(true)} />}
+          {active === "tickets" && <TicketsPage onOpenMobileMenu={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} />}
           {active === "tracking" && <TrackingPage />}
            {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} />}
            {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
@@ -5107,6 +5166,166 @@ function Shell() {
           </ErrorBoundary>
         </main>
       </div>
+
+      {/* Mobile Drawer (Sheet) */}
+      {mobileDrawerOpen && (
+        <div
+          data-testid="mobile-drawer-overlay"
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs transition-opacity md:hidden"
+          onClick={() => setMobileDrawerOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        data-testid="mobile-drawer-sheet"
+        className={cn(
+          "fixed top-0 bottom-0 left-0 z-50 w-[280px] sm:w-[320px] max-w-[85vw] bg-slate-950 text-white border-r border-slate-800 shadow-2xl flex flex-col transition-transform duration-300 ease-out md:hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
+          mobileDrawerOpen ? "translate-x-0" : "-translate-x-full pointer-events-none"
+        )}
+        aria-label="Menu móvel lateral"
+        role="dialog"
+        aria-modal="true"
+      >
+        {/* Header do Drawer */}
+        <div className="p-4 flex items-center justify-between border-b border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <Zap className="w-6 h-6 text-blue-400 shrink-0" />
+            <div className="min-w-0">
+              <h2 className="font-bold text-lg leading-none">MegaDesk</h2>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate max-w-[180px]">
+                {session.company || "Operação Conectada"}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileDrawerOpen(false)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            aria-label="Fechar menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Lista completa de módulos */}
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+          {filteredNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive =
+              active === item.id ||
+              (item.id === "crm-summary" && active.startsWith("crm-")) ||
+              (item.id === "erp-summary" && active.startsWith("erp-"));
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setMobileDrawerOpen(false);
+                  navigateToRoute(item.id);
+                }}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-colors text-left",
+                  isActive
+                    ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold shadow-sm"
+                    : "text-slate-300 hover:text-white hover:bg-slate-800/60"
+                )}
+              >
+                <Icon className="w-5 h-5 shrink-0" />
+                <span className="flex-1 truncate">{item.label}</span>
+                {item.id === "conversations" && (
+                  <span
+                    className={cn(
+                      "w-2 h-2 rounded-full",
+                      whatsappConnected ? "bg-emerald-400" : "bg-red-500"
+                    )}
+                    title={whatsappConnected ? "WhatsApp Conectado" : "WhatsApp Desconectado"}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Rodapé do Drawer: Modo Escuro e Logout */}
+        <div className="p-3 border-t border-slate-800 space-y-1">
+          <button
+            type="button"
+            onClick={() => toggleTheme()}
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors"
+          >
+            {theme === "light" ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+            <span>{theme === "light" ? "Modo Escuro" : "Modo Claro"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              setMobileDrawerOpen(false);
+              try { await logoutMutation.mutateAsync(); } catch { return; }
+              localStorage.removeItem(MEGADESK_SESSION_KEY);
+              localStorage.removeItem(MEGADESK_ACTIVE_PAGE_KEY);
+              localStorage.removeItem("megadesk-session-token");
+              localStorage.removeItem("manus-runtime-user-info");
+              setSession(null);
+              window.location.replace("/");
+            }}
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm text-slate-300 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+            <span>Sair da Conta</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile Bottom Navigation */}
+      <nav
+        data-testid="mobile-bottom-navigation"
+        className="fixed bottom-0 left-0 right-0 h-16 bg-slate-950/95 border-t border-slate-800/80 flex items-center justify-around z-40 px-2 pb-[env(safe-area-inset-bottom)] md:hidden backdrop-blur"
+      >
+        {[
+          { id: "conversations" as RouteId, testId: "bottom-nav-conversations", label: "Atendimento", icon: MessageCircle, match: (r: string) => r === "conversations" || r === "active-attendance" },
+          { id: "tickets" as RouteId, testId: "bottom-nav-tickets", label: "Chamados", icon: ClipboardList, match: (r: string) => r === "tickets" },
+          { id: "crm-summary" as RouteId, testId: "bottom-nav-crm-summary", label: "CRM", icon: Users, match: (r: string) => r.startsWith("crm-") },
+          { id: "erp-summary" as RouteId, testId: "bottom-nav-erp-summary", label: "ERP", icon: PackageSearch, match: (r: string) => r.startsWith("erp-") },
+          { id: "ai-assistant" as RouteId, testId: "bottom-nav-ai-assistant", label: "IA Copilot", icon: Sparkles, match: (r: string) => r === "ai-assistant" },
+        ].map((item) => {
+          const isActive = item.match(active);
+          const Icon = item.icon;
+
+          return (
+            <button
+              key={item.id}
+              type="button"
+              data-testid={item.testId}
+              onClick={() => navigateToRoute(item.id)}
+              className={cn(
+                "flex flex-1 flex-col items-center justify-center py-1 px-1 transition-all relative rounded-lg",
+                isActive
+                  ? "text-blue-400 font-semibold"
+                  : "text-slate-400 hover:text-slate-200"
+              )}
+            >
+              <div className="relative">
+                <Icon className={cn("w-5 h-5 transition-transform", isActive && "scale-110")} />
+                {item.id === "conversations" && (
+                  <span
+                    className={cn(
+                      "absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-slate-950",
+                      whatsappConnected ? "bg-emerald-400" : "bg-red-500"
+                    )}
+                  />
+                )}
+              </div>
+              <span className="text-[10px] mt-1 tracking-tight leading-none truncate max-w-[64px]">
+                {item.label}
+              </span>
+              {isActive && (
+                <span className="absolute bottom-0 w-8 h-0.5 rounded-full bg-blue-500" />
+              )}
+            </button>
+          );
+        })}
+      </nav>
 
     </div>
   );

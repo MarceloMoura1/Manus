@@ -57,4 +57,27 @@ describe("authenticated shell workspace variants", () => {
       settingsPageLayout: "standalone",
     });
   });
+
+  it("includes mobile-first topbar, responsive drawer sheet and bottom navigation in Home source", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const homeSource = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
+
+    // Mobile Topbar
+    expect(homeSource).toContain('data-testid="mobile-topbar"');
+    expect(homeSource).toContain('data-testid="mobile-menu-trigger"');
+    expect(homeSource).toContain('data-testid="mobile-user-avatar"');
+
+    // Mobile Drawer Sheet
+    expect(homeSource).toContain('data-testid="mobile-drawer-sheet"');
+    expect(homeSource).toContain('data-testid="mobile-drawer-overlay"');
+
+    // Mobile Bottom Navigation with 5 shortcuts
+    expect(homeSource).toContain('data-testid="mobile-bottom-navigation"');
+    expect(homeSource).toContain('bottom-nav-conversations');
+    expect(homeSource).toContain('bottom-nav-tickets');
+    expect(homeSource).toContain('bottom-nav-crm-summary');
+    expect(homeSource).toContain('bottom-nav-erp-summary');
+    expect(homeSource).toContain('bottom-nav-ai-assistant');
+  });
 });

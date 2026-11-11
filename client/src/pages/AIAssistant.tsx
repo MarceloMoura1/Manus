@@ -29,6 +29,7 @@ import {
   TrendingUp,
   FileText,
   ChevronRight,
+  ChevronLeft,
   Bell,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
@@ -1248,8 +1249,14 @@ export function AIAssistant() {
       <aside
         data-testid="ai-threads-sidebar"
         className={`${
-          sidebarOpen ? "w-72 border-r" : "w-0 border-r-0"
-        } transition-all duration-200 h-full flex flex-col flex-shrink-0 overflow-hidden ${currentTheme.sidebarBg} ${currentTheme.sidebarBorder}`}
+          sidebarOpen ? "w-full md:w-72 md:border-r" : "w-0 border-r-0"
+        } ${
+          activeTab === "chat" && selectedThreadId
+            ? "hidden md:flex"
+            : activeTab !== "chat"
+            ? "hidden md:flex"
+            : "flex"
+        } transition-all duration-200 h-full flex-col flex-shrink-0 overflow-hidden ${currentTheme.sidebarBg} ${currentTheme.sidebarBorder}`}
       >
         {/* Botão de destaque no topo: Nova Conversa */}
         <div className={`p-4 border-b ${currentTheme.sidebarBorder}`}>
@@ -1377,22 +1384,39 @@ export function AIAssistant() {
       </aside>
 
       {/* ─── COLUNA PRINCIPAL: TABS & CONTEÚDO ───────────────────────────────── */}
-      <div className={`h-full flex-1 flex flex-col min-w-0 overflow-hidden ${currentTheme.chatBg} text-slate-100`}>
+      <div
+        className={`h-full flex-1 flex-col min-w-0 overflow-hidden ${currentTheme.chatBg} text-slate-100 ${
+          activeTab === "chat" && !selectedThreadId ? "hidden md:flex" : "flex"
+        }`}
+      >
         {/* Cabeçalho Unificado com Abas Estilo Typebot */}
-        <header className={`flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b ${currentTheme.headerBg} ${currentTheme.headerBorder}`}>
-          <div className="flex items-center gap-3 min-w-0">
+        <header className={`flex flex-wrap items-center justify-between gap-3 px-3 sm:px-5 py-2.5 sm:py-3 border-b ${currentTheme.headerBg} ${currentTheme.headerBorder}`}>
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {selectedThreadId && (
+              <button
+                type="button"
+                data-testid="mobile-back-to-threads"
+                onClick={() => setSelectedThreadId(null)}
+                className="md:hidden flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-800 bg-slate-900/90 text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Voltar para lista de conversas"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Conversas</span>
+              </button>
+            )}
+
             <button
               type="button"
               data-testid="toggle-threads-sidebar"
               onClick={() => setSidebarOpen((prev) => !prev)}
               title={sidebarOpen ? "Recolher barra lateral" : "Abrir barra lateral"}
-              className="p-2 rounded-xl border border-slate-800 bg-slate-900/80 text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+              className="hidden md:flex p-2 rounded-xl border border-slate-800 bg-slate-900/80 text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <PanelLeft className="w-4 h-4" />
             </button>
 
-            <div className={`w-9 h-9 rounded-xl ${currentTheme.accentBg}/15 flex items-center justify-center flex-shrink-0`}>
-              <Sparkles className={`w-5 h-5 ${currentTheme.accentText}`} />
+            <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl ${currentTheme.accentBg}/15 flex items-center justify-center flex-shrink-0`}>
+              <Sparkles className={`w-4 h-4 sm:w-5 sm:h-5 ${currentTheme.accentText}`} />
             </div>
 
             <div className="min-w-0">
@@ -1456,7 +1480,7 @@ export function AIAssistant() {
           {/* Abas Superiores no Estilo Typebot */}
           <nav
             data-testid="assistant-tabs"
-            className="flex items-center gap-1 bg-slate-950/70 p-1 rounded-xl border border-slate-800/80"
+            className="flex items-center gap-1 bg-slate-950/70 p-1 rounded-xl border border-slate-800/80 overflow-x-auto no-scrollbar whitespace-nowrap max-w-full"
           >
             <button
               type="button"
@@ -1522,7 +1546,7 @@ export function AIAssistant() {
             {/* Timeline de Mensagens */}
             <div
               data-testid="ai-messages-timeline"
-              className={`flex-1 overflow-y-auto px-6 py-6 space-y-5 ${currentTheme.chatBg} text-slate-100`}
+              className={`flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5 ${currentTheme.chatBg} text-slate-100`}
             >
               {localMessages.length === 0 && !isSendingText && !isProcessingAudio ? (
                 <div className="flex flex-col items-center justify-center h-full max-w-xl mx-auto text-center py-10 gap-6">
@@ -1684,7 +1708,7 @@ export function AIAssistant() {
             </div>
 
             {/* Barra de Composição Inferior (Texto + Microfone) */}
-            <div className={`px-6 py-4 border-t ${currentTheme.composerBg} ${currentTheme.composerBorder}`}>
+            <div className={`sticky bottom-0 z-10 px-3 sm:px-6 py-2.5 sm:py-4 border-t ${currentTheme.composerBg} ${currentTheme.composerBorder}`}>
               {recordingError && (
                 <div className="mb-3 px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-800/80 text-xs text-rose-300 flex items-center justify-between">
                   <span>{recordingError}</span>
