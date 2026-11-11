@@ -180,7 +180,7 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
     expect(aiAssistantSource).toContain("trpc.assistantRoutines.runRoutineNow.useMutation");
   });
 
-  it("supports mobile-first responsive layout with back button, scrollable tabs and sticky composer", () => {
+  it("supports mobile-first responsive layout with back button, scrollable tabs and fixed bottom composer", () => {
     // Mobile back button to threads list
     expect(aiAssistantSource).toContain('data-testid="mobile-back-to-threads"');
     expect(aiAssistantSource).toContain("setSelectedThreadId(null)");
@@ -188,7 +188,8 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
     // Horizontally scrollable tabs
     expect(aiAssistantSource).toContain("overflow-x-auto no-scrollbar whitespace-nowrap");
 
-    // Sticky composer pinned above viewport
-    expect(aiAssistantSource).toContain("sticky bottom-0 z-10");
+    // Persistent composer pinned above viewport without getting clipped by overflow
+    expect(aiAssistantSource).toContain('data-testid="ai-composer-container"');
+    expect(aiAssistantSource).toContain("flex-shrink-0 z-20 w-full");
   });
 });

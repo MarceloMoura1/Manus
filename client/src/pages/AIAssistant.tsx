@@ -1546,7 +1546,7 @@ export function AIAssistant() {
             {/* Timeline de Mensagens */}
             <div
               data-testid="ai-messages-timeline"
-              className={`flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5 ${currentTheme.chatBg} text-slate-100`}
+              className={`flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5 ${currentTheme.chatBg} text-slate-100`}
             >
               {localMessages.length === 0 && !isSendingText && !isProcessingAudio ? (
                 <div className="flex flex-col items-center justify-center h-full max-w-xl mx-auto text-center py-10 gap-6">
@@ -1708,7 +1708,10 @@ export function AIAssistant() {
             </div>
 
             {/* Barra de Composição Inferior (Texto + Microfone) */}
-            <div className={`sticky bottom-0 z-10 px-3 sm:px-6 py-2.5 sm:py-4 border-t ${currentTheme.composerBg} ${currentTheme.composerBorder}`}>
+            <div
+              data-testid="ai-composer-container"
+              className={`flex-shrink-0 z-20 w-full px-3 sm:px-6 py-2 sm:py-3 border-t ${currentTheme.composerBg} ${currentTheme.composerBorder}`}
+            >
               {recordingError && (
                 <div className="mb-3 px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-800/80 text-xs text-rose-300 flex items-center justify-between">
                   <span>{recordingError}</span>
@@ -1726,30 +1729,30 @@ export function AIAssistant() {
                 /* Estado Visual de Gravação de Áudio */
                 <div
                   data-testid="audio-recording-bar"
-                  className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-rose-950/60 border border-rose-800/80"
+                  className="flex items-center justify-between gap-3 sm:gap-4 px-3 sm:px-4 py-2 sm:py-3 rounded-xl bg-rose-950/60 border border-rose-800/80"
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="relative flex h-3.5 w-3.5">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <span className="relative flex h-3.5 w-3.5 shrink-0">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500" />
                     </span>
-                    <span className="text-sm font-semibold text-rose-200">
+                    <span className="text-xs sm:text-sm font-semibold text-rose-200 truncate">
                       Gravando comando de voz...
                     </span>
                     <span
                       data-testid="recording-timer"
-                      className="font-mono text-sm font-bold text-rose-300 bg-slate-900 px-2.5 py-0.5 rounded-md border border-rose-800"
+                      className="font-mono text-xs sm:text-sm font-bold text-rose-300 bg-slate-900 px-2 py-0.5 rounded-md border border-rose-800 shrink-0"
                     >
                       {formatRecordingDuration(recordingSeconds)}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                     <button
                       type="button"
                       data-testid="cancel-audio-recording"
                       onClick={cancelAudioRecording}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer"
+                      className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-slate-700 bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                       <span>Cancelar</span>
@@ -1758,15 +1761,15 @@ export function AIAssistant() {
                       type="button"
                       data-testid="send-audio-recording"
                       onClick={finishAndSendAudioRecording}
-                      className={`flex items-center gap-1.5 px-4 py-2 rounded-lg ${currentTheme.accentBg} ${currentTheme.accentHoverBg} text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer`}
+                      className={`flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg ${currentTheme.accentBg} ${currentTheme.accentHoverBg} text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer`}
                     >
                       <Send className="w-3.5 h-3.5" />
-                      <span>Enviar Áudio</span>
+                      <span>Enviar</span>
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="flex items-end gap-3">
+                <div className="flex items-end gap-2 sm:gap-3">
                   {/* Textarea com auto-expansão e scrollbar vertical SOMENTE além de 2 linhas */}
                   <textarea
                     ref={textareaRef}
@@ -1777,7 +1780,7 @@ export function AIAssistant() {
                     placeholder="Digite sua mensagem ou clique no microfone para falar... (Enter envia, Shift+Enter quebra linha)"
                     rows={1}
                     disabled={isSendingText || isProcessingAudio}
-                    className={`flex-1 resize-none rounded-xl border px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all ${
+                    className={`flex-1 resize-none rounded-xl border px-3 sm:px-4 py-2 sm:py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all ${
                       composerHasScroll ? "overflow-y-auto" : "overflow-hidden"
                     } ${currentTheme.composerInputBg} ${currentTheme.composerInputBorder}`}
                     style={{ maxHeight: "76px" }}
@@ -1790,9 +1793,9 @@ export function AIAssistant() {
                     onClick={() => void startAudioRecording()}
                     disabled={isSendingText || isProcessingAudio}
                     title="Gravar comando de voz (Microfone)"
-                    className="w-11 h-11 rounded-xl border border-slate-800 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-500/50 hover:text-rose-400 text-slate-300 flex items-center justify-center transition-all flex-shrink-0 cursor-pointer disabled:opacity-50"
+                    className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl border border-slate-800 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-500/50 hover:text-rose-400 text-slate-300 flex items-center justify-center transition-all flex-shrink-0 cursor-pointer disabled:opacity-50"
                   >
-                    <Mic className="w-5 h-5" />
+                    <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
                   </button>
 
                   {/* Botão de Envio de Texto */}
@@ -1802,7 +1805,7 @@ export function AIAssistant() {
                     onClick={() => void handleSendText()}
                     disabled={!input.trim() || isSendingText || isProcessingAudio}
                     title="Enviar mensagem"
-                    className={`w-11 h-11 rounded-xl ${currentTheme.accentBg} ${currentTheme.accentHoverBg} disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-all flex-shrink-0 cursor-pointer`}
+                    className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl ${currentTheme.accentBg} ${currentTheme.accentHoverBg} disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-all flex-shrink-0 cursor-pointer`}
                   >
                     {isSendingText ? (
                       <Loader2 className="w-4 h-4 animate-spin" />

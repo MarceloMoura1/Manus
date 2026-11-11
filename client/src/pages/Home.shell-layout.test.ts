@@ -79,5 +79,9 @@ describe("authenticated shell workspace variants", () => {
     expect(homeSource).toContain('bottom-nav-crm-summary');
     expect(homeSource).toContain('bottom-nav-erp-summary');
     expect(homeSource).toContain('bottom-nav-ai-assistant');
+
+    // Mobile back button in conversation timeline
+    expect(homeSource).toContain('data-testid="mobile-back-to-conversations"');
+    expect(homeSource).toContain("setSelectedConversation(null)");
   });
 });

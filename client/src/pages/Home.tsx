@@ -97,6 +97,7 @@ import {
   Smartphone,
   Tag,
   ChevronDown,
+  ChevronLeft,
   ChevronUp,
   Calendar,
   Filter,
@@ -215,7 +216,7 @@ export function getShellWorkspaceLayout(active: RouteId) {
   if (active === "ai-assistant") {
     return {
       moduleTopbar: "none" as const,
-      mainContentClassName: "h-full w-full overflow-hidden p-0",
+      mainContentClassName: "h-full w-full overflow-hidden pb-16 md:pb-0",
       settingsPageLayout: "standalone" as const,
     };
   }
@@ -1462,11 +1463,11 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
   const getAvatarColor = (id: string) => avatarColors[id?.charCodeAt(0) % avatarColors.length] || 'bg-slate-500';
 
   return (
-      <div data-testid="attendance-workspace" data-theme={theme} className="group relative flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white data-[theme=dark]:border-slate-800 data-[theme=dark]:bg-slate-950 data-[theme=dark]:shadow-black/30 min-[900px]:rounded-2xl min-[900px]:border min-[900px]:border-slate-200 min-[900px]:shadow-xl">
+      <div data-testid="attendance-workspace" data-theme={theme} className="group relative flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white data-[theme=dark]:border-slate-800 data-[theme=dark]:bg-slate-950 data-[theme=dark]:shadow-black/30 md:rounded-2xl md:border md:border-slate-200 md:shadow-xl">
 
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
       <div className={cn(
-        'min-h-0 min-w-0 w-full max-w-full flex-col bg-slate-50 group-data-[theme=dark]:bg-slate-900 min-[900px]:flex min-[900px]:w-[420px] min-[900px]:flex-shrink-0 min-[900px]:border-r min-[900px]:border-slate-100 group-data-[theme=dark]:min-[900px]:border-slate-800',
+        'min-h-0 min-w-0 w-full max-w-full flex-col bg-slate-50 group-data-[theme=dark]:bg-slate-900 md:flex md:w-[380px] lg:w-[420px] md:flex-shrink-0 md:border-r md:border-slate-100 group-data-[theme=dark]:md:border-slate-800',
         selectedConv || newAttendanceOpen || crmHandoffState === 'composer' ? 'hidden' : 'flex',
       )} data-testid="conversation-list-panel">
 
@@ -1690,7 +1691,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
 
       {/* ─── Coluna Direita: Chat ─── */}
       <div className={cn(
-        'min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden min-[900px]:flex min-[900px]:w-auto min-[900px]:flex-1',
+        'min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden md:flex md:w-auto md:flex-1',
         selectedConv || newAttendanceOpen || crmHandoffState === 'composer' ? 'flex' : 'hidden',
       )} data-testid="conversation-chat-panel">
         {crmHandoffState === 'composer' && crmIntent && crmCustomerQuery.data?.client ? (
@@ -1739,15 +1740,18 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
             {/* Header do Chat */}
             <div data-testid="active-conversation-header" className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:px-4 md:px-6 md:py-3 group-data-[theme=dark]:border-slate-800 group-data-[theme=dark]:bg-slate-900">
               <div className="flex min-w-0 items-center gap-2 md:gap-3">
-                <button
-                  type="button"
-                  onClick={returnToConversationList}
-                  aria-label="Voltar para conversas"
-                  className="flex h-11 flex-shrink-0 items-center gap-1 rounded-xl px-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group-data-[theme=dark]:text-blue-300 group-data-[theme=dark]:hover:bg-blue-500/20 min-[900px]:hidden"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedConversation(null);
+                    returnToConversationList();
+                  }}
+                  data-testid="mobile-back-to-conversations"
+                  className="md:hidden flex items-center gap-1 text-xs"
                 >
-                  <ArrowLeft className="h-5 w-5" />
-                  <span>Voltar</span>
-                </button>
+                  <ChevronLeft className="h-4 w-4" /> Atendimentos
+                </Button>
                 <div className={cn('hidden h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold text-white sm:flex', getAvatarColor(selectedConv.id))}>
                   {getInitials(selectedConv.name)}
                 </div>
