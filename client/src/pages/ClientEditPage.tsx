@@ -686,7 +686,7 @@ function GeminiTokenUsagePanel({ clientId }: { clientId: string }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <TrendingUp className="h-5 w-5 text-purple-400" />
-          <h4 className="text-sm font-semibold text-white">Uso de Tokens Gemini</h4>
+          <h4 className="text-sm font-semibold text-white">Uso de Tokens de IA</h4>
           <span className="rounded-full bg-purple-400/10 border border-purple-400/20 px-2 py-0.5 text-xs text-purple-300">Controle financeiro</span>
         </div>
         <button onClick={() => refetch()} className="text-slate-400 hover:text-white transition">
@@ -773,7 +773,7 @@ function GeminiTokenUsagePanel({ clientId }: { clientId: string }) {
             <div>
               <div className="text-xs text-slate-400">Custo total estimado ({periods.find(p => p.key === period)?.label})</div>
               <div className="text-lg font-bold text-emerald-300 mt-0.5">R$ {data.estimatedCostBRL.toFixed(2)}</div>
-              <div className="text-xs text-slate-500">${data.estimatedCostUSD.toFixed(4)} USD · Gemini 1.5 Flash</div>
+              <div className="text-xs text-slate-500">${data.estimatedCostUSD.toFixed(4)} USD · Modelo IA</div>
             </div>
             <div className="text-right">
               <div className="text-xs text-slate-400">{data.totalConversations} conversas</div>
@@ -897,7 +897,7 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-purple-400" />
-            <h4 className="text-sm font-semibold text-white">Gemini IA</h4>
+            <h4 className="text-sm font-semibold text-white">Inteligência Artificial (IA)</h4>
           </div>
           <TestBadge type="gemini" />
         </div>

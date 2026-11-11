@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { MessageSquare, Check, AlertCircle, Loader2, Eye, EyeOff, Upload, Building2, Lock, Wifi, WifiOff } from "lucide-react";
+import { MessageSquare, Check, AlertCircle, Loader2, Eye, EyeOff, Upload, Building2, Lock, Wifi, WifiOff, Sparkles } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
+import { AITokenUsagePage } from "./AITokenUsagePage";
 
 interface AdminSettingsPageProps {
   clientId: string;
@@ -154,7 +155,7 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
         </div>
 
         <Tabs defaultValue="whatsapp" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 bg-white border border-slate-200">
+          <TabsList className="grid w-full grid-cols-3 bg-white border border-slate-200">
             <TabsTrigger value="whatsapp" className="flex items-center gap-2">
               <MessageSquare className="w-4 h-4" />
               WhatsApp
@@ -162,6 +163,10 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
             <TabsTrigger value="geral" className="flex items-center gap-2">
               <Building2 className="w-4 h-4" />
               Geral
+            </TabsTrigger>
+            <TabsTrigger value="ai-tokens" className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4" />
+              Consumo de IA
             </TabsTrigger>
           </TabsList>
 
@@ -644,6 +649,13 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Aba Consumo de IA */}
+          <TabsContent value="ai-tokens" className="space-y-6">
+            <div className="rounded-xl overflow-hidden border border-slate-800 h-[700px]">
+              <AITokenUsagePage />
+            </div>
           </TabsContent>
         </Tabs>
       </div>

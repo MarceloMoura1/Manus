@@ -4,6 +4,7 @@ import { generateText, isStepCount } from "ai";
 import { router, isolatedProcedure } from "../../_core/trpc";
 import { createHermesTools } from "../../hermes-tools";
 import { getClientGeminiToken } from "../../gemini-client";
+import { recordAiUsageLog } from "../ai-usage/ai-usage.service";
 import {
   createThreadSchema,
   deleteThreadSchema,
@@ -277,6 +278,14 @@ Você tem acesso a ferramentas operacionais para consultar chamados, vendas, dad
             stopWhen: isStepCount(5),
           });
 
+          void recordAiUsageLog({
+            tenantId,
+            userId,
+            featureSource: "assistant_chat",
+            conversationId: input.threadId,
+            usage: aiResult.usage,
+          });
+
           const toolMetadata = extractToolMetadata(aiResult);
           const pendingReq = toolMetadata?.pendingActionRequest as any;
 
@@ -422,6 +431,14 @@ Execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, c
             messages: multimodalMessages,
             tools: tenantTools,
             stopWhen: isStepCount(5),
+          });
+
+          void recordAiUsageLog({
+            tenantId,
+            userId,
+            featureSource: "assistant_chat",
+            conversationId: input.threadId,
+            usage: aiResult.usage,
           });
 
           let rawText = aiResult.text?.trim() || "";

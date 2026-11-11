@@ -54,7 +54,7 @@ const ACTION_LABELS: Record<string, { label: string; icon: string }> = {
   assign_owner: { label: "Atribuir Responsável", icon: "👤" },
   add_tag: { label: "Adicionar Tag", icon: "🏷️" },
   send_whatsapp: { label: "Preparar Envio WhatsApp", icon: "💬" },
-  ai_qualify: { label: "Qualificar com IA (Gemini)", icon: "✨" },
+  ai_qualify: { label: "Qualificar com IA", icon: "✨" },
   call_webhook: { label: "Chamar Webhook Externo", icon: "🌐" },
 };
 
@@ -182,7 +182,7 @@ export function AutomationsPage() {
 
   const updateAiMutation = trpc.crm.automations.updateAiSettings.useMutation({
     onSuccess: () => {
-      toast.success("Configurações do Gemini salvas!");
+      toast.success("Configurações de IA salvas!");
       utils.crm.automations.getAiSettings.invalidate();
     },
   });
@@ -266,7 +266,7 @@ export function AutomationsPage() {
           <div className="flex items-center gap-2">
             <Zap className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-              Automações Comerciais & IA (Gemini)
+              Automações Comerciais & IA
             </h1>
           </div>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
@@ -333,7 +333,7 @@ export function AutomationsPage() {
               : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
           }`}
         >
-          <Sparkles className="w-4 h-4" /> Copiloto IA (Gemini)
+          <Sparkles className="w-4 h-4" /> Copiloto IA
         </button>
       </div>
 
@@ -634,11 +634,11 @@ export function AutomationsPage() {
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-indigo-600" />
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                  Copiloto Comercial Inteligente (Google Gemini)
+                  Copiloto Comercial Inteligente
                 </h3>
               </div>
               <Badge variant="outline" className="text-indigo-600 border-indigo-200">
-                Modelo Ativo: {aiSettings?.modelName || "gemini-1.5-flash"}
+                Modelo Ativo: IA Corporativa
               </Badge>
             </div>
 
@@ -717,7 +717,7 @@ export function AutomationsPage() {
             {aiTestResult && (
               <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 text-xs whitespace-pre-wrap leading-relaxed shadow-sm">
                 <span className="font-bold text-indigo-700 dark:text-indigo-400 block mb-2">
-                  Recomendação do Copiloto Gemini:
+                  Recomendação do Copiloto IA:
                 </span>
                 {aiTestResult}
               </div>

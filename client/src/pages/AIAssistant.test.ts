@@ -104,7 +104,7 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
     expect(aiAssistantSource).toContain('data-testid="start-audio-recording"');
     expect(aiAssistantSource).toContain('data-testid="cancel-audio-recording"');
     expect(aiAssistantSource).toContain('data-testid="send-audio-recording"');
-    expect(aiAssistantSource).toContain("Processando áudio no Gemini Multimodal...");
+    expect(aiAssistantSource).toContain("Processando áudio multimodal...");
   });
 
   it("renders Markdown with AssistantMarkdown and interactive HITL approval cards", () => {

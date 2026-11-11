@@ -401,7 +401,7 @@ function AccessDeniedScreen({ onLogout }: { onLogout: () => void }) {
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   { key: "dashboard" as Section, label: "Dashboard", icon: LayoutDashboard },
-  { key: "hermes" as Section, label: "Escritório do Hermes", icon: Bot },
+  { key: "hermes" as Section, label: "Escritório do Assistente", icon: Bot },
   { key: "clients" as Section, label: "Clientes", icon: Building2 },
   { key: "users" as Section, label: "Usuários", icon: Users },
   { key: "admins" as Section, label: "Administradores", icon: ShieldCheck },
@@ -1220,7 +1220,7 @@ export default function AdminPanel() {
                           <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">Cadastrados</th>
                           <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">Ativos</th>
                           <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">Status</th>
-                          <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">IA Gemini</th>
+                          <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">IA</th>
                           <th className="px-4 py-3 text-right text-xs text-slate-400 font-medium">Ação</th>
                         </tr>
                       </thead>

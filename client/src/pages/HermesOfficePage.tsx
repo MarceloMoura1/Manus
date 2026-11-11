@@ -334,7 +334,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
       if (context?.previousData) {
         utils.admin.hermes.getHistory.setData(undefined, context.previousData);
       }
-      toast.error(err.message || "Falha ao enviar mensagem para o Hermes.");
+      toast.error(err.message || "Falha ao enviar mensagem para o Assistente.");
     },
   });
 
@@ -347,7 +347,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
       });
     },
     onError(err) {
-      toast.error(err.message || "Erro ao limpar histórico do Hermes.");
+      toast.error(err.message || "Erro ao limpar histórico do Assistente.");
     },
   });
 
@@ -390,7 +390,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
   const handleClearHistory = () => {
     if (
       confirm(
-        "Deseja realmente limpar toda a sua conversa com o Hermes? Esta ação afeta apenas a sua sessão privada de administrador."
+        "Deseja realmente limpar toda a sua conversa com o Assistente? Esta ação afeta apenas a sua sessão privada de administrador."
       )
     ) {
       clearHistoryMutation.mutate();
@@ -414,7 +414,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-                  Escritório do Hermes
+                  Escritório do Assistente
                 </h1>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-0.5 text-xs font-semibold text-emerald-300">
                   <Sparkles className="h-3 w-3" /> Central de Inteligência & Operações
@@ -474,7 +474,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
             </div>
             <div className="flex items-center gap-2 text-xs font-medium text-emerald-300 bg-emerald-400/10 border border-emerald-400/20 px-3 py-1 rounded-full">
               <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
-              Hermes Online
+              Assistente Online
             </div>
           </div>
 
@@ -483,7 +483,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
             {historyQuery.isLoading && (
               <div className="flex flex-col items-center justify-center h-48 gap-3 text-slate-400 text-sm">
                 <RefreshCw className="h-6 w-6 animate-spin text-emerald-400" />
-                Carregando histórico privado do Hermes...
+                Carregando histórico privado do Assistente...
               </div>
             )}
 
@@ -496,7 +496,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
                   Pronto para as ordens, {adminUser.name || "Sócio"}.
                 </h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                  Este é o seu canal direto e particular com o Hermes. As mensagens registradas aqui pertencem
+                  Este é o seu canal direto e particular com o Assistente. As mensagens registradas aqui pertencem
                   exclusivamente à sua conta de administrador. Escolha uma ação rápida abaixo ou instrua o assistente.
                 </p>
               </div>
@@ -510,7 +510,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
                   className={cn("flex flex-col", isUser ? "items-end" : "items-start")}
                 >
                   <div className="flex items-center gap-2 mb-1.5 px-1 text-xs text-slate-500 font-medium">
-                    <span>{isUser ? "Você" : "Hermes"}</span>
+                    <span>{isUser ? "Você" : "Assistente"}</span>
                     <span>•</span>
                     <span>
                       {new Date(msg.createdAt).toLocaleTimeString([], {
@@ -536,9 +536,9 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
 
                     {!isUser && Boolean(msg.metadataJson?.source) && (
                       <div className="mt-4 pt-2.5 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-500 font-mono">
-                        <span>Modelo: {String(msg.metadataJson?.model || "Hermes Core")}</span>
+                        <span>Modelo: {String(msg.metadataJson?.model || "Assistente IA")}</span>
                         <span className="flex items-center gap-1">
-                          {msg.metadataJson?.source === "gemini_api" ? "⚡ Gemini Live" : "🛡️ Local Standby"}
+                          {msg.metadataJson?.source === "gemini_api" ? "⚡ IA ao Vivo" : "🛡️ Local Standby"}
                         </span>
                       </div>
                     )}
@@ -550,7 +550,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
             {sendMessageMutation.isPending && (
               <div className="flex flex-col items-start transition-all duration-300 animate-in fade-in slide-in-from-bottom-2">
                 <div className="flex items-center gap-2 mb-1.5 px-1 text-xs text-slate-500 font-medium">
-                  <span className="text-emerald-400">Hermes</span>
+                  <span className="text-emerald-400">Assistente</span>
                   <span>•</span>
                   <span className="text-slate-400">Digitando</span>
                 </div>
@@ -561,7 +561,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
                     <span className="h-2 w-2 rounded-full bg-emerald-400 animate-bounce" />
                   </div>
                   <span className="text-xs sm:text-sm text-emerald-300/90 font-medium tracking-wide">
-                    Hermes está analisando e sintetizando sua resposta...
+                    O Assistente está analisando e sintetizando sua resposta...
                   </span>
                 </div>
               </div>
@@ -604,7 +604,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
                     handleSend();
                   }
                 }}
-                placeholder="Instrua o Hermes ou faça uma pergunta sobre a plataforma (Shift+Enter para nova linha)..."
+                placeholder="Instrua o Assistente ou faça uma pergunta sobre a plataforma (Shift+Enter para nova linha)..."
                 className="flex-1 bg-transparent px-3 py-2 text-sm sm:text-base text-white placeholder-slate-500 outline-none resize-none min-h-[72px] sm:min-h-[84px] max-h-[220px]"
               />
               <div className="flex flex-col items-center gap-1.5 pb-0.5">
@@ -718,7 +718,7 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
               </div>
               <div>
                 <h3 className="text-sm sm:text-base font-semibold text-white">Caixa de Habilidades</h3>
-                <span className="text-[11px] sm:text-xs text-slate-400">Atribuições operacionais do Hermes</span>
+                <span className="text-[11px] sm:text-xs text-slate-400">Atribuições operacionais do Assistente</span>
               </div>
             </div>
 

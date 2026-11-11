@@ -110,8 +110,8 @@ export function CrmSummaryPage({ onNavigate }: CrmSummaryPageProps) {
       tag: "Operacional",
     },
     {
-      title: "Automações & IA (Gemini)",
-      description: "Gatilhos por mudança de estágio, captura via webhooks e assistência inteligente do Gemini.",
+      title: "Automações & IA",
+      description: "Gatilhos por mudança de estágio, captura via webhooks e assistência inteligente com IA.",
       section: "automations" as CrmSection,
       icon: Sparkles,
       tag: "Operacional",

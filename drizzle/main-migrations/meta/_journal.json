@@ -339,6 +339,13 @@
       "when": 1794355560441,
       "tag": "0047_wakeful_brother_voodoo",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "5",
+      "when": 1794409955686,
+      "tag": "0048_awesome_inhumans",
+      "breakpoints": true
     }
   ]
 }

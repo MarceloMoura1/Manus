@@ -49,6 +49,7 @@ import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whats
 import { classifyAssistantFailure } from "./assistant-error";
 import { hermesRouter } from "./modules/admin/hermes";
 import { assistantThreadsRouter, assistantRoutinesRouter } from "./modules/assistant";
+import { aiUsageRouter } from "./modules/ai-usage/ai-usage.router";
 import { botTrpcRouter } from "./modules/bot/bot.router";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
 import { executeHermesCrmAction } from "./hermes-crm-actions";
@@ -558,6 +559,7 @@ export const appRouter = router({
   bot: botTrpcRouter,
   assistantThreads: assistantThreadsRouter,
   assistantRoutines: assistantRoutinesRouter,
+  aiUsage: aiUsageRouter,
   admin: router({
     hermes: hermesRouter,
   }),

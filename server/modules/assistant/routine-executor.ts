@@ -7,6 +7,7 @@ import {
 } from "./assistant-threads.router";
 import { AssistantThreadsRepository, assistantThreadsRepository } from "./repository";
 import { AssistantRoutinesRepository, assistantRoutinesRepository } from "./routines-repository";
+import { recordAiUsageLog } from "../ai-usage/ai-usage.service";
 import type { MegadeskAiRoutine } from "../../../drizzle/schema";
 
 export interface ExecuteRoutineOptions {
@@ -78,6 +79,14 @@ Não gere mensagens de confirmação de aprovação nem faça perguntas ao usuá
         prompt: promptText,
         tools: tenantTools,
         stopWhen: isStepCount(6),
+      });
+
+      void recordAiUsageLog({
+        tenantId: routine.tenantId,
+        userId: routine.userId,
+        featureSource: "automation",
+        conversationId: routine.id,
+        usage: aiResult.usage,
       });
 
       outputSummary =

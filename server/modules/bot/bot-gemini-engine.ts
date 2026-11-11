@@ -17,6 +17,7 @@ import { z } from "zod";
 import { getPool } from "../../db";
 import { queryErpProducts, queryTicketsByPhone, saveLead } from "./bot.router";
 import { checkBotEligibility, deliverBotMessage, transferConversationToHuman } from "./bot-runtime";
+import { recordAiUsageLog } from "../ai-usage/ai-usage.service";
 
 export interface ProcessBotMessageInput {
   tenantId: string;
@@ -258,6 +259,13 @@ Diretrizes obrigatórias de comportamento:
       messages: historyMessages,
       tools,
       stopWhen: isStepCount(5),
+    });
+
+    void recordAiUsageLog({
+      tenantId,
+      featureSource: "whatsapp_bot",
+      conversationId,
+      usage: aiResult.usage,
     });
 
     let replyText = (aiResult.text || "").trim();

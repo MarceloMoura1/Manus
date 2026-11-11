@@ -13,6 +13,7 @@ import {
   resolveGeminiApiKey,
   stripAudioDataUrlPrefix,
 } from "../modules/assistant/assistant-threads.router";
+import { recordAiUsageLog } from "../modules/ai-usage/ai-usage.service";
 
 export const DAILY_OPERATIONS_THREAD_TITLE = "Operações do Dia";
 
@@ -187,6 +188,14 @@ Execute imediatamente as ferramentas necessárias do tenant (consultar CRM, vend
       messages: promptMessages,
       tools: tenantTools,
       stopWhen: isStepCount(5),
+    });
+
+    void recordAiUsageLog({
+      tenantId,
+      userId,
+      featureSource: "voice_shortcut",
+      conversationId: dailyThread.id,
+      usage: aiResult.usage,
     });
 
     const toolMetadata = extractToolMetadata(aiResult);

@@ -1697,7 +1697,7 @@ export function AIAssistant() {
                   <div className="rounded-2xl px-4 py-3 text-sm bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-sm shadow-xs flex items-center gap-2.5">
                     <span className="font-medium">
                       {isProcessingAudio
-                        ? "Processando áudio no Gemini Multimodal..."
+                        ? "Processando áudio multimodal..."
                         : "Digitando resposta..."}
                     </span>
                   </div>
@@ -2282,7 +2282,7 @@ export function AIAssistant() {
                 <label className="flex items-center justify-between gap-4 cursor-pointer text-xs text-slate-300">
                   <div>
                     <span className="font-medium text-slate-100 block">Auto-Transcrição em Tempo Real</span>
-                    <span className="text-slate-400 text-[11px]">Grava o texto transcrito pelo Gemini diretamente no histórico da mensagem.</span>
+                    <span className="text-slate-400 text-[11px]">Grava o texto transcrito pela IA diretamente no histórico da mensagem.</span>
                   </div>
                   <input
                     type="checkbox"
@@ -2372,14 +2372,14 @@ export function AIAssistant() {
                     <label className="text-xs font-semibold text-slate-300">
                       Instrução para a Inteligência Artificial
                     </label>
-                    <span className="text-[11px] text-slate-500">Gemini 3.5 Flash Lite</span>
+                    <span className="text-[11px] text-slate-500">Modelo IA Multimodal</span>
                   </div>
                   <textarea
                     rows={4}
                     required
                     value={routineForm.promptInstruction}
                     onChange={(e) => setRoutineForm((prev) => ({ ...prev, promptInstruction: e.target.value }))}
-                    placeholder="Descreva exatamente o que o Gemini deve analisar e produzir..."
+                    placeholder="Descreva exatamente o que a IA deve analisar e produzir..."
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
                   />
                 </div>

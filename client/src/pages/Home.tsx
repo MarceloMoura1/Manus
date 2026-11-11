@@ -12,6 +12,7 @@ import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
 import { AIAssistant } from "./AIAssistant";
+import { AITokenUsagePage } from "./AITokenUsagePage";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
 import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorkspace";
 import { Users } from "lucide-react";
@@ -69,6 +70,7 @@ import {
   Clock,
   ClipboardList,
   Cog,
+  Cpu,
   Eye,
   EyeOff,
   Home as HomeIcon,
@@ -202,7 +204,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-services" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "crm-summary" | "crm-pipeline" | "crm-leads" | "crm-clients" | "crm-activities" | "crm-proposals" | "crm-automations" | "crm-reports" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
+export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-services" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "crm-summary" | "crm-pipeline" | "crm-leads" | "crm-clients" | "crm-activities" | "crm-proposals" | "crm-automations" | "crm-reports" | "settings" | "bot-config" | "ai-assistant" | "ai-token-usage" | "notifications" | "whatsapp-config" | "admin-settings";
 
 export function getShellWorkspaceLayout(active: RouteId) {
   if (active === "conversations") {
@@ -213,7 +215,7 @@ export function getShellWorkspaceLayout(active: RouteId) {
     };
   }
 
-  if (active === "ai-assistant") {
+  if (active === "ai-assistant" || active === "ai-token-usage") {
     return {
       moduleTopbar: "none" as const,
       mainContentClassName: "h-full w-full overflow-hidden p-0",
@@ -3981,7 +3983,7 @@ function SettingsPagePlaceholder() {
 
 // BotConfigPage é importada de BotConfigPage.tsx
 
-const HERMES_TYPING_CONTENT = "Hermes está digitando…";
+const HERMES_TYPING_CONTENT = "Assistente está digitando…";
 
 type HermesChatMessage = {
   id?: string;
@@ -4317,9 +4319,9 @@ function LegacyAIAssistantPage() {
           <Sparkles className="w-8 h-8 text-amber-500" />
         </div>
         <div className="text-center max-w-md">
-          <h2 className="text-xl font-bold text-slate-900 mb-2">Token Gemini não configurado</h2>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">Token de IA não configurado</h2>
           <p className="text-slate-500 text-sm">
-            O Assistente IA precisa de um token da API Gemini configurado pelo administrador.
+            O Assistente IA precisa de um token de IA configurado pelo administrador.
             Entre em contato com o suporte para ativar esta funcionalidade.
           </p>
         </div>
@@ -4337,7 +4339,7 @@ function LegacyAIAssistantPage() {
           </div>
           <div>
             <h2 className="text-base font-semibold text-white">Assistente IA</h2>
-            <p className="text-xs text-slate-400">Powered by Gemini • {session?.company}</p>
+            <p className="text-xs text-slate-400">Tecnologia de IA • {session?.company}</p>
           </div>
         </div>
         <button
@@ -4398,7 +4400,7 @@ function LegacyAIAssistantPage() {
                       <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                       <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                     </span>
-                    <span>Hermes está digitando…</span>
+                    <span>Assistente está digitando…</span>
                   </span>
                 ) : (
                   <div className="whitespace-pre-wrap">{msg.role === "assistant" ? formatAssistantMessageContent(msg) : msg.content}</div>
@@ -4416,7 +4418,7 @@ function LegacyAIAssistantPage() {
               {msg.pendingActionRequest && (
                 <div className="mt-2 rounded-xl border border-sky-500/40 bg-slate-900/90 p-4 text-xs text-slate-100 shadow-sm">
                   <p className="font-semibold text-sky-200">
-                    {msg.pendingActionRequest.actionType === "SEND_WHATSAPP_OUTBOUND" ? "Disparo Ativo de Mensagens via WhatsApp" : "Ação sugerida pelo Hermes que requer sua aprovação"}
+                    {msg.pendingActionRequest.actionType === "SEND_WHATSAPP_OUTBOUND" ? "Disparo Ativo de Mensagens via WhatsApp" : "Ação sugerida pelo Assistente que requer sua aprovação"}
                   </p>
                   <p className="mt-1 text-slate-300">{msg.pendingActionRequest.summary ?? `${msg.pendingActionRequest.actionType.includes("PROPOSAL") ? "Nova Proposta Comercial" : msg.pendingActionRequest.actionType.includes("CLIENT") ? "Proposta de Ação: Cadastro de Cliente" : msg.pendingActionRequest.actionType.includes("PRODUCT") ? "Produto ERP" : msg.pendingActionRequest.actionType.includes("SUPPLIER") ? "Fornecedor" : msg.pendingActionRequest.actionType === "REQUEST_PURCHASE" ? "Pedido de compra" : msg.pendingActionRequest.actionType.includes("SERVICE") ? "Serviço ERP" : msg.pendingActionRequest.toolName.replace(/_/g, " ")}`} — nenhuma alteração foi executada.</p>
                   {msg.pendingActionRequest.actionType === "SEND_WHATSAPP_OUTBOUND" ? (
@@ -4553,7 +4555,7 @@ function LegacyAIAssistantPage() {
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                   </span>
-                  <span className="font-medium text-slate-600">Hermes está consultando os dados da operação...</span>
+                  <span className="font-medium text-slate-600">Assistente está consultando os dados da operação...</span>
                 </span>
               </div>
             </div>
@@ -4621,6 +4623,7 @@ function getActiveModuleName(active: RouteId): string {
   if (active.startsWith("crm-")) return "CRM";
   if (active.startsWith("erp-")) return "ERP";
   if (active === "ai-assistant") return "Assistente IA";
+  if (active === "ai-token-usage") return "Consumo de IA";
   if (active === "whatsapp-config") return "WhatsApp";
   if (active === "settings" || active === "admin-settings") return "Configurações";
   if (active === "notifications") return "Notificações";
@@ -4867,6 +4870,8 @@ function Shell() {
   if (loading) return <LoadingSpinner />;
   if (!session) return <LoginPage onLoginSuccess={(newSession) => setSession(newSession)} />;
 
+  const isAdmin = session.role === "admin" || session.userRole === "admin";
+
   const navItems = [
     { id: "home" as RouteId, label: "Home", icon: HomeIcon },
     { id: "conversations" as RouteId, label: "Atendimento", icon: MessageCircle },
@@ -4875,6 +4880,7 @@ function Shell() {
     { id: "crm-summary" as RouteId, label: "CRM", icon: Users },
     { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
     { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
+    ...(isAdmin ? [{ id: "ai-token-usage" as RouteId, label: "Consumo de IA", icon: Cpu }] : []),
     { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
     { id: "admin-settings" as RouteId, label: "Configurações Admin", icon: Cog },
@@ -4883,7 +4889,7 @@ function Shell() {
   ];
 
   // Itens que são sempre visíveis independente de permissões
-  const alwaysVisibleItems = ["home", "settings", "help", "notifications"];
+  const alwaysVisibleItems = ["home", "settings", "help", "notifications", "ai-token-usage"];
   
   const filteredNavItems = navItems.filter(item => {
     // Itens sempre visíveis
@@ -5170,6 +5176,7 @@ function Shell() {
           {active === "bot-config" && <BotConfigPage />}
           {active === "whatsapp-config" && <WhatsAppConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}
+          {active === "ai-token-usage" && (session.role === "admin" || session.userRole === "admin") && <AITokenUsagePage />}
           {active === "notifications" && <NotificationsModernPage />}
           </ErrorBoundary>
         </main>

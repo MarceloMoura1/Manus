@@ -30,6 +30,7 @@ import { registerSaleDocumentRoutes } from "../modules/erp/sales/documents-http"
 import { registerCrmWebhookIngressRoutes } from "../modules/crm/automations/webhook-ingress";
 import { registerBotRoutes } from "../modules/bot/bot.router";
 import { registerVoiceShortcutRoutes } from "../routes/voice-shortcut";
+import { registerAiTokenUsageRoutes } from "../routes/ai-token-usage";
 import { createLegacyTypebotPathRedirect, createTypebotHostProxy } from "../modules/bot/typebot-proxy";
 import { createTypebotStorageProxy } from "../modules/bot/typebot-storage-proxy";
 export { typebotWorkspaceService } from "../modules/bot/typebot-workspace.service";
@@ -164,6 +165,7 @@ async function startServer() {
   registerCrmWebhookIngressRoutes(app);
   registerBotRoutes(app);
   registerVoiceShortcutRoutes(app);
+  registerAiTokenUsageRoutes(app);
 
   // ─── Webhooks ─────────────────────────────────────────────────────────────
   // Meta WhatsApp Business API

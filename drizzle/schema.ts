@@ -422,6 +422,8 @@ export const megadeskDomainClients = mysqlTable(
     apiToken: varchar("api_token", { length: 255 }).notNull(),
     modulesJson: longtext("modules_json").notNull(),
     integrationsJson: longtext("integrations_json").notNull(),
+    aiMonthlyTokenLimit: int("ai_monthly_token_limit").default(1000000).notNull(),
+    aiCycleRenewalDate: timestamp("ai_cycle_renewal_date", { mode: "string" }),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),
@@ -4667,3 +4669,25 @@ export const megadeskAiRoutineLogs = mysqlTable(
 
 export type MegadeskAiRoutineLog = typeof megadeskAiRoutineLogs.$inferSelect;
 export type MegadeskAiRoutineLogInsert = typeof megadeskAiRoutineLogs.$inferInsert;
+
+export const megadeskAiUsageLogs = mysqlTable(
+  "megadesk_ai_usage_logs",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().notNull(),
+    tenantId: varchar("tenant_id", { length: 36 }).notNull(),
+    userId: varchar("user_id", { length: 36 }),
+    featureSource: varchar("feature_source", { length: 32 }).notNull(),
+    conversationId: varchar("conversation_id", { length: 36 }),
+    promptTokens: int("prompt_tokens").notNull(),
+    completionTokens: int("completion_tokens").notNull(),
+    totalTokens: int("total_tokens").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  table => [
+    index("idx_ai_usage_tenant_created").on(table.tenantId, table.createdAt),
+    index("idx_ai_usage_tenant_user").on(table.tenantId, table.userId),
+  ]
+);
+
+export type MegadeskAiUsageLog = typeof megadeskAiUsageLogs.$inferSelect;
+export type MegadeskAiUsageLogInsert = typeof megadeskAiUsageLogs.$inferInsert;
