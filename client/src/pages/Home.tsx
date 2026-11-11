@@ -216,7 +216,7 @@ export function getShellWorkspaceLayout(active: RouteId) {
   if (active === "ai-assistant") {
     return {
       moduleTopbar: "none" as const,
-      mainContentClassName: "h-full w-full overflow-hidden pb-16 md:pb-0",
+      mainContentClassName: "h-[calc(100dvh-3.5rem-4rem)] md:h-full w-full overflow-hidden p-0",
       settingsPageLayout: "standalone" as const,
     };
   }
@@ -1738,8 +1738,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
         ) : selectedConv ? (
           <>
             {/* Header do Chat */}
-            <div data-testid="active-conversation-header" className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:px-4 md:px-6 md:py-3 group-data-[theme=dark]:border-slate-800 group-data-[theme=dark]:bg-slate-900">
-              <div className="flex min-w-0 items-center gap-2 md:gap-3">
+            <div data-testid="active-conversation-header" className="flex min-w-0 flex-shrink-0 items-center justify-between gap-1.5 sm:gap-2 border-b border-slate-200/80 bg-white px-2 py-2 sm:px-4 md:px-6 md:py-3 group-data-[theme=dark]:border-slate-800 group-data-[theme=dark]:bg-slate-900">
+              <div className="flex min-w-0 items-center gap-1.5 sm:gap-2 md:gap-3">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1748,14 +1748,15 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                     returnToConversationList();
                   }}
                   data-testid="mobile-back-to-conversations"
-                  className="md:hidden flex items-center gap-1 text-xs"
+                  aria-label="Voltar para atendimentos"
+                  className="md:hidden flex h-8 w-8 p-0 items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
                 >
-                  <ChevronLeft className="h-4 w-4" /> Atendimentos
+                  <ChevronLeft className="h-5 w-5" />
                 </Button>
                 <div className={cn('hidden h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold text-white sm:flex', getAvatarColor(selectedConv.id))}>
                   {getInitials(selectedConv.name)}
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 max-w-[140px] sm:max-w-[200px] md:max-w-none">
                   <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
                     <h3 className="truncate text-sm font-bold text-slate-900 group-data-[theme=dark]:text-slate-100 md:text-base">{selectedConv.name}</h3>
                     <span className={cn(
@@ -1767,10 +1768,12 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                       {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'Em Atendimento pelo Bot' : 'Fechada'}
                     </span>
                   </div>
-                  <p className="truncate text-xs text-slate-500 group-data-[theme=dark]:text-slate-400">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
+                  <p className="truncate text-xs text-slate-500 group-data-[theme=dark]:text-slate-400">
+                    {selectedConv.company ? `${selectedConv.phone} • ${selectedConv.company}` : selectedConv.phone}
+                  </p>
                 </div>
               </div>
-              <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
+              <div className="flex flex-shrink-0 items-center gap-1 sm:gap-1.5 md:gap-2">
                 {(selectedConv.status === 'bot' || selectedConv.status === 'waiting_human' || !selectedConv.assignedUserId) && selectedConv.status !== 'closed' && (
                   <button type="button" onClick={() => claimConversationMutation.mutate({ conversationId: selectedConv.id }, {
                     onSuccess: async (data: any) => {
@@ -1790,9 +1793,10 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                       showToast('Conversa assumida com sucesso!', 'success');
                     },
                     onError: () => showToast('Não foi possível assumir a conversa', 'error'),
-                  })} className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shadow-sm">
+                  })} className="inline-flex items-center gap-1 rounded-lg sm:rounded-xl bg-blue-600 px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shadow-sm shrink-0">
                     <UserCheck className="h-4 w-4" />
-                    <span>Assumir Conversa</span>
+                    <span className="hidden sm:inline">Assumir Conversa</span>
+                    <span className="sm:hidden">Assumir</span>
                   </button>
                 )}
                 <button
@@ -1801,7 +1805,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                   onClick={() => setTransferOpen(true)}
                   aria-label="Transferir atendimento"
                   title="Transferir atendimento"
-                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 group-data-[theme=dark]:border-slate-700 group-data-[theme=dark]:bg-slate-800 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:border-violet-500/40 group-data-[theme=dark]:hover:bg-violet-500/20 group-data-[theme=dark]:hover:text-violet-200"
+                  className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 group-data-[theme=dark]:border-slate-700 group-data-[theme=dark]:bg-slate-800 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:border-violet-500/40 group-data-[theme=dark]:hover:bg-violet-500/20 group-data-[theme=dark]:hover:text-violet-200 shrink-0"
                 >
                   <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -1809,23 +1813,23 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                   type="button"
                   onClick={() => selectedConv.status === 'closed' ? setReopenConfirmOpen(true) : setCloseConfirmOpen(true)}
                   aria-label={selectedConv.status === 'closed' ? 'Reabrir atendimento' : 'Encerrar atendimento'}
+                  title={selectedConv.status === 'closed' ? 'Reabrir atendimento' : 'Encerrar atendimento'}
                   className={cn(
-                    'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 sm:px-3 sm:text-sm',
+                    'inline-flex h-8 w-8 sm:h-9 sm:w-auto items-center justify-center gap-1.5 rounded-lg border p-0 sm:px-3 text-xs font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 sm:text-sm shrink-0',
                     selectedConv.status === 'closed'
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 focus-visible:ring-emerald-500'
                       : 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100 focus-visible:ring-rose-500'
                   )}
                 >
-                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                   <span className="hidden sm:inline">{selectedConv.status === 'closed' ? 'Reabrir' : 'Encerrar atendimento'}</span>
-                  <span className="sm:hidden">{selectedConv.status === 'closed' ? 'Reabrir' : 'Encerrar'}</span>
                 </button>
                 <button type="button" aria-expanded={conversationDetailsOpen} aria-controls="conversation-details-panel"
                   aria-label={conversationDetailsOpen ? "Fechar detalhes da conversa" : "Abrir detalhes da conversa"}
                   title={conversationDetailsOpen ? "Fechar detalhes da conversa" : "Abrir detalhes da conversa"}
                   onClick={() => setConversationDetailsOpen(value => !value)}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800">
-                  {conversationDetailsOpen ? <ArrowRight className="h-5 w-5" aria-hidden="true" /> : <ArrowLeft className="h-5 w-5" aria-hidden="true" />}
+                  className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg sm:rounded-xl text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800 shrink-0">
+                  {conversationDetailsOpen ? <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" /> : <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />}
                 </button>
               </div>
             </div>
