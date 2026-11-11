@@ -1385,7 +1385,7 @@ export function AIAssistant() {
 
       {/* ─── COLUNA PRINCIPAL: TABS & CONTEÚDO ───────────────────────────────── */}
       <div
-        className={`h-full flex-1 flex-col min-w-0 overflow-hidden ${currentTheme.chatBg} text-slate-100 ${
+        className={`h-full max-h-full flex-1 flex-col min-w-0 overflow-hidden ${currentTheme.chatBg} text-slate-100 ${
           activeTab === "chat" && !selectedThreadId ? "hidden md:flex" : "flex"
         }`}
       >
@@ -1710,7 +1710,7 @@ export function AIAssistant() {
             {/* Barra de Composição Inferior (Texto + Microfone) */}
             <div
               data-testid="ai-composer-container"
-              className={`flex-shrink-0 z-20 w-full px-3 sm:px-6 py-2 sm:py-3 border-t ${currentTheme.composerBg} ${currentTheme.composerBorder}`}
+              className={`flex-shrink-0 z-20 w-full mb-16 md:mb-0 pb-2 md:pb-0 px-3 sm:px-6 py-2 sm:py-3 border-t ${currentTheme.composerBg} ${currentTheme.composerBorder}`}
             >
               {recordingError && (
                 <div className="mb-3 px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-800/80 text-xs text-rose-300 flex items-center justify-between">

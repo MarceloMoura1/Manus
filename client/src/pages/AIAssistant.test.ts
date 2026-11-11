@@ -191,5 +191,6 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
     // Persistent composer pinned above viewport without getting clipped by overflow
     expect(aiAssistantSource).toContain('data-testid="ai-composer-container"');
     expect(aiAssistantSource).toContain("flex-shrink-0 z-20 w-full");
+    expect(aiAssistantSource).toContain("mb-16 md:mb-0");
   });
 });

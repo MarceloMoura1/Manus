@@ -61,7 +61,7 @@ describe("authenticated shell workspace variants", () => {
   it("gives AI Assistant a full-height workspace sized to avoid mobile bottom navigation overlap", () => {
     expect(getShellWorkspaceLayout("ai-assistant")).toEqual({
       moduleTopbar: "none",
-      mainContentClassName: "h-[calc(100dvh-3.5rem-4rem)] md:h-full w-full overflow-hidden p-0",
+      mainContentClassName: "h-full w-full overflow-hidden p-0",
       settingsPageLayout: "standalone",
     });
   });

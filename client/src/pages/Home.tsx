@@ -216,7 +216,7 @@ export function getShellWorkspaceLayout(active: RouteId) {
   if (active === "ai-assistant") {
     return {
       moduleTopbar: "none" as const,
-      mainContentClassName: "h-[calc(100dvh-3.5rem-4rem)] md:h-full w-full overflow-hidden p-0",
+      mainContentClassName: "h-full w-full overflow-hidden p-0",
       settingsPageLayout: "standalone" as const,
     };
   }
