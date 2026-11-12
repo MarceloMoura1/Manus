@@ -9,12 +9,14 @@ import {
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
 import { executeSendWhatsAppMessage } from "./hermes-crm-actions";
 import { normalizeContactPhone } from "../shared/contact-phone";
+import { getAiTokenUsageSummary } from "./modules/ai-usage/ai-usage.service";
 
 export interface HermesToolContext {
   clientId: string;
   userId?: string;
   userEmail?: string;
   operationalUserId?: string;
+  userRole?: string;
   pool?: any;
   userPermissions?: readonly string[];
   hitlRequired?: boolean;
@@ -113,6 +115,13 @@ export const consultarChamadosParameters = z.object({
   status: z.enum(["open", "in_progress", "waiting", "closed", "all"]).optional().describe("Filtrar por status dos chamados (ex: open para abertos)"),
   search: z.string().optional().describe("Termo de busca textual em títulos, clientes ou código"),
   limit: z.number().min(1).max(50).optional().describe("Limite de chamados a retornar"),
+});
+
+export const getSystemMetricsSummaryParameters = z.object({
+  categoria: z
+    .enum(["todas", "atendimento", "chamados", "crm", "ia_tokens"])
+    .optional()
+    .describe("Foco opcional da consulta: 'todas', 'atendimento', 'chamados', 'crm', 'ia_tokens'. Padrão: 'todas'."),
 });
 
 export function calculateDateRange(mes?: number, ano?: number, periodo?: string) {
@@ -705,6 +714,169 @@ export function createHermesTools(context: HermesToolContext) {
     (whatsappToolDef as any).parameters = sendWhatsappMessageParameters;
     tools.send_whatsapp_message = whatsappToolDef;
   }
+
+  // ─── FERRAMENTA DE RESUMO OPERACIONAL E MÉTRICAS DO SISTEMA ─────────────────
+  const metricsToolDef = tool({
+    description:
+      "Consulta em tempo real o resumo operacional da empresa (conversas ativas e carga por atendente, chamados abertos/críticos, rastreamentos ativos, leads/orçamentos recentes e status da cota de tokens de IA) para auxiliar o usuário nas prioridades e tarefas do dia.",
+    inputSchema: getSystemMetricsSummaryParameters,
+    execute: async ({ categoria = "todas" }) => {
+      if (!pool) {
+        return {
+          success: false,
+          message: "Banco de dados indisponível no momento para consolidar os indicadores.",
+        };
+      }
+
+      const tenantId = context.clientId;
+      const result: Record<string, any> = {
+        success: true,
+        tenantId,
+        dataHora: new Date().toISOString(),
+      };
+
+      // 1. Atendimento (Conversas WhatsApp)
+      if (categoria === "todas" || categoria === "atendimento") {
+        try {
+          const [convSummary] = (await pool.execute(
+            `SELECT
+               COUNT(*) AS totalAbertas,
+               SUM(CASE WHEN status = 'bot' THEN 1 ELSE 0 END) AS emTriagemBot,
+               SUM(CASE WHEN status <> 'bot' AND (assigned_user_id IS NOT NULL OR assigned_user_name IS NOT NULL) THEN 1 ELSE 0 END) AS emAtendimentoHumano,
+               SUM(CASE WHEN status <> 'bot' AND assigned_user_id IS NULL AND assigned_user_name IS NULL THEN 1 ELSE 0 END) AS filaEspera
+             FROM megadesk_domain_conversations
+            WHERE client_id = ? AND status <> 'closed'`,
+            [tenantId]
+          )) as any[];
+
+          const [operatorLoad] = (await pool.execute(
+            `SELECT
+               COALESCE(assigned_user_name, assigned_user_id, 'Sem atendente') AS operador,
+               COUNT(*) AS conversasAtivas
+             FROM megadesk_domain_conversations
+            WHERE client_id = ? AND status <> 'closed' AND (assigned_user_id IS NOT NULL OR assigned_user_name IS NOT NULL)
+            GROUP BY operador
+            ORDER BY conversasAtivas DESC
+            LIMIT 5`,
+            [tenantId]
+          )) as any[];
+
+          result.atendimento = {
+            totalAbertas: Number(convSummary?.[0]?.totalAbertas || 0),
+            emTriagemBot: Number(convSummary?.[0]?.emTriagemBot || 0),
+            emAtendimentoHumano: Number(convSummary?.[0]?.emAtendimentoHumano || 0),
+            filaEspera: Number(convSummary?.[0]?.filaEspera || 0),
+            cargaPorAtendente: (operatorLoad || []).map((op: any) => ({
+              operador: String(op.operador),
+              conversas: Number(op.conversasAtivas || 0),
+            })),
+          };
+        } catch {
+          result.atendimento = { totalAbertas: 0, filaEspera: 0 };
+        }
+      }
+
+      // 2. Chamados (Tickets)
+      if (categoria === "todas" || categoria === "chamados") {
+        try {
+          const [ticketsSummary] = (await pool.execute(
+            `SELECT
+               COUNT(*) AS totalAtivos,
+               SUM(CASE WHEN prioridade IN ('urgent', 'urgente', 'high', 'alta') THEN 1 ELSE 0 END) AS criticos,
+               SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS novosAbertos,
+               SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS emAndamento,
+               SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) AS aguardando
+             FROM chamados
+            WHERE client_id = ? AND status <> 'closed'`,
+            [tenantId]
+          )) as any[];
+
+          result.chamados = {
+            totalAtivos: Number(ticketsSummary?.[0]?.totalAtivos || 0),
+            criticosUrgentes: Number(ticketsSummary?.[0]?.criticos || 0),
+            novosAbertos: Number(ticketsSummary?.[0]?.novosAbertos || 0),
+            emAndamento: Number(ticketsSummary?.[0]?.emAndamento || 0),
+            aguardandoCliente: Number(ticketsSummary?.[0]?.aguardando || 0),
+          };
+        } catch {
+          result.chamados = { totalAtivos: 0, criticosUrgentes: 0 };
+        }
+      }
+
+      // 3. Rastreamentos Operacionais
+      if (categoria === "todas") {
+        try {
+          const [trackingRows] = (await pool.execute(
+            `SELECT COUNT(*) AS total
+             FROM megadesk_domain_operational_records
+            WHERE client_id = ? AND record_type = 'tracking'`,
+            [tenantId]
+          )) as any[];
+          result.rastreamentos = {
+            ativos: Number(trackingRows?.[0]?.total || 0),
+          };
+        } catch {
+          result.rastreamentos = { ativos: 0 };
+        }
+      }
+
+      // 4. CRM & Vendas (Leads & Oportunidades/Orçamentos)
+      if (categoria === "todas" || categoria === "crm") {
+        try {
+          const [leadsRows] = (await pool.execute(
+            `SELECT COUNT(*) AS totalLeads
+             FROM megadesk_crm_clients
+            WHERE client_id = ? AND status = 'lead' AND (lifecycle_state IS NULL OR lifecycle_state <> 'archived')`,
+            [tenantId]
+          )) as any[];
+
+          const [oppsRows] = (await pool.execute(
+            `SELECT COUNT(*) AS totalOportunidades, COALESCE(SUM(estimated_value), 0) AS valorTotal
+             FROM megadesk_crm_opportunities
+            WHERE client_id = ? AND status = 'open'`,
+            [tenantId]
+          )) as any[];
+
+          result.crm = {
+            leadsAtivos: Number(leadsRows?.[0]?.totalLeads || 0),
+            oportunidadesAbertas: Number(oppsRows?.[0]?.totalOportunidades || 0),
+            valorPipelineEstimado: Number(oppsRows?.[0]?.valorTotal || 0),
+          };
+        } catch {
+          result.crm = { leadsAtivos: 0, oportunidadesAbertas: 0 };
+        }
+      }
+
+      // 5. Cota e Consumo de Tokens de IA (Governança de Acesso)
+      if (categoria === "todas" || categoria === "ia_tokens") {
+        try {
+          const usageSummary = await getAiTokenUsageSummary(tenantId, pool);
+          const isAdmin = context.userRole === "admin";
+          if (isAdmin) {
+            result.iaTokens = {
+              limiteMensal: usageSummary.summary.total_limit,
+              totalConsumido: usageSummary.summary.total_used,
+              saldoDisponivel: usageSummary.summary.remaining_tokens,
+              percentualUtilizado: `${usageSummary.summary.percent_used}%`,
+              diasRestantesCiclo: usageSummary.summary.days_remaining,
+              dataRenovacao: usageSummary.summary.cycle_renewal_date,
+            };
+          } else {
+            result.iaTokens = {
+              status: "operacional",
+              observacao: "Métricas detalhadas de cota contratual são visíveis apenas para administradores.",
+            };
+          }
+        } catch {
+          result.iaTokens = { status: "operacional" };
+        }
+      }
+
+      return result;
+    },
+  });
+  (metricsToolDef as any).parameters = getSystemMetricsSummaryParameters;
+  tools.get_system_metrics_summary = metricsToolDef;
 
   return tools;
 }

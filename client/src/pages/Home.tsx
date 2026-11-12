@@ -75,6 +75,7 @@ import {
   EyeOff,
   Home as HomeIcon,
   Hourglass,
+  LayoutDashboard,
   Lock,
   Mail,
   MapPin,
@@ -394,7 +395,18 @@ function LoginPage({ onLoginSuccess }: { onLoginSuccess: (session: MegaDeskSessi
   return <MegaDeskLoginGate onLogin={onLoginSuccess} />;
 }
 
-function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId) => void; indicadores?: { conversasAbertas: number; chamadosAbertos: number; tempoMedio: string; resolucaoBot: string } }) {
+function DashboardPage({
+  setActive,
+  indicadores,
+  session,
+}: {
+  setActive: (route: RouteId) => void;
+  indicadores?: { conversasAbertas: number; chamadosAbertos: number; tempoMedio: string; resolucaoBot: string };
+  session?: MegaDeskSession | null;
+}) {
+  const [homeTab, setHomeTab] = useState<"overview" | "admin">("overview");
+  const isAdmin = session?.role === "admin" || session?.userRole === "admin";
+
   const kpiCards = [
     { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), icon: MessageCircle, note: "em andamento", gradient: "from-emerald-400 to-teal-600", bgGradient: "from-emerald-50 to-teal-50", iconBg: "from-emerald-100 to-teal-100", iconColor: "text-emerald-600" },
     { label: "Taxa de Resolução", value: indicadores?.resolucaoBot ?? "0%", icon: CheckCircle2, note: "bot inteligente", gradient: "from-violet-400 to-purple-600", bgGradient: "from-violet-50 to-purple-50", iconBg: "from-violet-100 to-purple-100", iconColor: "text-violet-600" },
@@ -410,131 +422,253 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 
   return (
     <div className="space-y-6">
-      {/* Hero Section - Profissional e Estilizado */}
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900 p-16 shadow-2xl">
-        <div className="absolute inset-0 opacity-20">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
-          <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-500 rounded-full blur-3xl" />
-        </div>
-        <div className="relative z-10 grid gap-12 lg:grid-cols-2 lg:items-center">
-          <div className="space-y-8 animate-fade-in">
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-3 rounded-full bg-blue-500/20 backdrop-blur px-4 py-2 border border-blue-400/30">
-                <Zap className="h-4 w-4 text-blue-300 animate-pulse" />
-                <span className="text-sm font-semibold uppercase tracking-wider text-blue-200">Plataforma Inteligente</span>
-              </div>
-              <h1 className="text-7xl font-black text-white leading-tight animate-slide-up" style={{ animationDelay: '0.1s' }}>
-                Mega<span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">Desk</span>
-              </h1>
-              <p className="text-2xl text-blue-100 font-semibold animate-slide-up" style={{ animationDelay: '0.2s' }}>Atendimento Inteligente em Um Lugar</p>
-            </div>
-            <p className="text-lg text-slate-300 leading-relaxed max-w-lg animate-slide-up" style={{ animationDelay: '0.3s' }}>
-              Gerencie conversas WhatsApp, chamados, rastreio e atendimento com IA. Tudo integrado e sincronizado.
+      {/* Cabeçalho Enxuto: Centro de Comando com Abas de Navegação */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/20">
+            <Zap className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              Centro de Comando
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                {session?.company || "MegaDesk"}
+              </span>
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Visão operacional em tempo real e controle executivo da plataforma.
             </p>
-            <div className="flex gap-4 pt-4 animate-slide-up" style={{ animationDelay: '0.4s' }}>
-              <button onClick={() => setActive('conversations')} className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/50 hover:-translate-y-1 active:scale-95">
-                Acessar Dashboard
-              </button>
-              <button className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl border border-white/30 transition-all duration-200 backdrop-blur hover:shadow-lg">
-                Documentação
-              </button>
-            </div>
-          </div>
-          <div className="hidden lg:flex items-center justify-center animate-float">
-            <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl blur-2xl opacity-40 animate-pulse" />
-              <div className="relative bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl p-12 shadow-2xl flex items-center justify-center">
-                <Zap className="w-40 h-40 text-white opacity-90 animate-bounce" style={{ animationDuration: '2s' }} />
-              </div>
-            </div>
           </div>
         </div>
-      </section>
 
-      {/* KPI Cards - Estilizados e Animados */}
-      <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-        {kpiCards.map((card: any, idx) => {
-          const Icon = card.icon;
-          return (
-            <div
-              key={card.label}
-              className={`group relative overflow-hidden rounded-3xl bg-gradient-to-br ${card.bgGradient} p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 cursor-pointer animate-fade-in border border-white/40 backdrop-blur-sm`}
-              style={{ animationDelay: `${idx * 0.1}s` }}
+        {/* Abas Superiores do Centro de Comando */}
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setHomeTab("overview")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+              homeTab === "overview"
+                ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            )}
+          >
+            <LayoutDashboard className="w-3.5 h-3.5 text-blue-500" />
+            <span>Visão Geral</span>
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setHomeTab("admin")}
+              className={cn(
+                "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                homeTab === "admin"
+                  ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              )}
             >
-              <div className={`absolute -top-12 -right-12 w-40 h-40 bg-gradient-to-br ${card.gradient} rounded-full blur-3xl opacity-20 group-hover:opacity-30 transition-all duration-500 animate-pulse`} />
-              <div className={`absolute -bottom-12 -left-12 w-40 h-40 bg-gradient-to-tr ${card.gradient} rounded-full blur-3xl opacity-15 group-hover:opacity-25 transition-all duration-500`} style={{ animationDelay: '0.5s' }} />
-              
-              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent transform -skew-x-12" style={{ animation: 'shimmer 2s infinite' }} />
-              </div>
-              
-              <div className="relative z-10">
-                <div className="flex items-center justify-between mb-6">
-                  <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${card.iconBg} flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
-                    <Icon className={`w-8 h-8 ${card.iconColor} group-hover:animate-bounce`} style={{ animationDuration: '0.6s' }} />
-                  </div>
-                  <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${card.gradient} animate-pulse`} />
-                </div>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-600 mb-3 opacity-75">{card.label}</p>
-                <p className={`text-5xl font-black bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent mb-2 group-hover:scale-105 transition-transform duration-300 origin-left`}>{card.value}</p>
-                <p className="text-sm font-semibold text-slate-600 group-hover:text-slate-700 transition-colors">{card.note}</p>
-              </div>
-              
-              <div className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r ${card.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`} />
-            </div>
-          );
-        })}
-      </section>
+              <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Administração</span>
+            </button>
+          )}
+        </div>
+      </div>
 
-      {/* Actions and Activity - Profissional */}
-      <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        {/* Quick Actions */}
-        <div className="rounded-2xl bg-white p-10 shadow-lg border border-slate-100 animate-fade-in" style={{ animationDelay: '0.4s' }}>
-          <h2 className="text-2xl font-bold text-slate-900 mb-8">Atalhos Principais</h2>
-          <div className="grid gap-4 md:grid-cols-3">
-            {quickActions.map((action, idx) => {
-              const Icon = action.title === "Atendimento" ? MessageCircle : action.title === "Chamados" ? ClipboardList : Zap;
-              return (
-                <button
-                  key={action.route}
-                  onClick={() => setActive(action.route)}
-                  className="group relative overflow-hidden rounded-2xl p-6 text-left text-white shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-2 active:scale-95 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
-                  style={{ animationDelay: `${0.4 + idx * 0.1}s` }}
-                >
-                  <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full blur-xl group-hover:bg-white/20 transition-all duration-300" />
-                  <div className="relative z-10">
-                    <Icon className="h-8 w-8 mb-3 group-hover:scale-125 transition-transform duration-300" />
-                    <p className="text-lg font-bold">{action.title}</p>
-                    <p className="text-sm text-white/90 mt-1">{action.subtitle}</p>
+      {/* Aba 1: Visão Geral */}
+      {homeTab === "overview" && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Hero Section */}
+          <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900 p-10 sm:p-14 shadow-2xl">
+            <div className="absolute inset-0 opacity-20">
+              <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
+              <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-500 rounded-full blur-3xl" />
+            </div>
+            <div className="relative z-10 grid gap-8 lg:grid-cols-2 lg:items-center">
+              <div className="space-y-6 animate-fade-in">
+                <div className="space-y-3">
+                  <div className="inline-flex items-center gap-3 rounded-full bg-blue-500/20 backdrop-blur px-3.5 py-1.5 border border-blue-400/30">
+                    <Zap className="h-3.5 w-3.5 text-blue-300 animate-pulse" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-200">Operações e Atendimento</span>
                   </div>
-                </button>
+                  <h2 className="text-4xl sm:text-5xl font-black text-white leading-tight">
+                    Mega<span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">Desk</span>
+                  </h2>
+                  <p className="text-lg text-blue-100 font-medium">Gestão Integrada com Inteligência Artificial</p>
+                </div>
+                <p className="text-sm text-slate-300 leading-relaxed max-w-lg">
+                  Monitore conversas no WhatsApp, chamados com SLA, pipeline do CRM, vendas no ERP e copiloto de IA sincronizados.
+                </p>
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <button onClick={() => setActive('conversations')} className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-bold text-sm rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/50 hover:-translate-y-0.5 active:scale-95 cursor-pointer">
+                    Central de Atendimento
+                  </button>
+                  <button onClick={() => setActive('tickets')} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold text-sm rounded-xl border border-white/30 transition-all duration-200 backdrop-blur hover:shadow-lg cursor-pointer">
+                    Chamados
+                  </button>
+                </div>
+              </div>
+              <div className="hidden lg:flex items-center justify-center animate-float">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl blur-2xl opacity-40 animate-pulse" />
+                  <div className="relative bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl p-10 shadow-2xl flex items-center justify-center">
+                    <Zap className="w-28 h-28 text-white opacity-90 animate-bounce" style={{ animationDuration: '2s' }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* KPI Cards */}
+          <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+            {kpiCards.map((card: any, idx) => {
+              const Icon = card.icon;
+              return (
+                <div
+                  key={card.label}
+                  className={`group relative overflow-hidden rounded-3xl bg-gradient-to-br ${card.bgGradient} p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 cursor-pointer animate-fade-in border border-white/40 backdrop-blur-sm`}
+                  style={{ animationDelay: `${idx * 0.1}s` }}
+                >
+                  <div className={`absolute -top-12 -right-12 w-40 h-40 bg-gradient-to-br ${card.gradient} rounded-full blur-3xl opacity-20 group-hover:opacity-30 transition-all duration-500 animate-pulse`} />
+                  <div className={`absolute -bottom-12 -left-12 w-40 h-40 bg-gradient-to-tr ${card.gradient} rounded-full blur-3xl opacity-15 group-hover:opacity-25 transition-all duration-500`} style={{ animationDelay: '0.5s' }} />
+                  
+                  <div className="relative z-10">
+                    <div className="flex items-center justify-between mb-6">
+                      <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${card.iconBg} flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
+                        <Icon className={`w-8 h-8 ${card.iconColor} group-hover:animate-bounce`} style={{ animationDuration: '0.6s' }} />
+                      </div>
+                      <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${card.gradient} animate-pulse`} />
+                    </div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-600 mb-3 opacity-75">{card.label}</p>
+                    <p className={`text-5xl font-black bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent mb-2 group-hover:scale-105 transition-transform duration-300 origin-left`}>{card.value}</p>
+                    <p className="text-sm font-semibold text-slate-600 group-hover:text-slate-700 transition-colors">{card.note}</p>
+                  </div>
+                  
+                  <div className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r ${card.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`} />
+                </div>
               );
             })}
-          </div>
-        </div>
+          </section>
 
-        {/* Recent Activity */}
-        <div className="rounded-2xl bg-white p-10 shadow-lg border border-slate-100 animate-fade-in" style={{ animationDelay: '0.5s' }}>
-          <h2 className="text-2xl font-bold text-slate-900 mb-8">Atividades Recentes</h2>
-          <div className="space-y-4">
-            {[
-              { title: "Novo chamado", desc: "Solicitação de backup", time: "Agora", color: "bg-blue-500" },
-              { title: "BOT ativo", desc: "Cliente em triagem", time: "5 min", color: "bg-emerald-500" },
-              { title: "Token OK", desc: "MegaAdmin validado", time: "12 min", color: "bg-slate-500" },
-            ].map(({ title, desc, time, color }, idx) => (
-              <div key={title} className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-r from-slate-50 to-slate-100 hover:from-slate-100 hover:to-slate-200 transition-all duration-200 animate-fade-in border border-slate-200 group cursor-pointer" style={{ animationDelay: `${0.5 + idx * 0.1}s` }}>
-                <div className={cn("mt-1 h-3 w-3 rounded-full flex-shrink-0 group-hover:scale-125 transition-transform duration-300", color)} />
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold text-slate-900 text-sm">{title}</p>
-                  <p className="text-xs text-slate-600 mt-0.5">{desc}</p>
-                </div>
-                <span className="text-xs font-semibold text-slate-600 flex-shrink-0 bg-white px-2 py-1 rounded-lg group-hover:bg-blue-50 transition-colors duration-200">{time}</span>
+          {/* Quick Actions and Activity */}
+          <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+            <div className="rounded-2xl bg-white p-8 sm:p-10 shadow-lg border border-slate-100">
+              <h3 className="text-xl font-bold text-slate-900 mb-6">Atalhos Operacionais</h3>
+              <div className="grid gap-4 md:grid-cols-3">
+                {quickActions.map((action) => {
+                  const Icon = action.title === "Atendimento" ? MessageCircle : action.title === "Chamados" ? ClipboardList : Zap;
+                  return (
+                    <button
+                      key={action.route}
+                      onClick={() => setActive(action.route)}
+                      className="group relative overflow-hidden rounded-2xl p-6 text-left text-white shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1 active:scale-95 bg-gradient-to-br from-blue-600 to-blue-700 cursor-pointer"
+                    >
+                      <div className="relative z-10">
+                        <Icon className="h-7 w-7 mb-3 group-hover:scale-110 transition-transform duration-300" />
+                        <p className="text-base font-bold">{action.title}</p>
+                        <p className="text-xs text-white/80 mt-1">{action.subtitle}</p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            ))}
+            </div>
+
+            <div className="rounded-2xl bg-white p-8 sm:p-10 shadow-lg border border-slate-100">
+              <h3 className="text-xl font-bold text-slate-900 mb-6">Atividades Recentes</h3>
+              <div className="space-y-3">
+                {[
+                  { title: "Novo chamado", desc: "Solicitação registrada", time: "Agora", color: "bg-blue-500" },
+                  { title: "BOT ativo", desc: "Cliente em triagem", time: "5 min", color: "bg-emerald-500" },
+                  { title: "Sessão IA", desc: "Rotinas operacionais", time: "12 min", color: "bg-indigo-500" },
+                ].map(({ title, desc, time, color }) => (
+                  <div key={title} className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className={cn("mt-1.5 h-2.5 w-2.5 rounded-full flex-shrink-0", color)} />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-slate-900 text-xs">{title}</p>
+                      <p className="text-[11px] text-slate-600">{desc}</p>
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-500">{time}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Aba 2: Administração (Restrito a Perfil Admin) */}
+      {homeTab === "admin" && isAdmin && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Barra de Acesso Rápido Administrativo */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <button
+              type="button"
+              onClick={() => setActive("admin-settings")}
+              className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-indigo-500/50 hover:shadow-md transition-all text-left group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform">
+                  <Cog className="w-5 h-5" />
+                </div>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
+              </div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Configurações Gerais</h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Parâmetros da empresa e regras do tenant.</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActive("whatsapp-config")}
+              className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-emerald-500/50 hover:shadow-md transition-all text-left group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all" />
+              </div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Conexão WhatsApp</h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Status de QR Code, instâncias e sessões.</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActive("bot-config")}
+              className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-purple-500/50 hover:shadow-md transition-all text-left group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform">
+                  <Bot className="w-5 h-5" />
+                </div>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 group-hover:translate-x-1 transition-all" />
+              </div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Atendimento Inteligente</h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Regras de triagem, transbordo e horários.</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActive("notifications")}
+              className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-amber-500/50 hover:shadow-md transition-all text-left group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-amber-500 group-hover:translate-x-1 transition-all" />
+              </div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Alertas & Notificações</h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Disparos operacionais e avisos críticos.</p>
+            </button>
+          </div>
+
+          {/* Painel Embutido de Consumo e Auditoria de Tokens de IA */}
+          <div className="min-h-[580px]">
+            <AITokenUsagePage embedded={true} />
           </div>
         </div>
-      </section>
+      )}
     </div>
   );
 }
@@ -4880,7 +5014,6 @@ function Shell() {
     { id: "crm-summary" as RouteId, label: "CRM", icon: Users },
     { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
     { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
-    ...(isAdmin ? [{ id: "ai-token-usage" as RouteId, label: "Consumo de IA", icon: Cpu }] : []),
     { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
     { id: "admin-settings" as RouteId, label: "Configurações Admin", icon: Cog },
@@ -4889,7 +5022,7 @@ function Shell() {
   ];
 
   // Itens que são sempre visíveis independente de permissões
-  const alwaysVisibleItems = ["home", "settings", "help", "notifications", "ai-token-usage"];
+  const alwaysVisibleItems = ["home", "settings", "help", "notifications"];
   
   const filteredNavItems = navItems.filter(item => {
     // Itens sempre visíveis
@@ -5159,7 +5292,7 @@ function Shell() {
             : shellLayout.mainContentClassName,
         )}>
           <ErrorBoundary key={active}>
-          {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
+          {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} session={session} />}
           {active === "conversations" && <ConversationsPage
             attendanceLaunch={attendanceIntent.activeToken}
             attendancePhone={attendanceIntent.phone}

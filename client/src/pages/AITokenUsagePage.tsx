@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../co
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea } from "../components/ui/scroll-area";
+import { cn } from "../lib/utils";
 
 function formatTokens(val: number): string {
   if (val >= 1_000_000) {
@@ -52,7 +53,12 @@ function formatDateTime(isoStr?: string): string {
   }
 }
 
-export function AITokenUsagePage() {
+export interface AITokenUsagePageProps {
+  embedded?: boolean;
+  isDrawer?: boolean;
+}
+
+export function AITokenUsagePage({ embedded = false, isDrawer = false }: AITokenUsagePageProps = {}) {
   const { data, isLoading, isError, error, refetch, isFetching } =
     trpc.aiUsage.getSummary.useQuery(undefined, {
       refetchInterval: 30_000,
@@ -78,44 +84,81 @@ export function AITokenUsagePage() {
         : "bg-emerald-500";
 
   return (
-    <div className="flex flex-col h-full w-full bg-slate-950 text-slate-100 overflow-hidden">
+    <div className={cn(
+      "flex flex-col h-full w-full text-slate-100 overflow-hidden",
+      embedded ? "bg-slate-950/70 rounded-2xl border border-slate-800/80 shadow-md backdrop-blur-sm" : "bg-slate-950"
+    )}>
       {/* Header */}
-      <header className="flex-none px-6 py-4 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur flex items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
-              <Sparkles className="w-5 h-5" />
+      {embedded ? (
+        <div className="flex-none px-5 py-3.5 border-b border-slate-800/70 bg-slate-900/40 backdrop-blur flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+              <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-                Gestão e Auditoria de Consumo de IA
-                <Badge variant="outline" className="text-xs bg-slate-800 text-slate-300 border-slate-700">
-                  White-Label
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                Auditoria de Consumo de IA
+                <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-slate-800 text-slate-300 border-slate-700">
+                  Tempo Real
                 </Badge>
-              </h1>
-              <p className="text-xs text-slate-400">
-                Auditoria em tempo real de tokens consumidos pela inteligência artificial neste ciclo de faturamento.
+              </h2>
+              <p className="text-[11px] text-slate-400">
+                Métricas de tokens faturados no ciclo de faturamento atual.
               </p>
             </div>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
             onClick={() => refetch()}
             disabled={isFetching}
-            className="border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs h-8"
+            className="border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs h-7 px-2.5"
           >
-            <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin text-indigo-400" : ""}`} />
+            <RefreshCw className={`w-3 h-3 mr-1.5 ${isFetching ? "animate-spin text-indigo-400" : ""}`} />
             Atualizar
           </Button>
         </div>
-      </header>
+      ) : (
+        <header className="flex-none px-6 py-4 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur flex items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                  Gestão e Auditoria de Consumo de IA
+                  <Badge variant="outline" className="text-xs bg-slate-800 text-slate-300 border-slate-700">
+                    White-Label
+                  </Badge>
+                </h1>
+                <p className="text-xs text-slate-400">
+                  Auditoria em tempo real de tokens consumidos pela inteligência artificial neste ciclo de faturamento.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs h-8"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin text-indigo-400" : ""}`} />
+              Atualizar
+            </Button>
+          </div>
+        </header>
+      )}
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className={cn(
+        "flex-1 overflow-y-auto space-y-6",
+        embedded ? "p-4 sm:p-5" : "p-6"
+      )}>
         {isError && (
           <div className="p-4 rounded-lg bg-rose-950/40 border border-rose-500/30 text-rose-200 flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />

@@ -37,6 +37,7 @@ export interface AssistantSessionIdentity {
   userId: string;
   userEmail?: string;
   operationalUserId?: string;
+  userRole?: string;
 }
 
 export function resolveAssistantIdentity(ctx: any): AssistantSessionIdentity {
@@ -44,11 +45,13 @@ export function resolveAssistantIdentity(ctx: any): AssistantSessionIdentity {
   if (ctx?.tenantId && (ctx?.userEmail || ctx?.operationalUserId)) {
     const userEmail = ctx.userEmail ? String(ctx.userEmail).trim().toLowerCase() : undefined;
     const operationalUserId = ctx.operationalUserId ? String(ctx.operationalUserId).trim().toLowerCase() : undefined;
+    const userRole = ctx.operationalUserRole || ctx.userRole || ctx.role || (ctx.user?.role ? String(ctx.user.role) : undefined);
     return {
       tenantId: String(ctx.tenantId).trim(),
       userId: (userEmail || operationalUserId)!,
       userEmail,
       operationalUserId,
+      userRole: userRole ? String(userRole).trim().toLowerCase() : undefined,
     };
   }
 
@@ -57,11 +60,13 @@ export function resolveAssistantIdentity(ctx: any): AssistantSessionIdentity {
     const adminId = ctx.user.email || ctx.user.openId || (ctx.user.id ? String(ctx.user.id) : null);
     if (adminId) {
       const email = ctx.user.email ? String(ctx.user.email).trim().toLowerCase() : undefined;
+      const userRole = ctx.user.role || ctx.operationalUserRole || ctx.userRole || "admin";
       return {
         tenantId: ctx.user.clientId ? String(ctx.user.clientId).trim() : "main",
         userId: adminId.trim().toLowerCase(),
         userEmail: email,
         operationalUserId: ctx.user.id ? String(ctx.user.id).trim().toLowerCase() : undefined,
+        userRole: userRole ? String(userRole).trim().toLowerCase() : "admin",
       };
     }
   }
@@ -73,6 +78,7 @@ export function resolveAssistantIdentity(ctx: any): AssistantSessionIdentity {
       userId: String(ctx.assistantIdentity.userId).trim().toLowerCase(),
       userEmail: ctx.assistantIdentity.userEmail ? String(ctx.assistantIdentity.userEmail).trim().toLowerCase() : undefined,
       operationalUserId: ctx.assistantIdentity.operationalUserId ? String(ctx.assistantIdentity.operationalUserId).trim().toLowerCase() : undefined,
+      userRole: ctx.assistantIdentity.userRole ? String(ctx.assistantIdentity.userRole).trim().toLowerCase() : undefined,
     };
   }
 
@@ -261,6 +267,7 @@ export function createAssistantThreadsRouter(
             userId,
             userEmail: identity.userEmail,
             operationalUserId: identity.operationalUserId,
+            userRole: identity.userRole,
             hitlRequired,
           });
 
@@ -268,7 +275,10 @@ export function createAssistantThreadsRouter(
           const systemInstruction = `Você é o Copiloto de Inteligência Artificial da plataforma MegaDesk.
 Atue como um assessor executivo e operacional ágil, estruturado, acolhedor e focado em resolver as necessidades do usuário em português do Brasil.
 ${toneInstruction}
-Você tem acesso a ferramentas operacionais para consultar chamados, vendas, dados no CRM, abrir chamados e enviar mensagens via WhatsApp (send_whatsapp_message) para clientes ou números informados.`;
+Você tem acesso a ferramentas operacionais para:
+- Consultar em tempo real os indicadores e métricas operacionais da empresa com get_system_metrics_summary (conversas ativas no WhatsApp, carga de atendentes, chamados abertos/críticos, rastreamentos, leads no CRM, orçamentos e status da cota de tokens de IA). SEMPRE use get_system_metrics_summary quando o usuário perguntar como está o dia, pendências, prioridades, gargalos da equipe ou consumo da plataforma.
+- Consultar chamados, vendas e clientes no CRM.
+- Abrir chamados e enviar mensagens via WhatsApp (send_whatsapp_message).`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),
@@ -411,6 +421,7 @@ Você tem acesso a ferramentas operacionais para consultar chamados, vendas, dad
             userId,
             userEmail: identity.userEmail,
             operationalUserId: identity.operationalUserId,
+            userRole: identity.userRole,
             hitlRequired,
           });
 
@@ -423,7 +434,7 @@ Na PRIMEIRA LINHA da sua resposta final em texto, você DEVE transcrever exatame
 [Transcrição: "texto falado pelo usuário"]
 
 Após essa primeira linha, pule uma linha e forneça a sua resposta natural ou resultado da execução das ferramentas ao usuário.
-Execute imediatamente as ferramentas necessárias (como consultar CRM, vendas, chamados, preparar abertura de chamado ou enviar mensagem via WhatsApp) e responda de forma clara, estruturada e direta em português do Brasil.`;
+Execute imediatamente as ferramentas necessárias (como consultar resumo e métricas operacionais com get_system_metrics_summary, consultar CRM, vendas, chamados, preparar abertura de chamado ou enviar mensagem via WhatsApp) e responda de forma clara, estruturada e direta em português do Brasil.`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),

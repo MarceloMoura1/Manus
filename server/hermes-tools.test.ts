@@ -278,5 +278,56 @@ describe("Hermes Tools (Vercel AI SDK - hermes-tools.ts)", () => {
       });
     });
   });
+
+  describe("get_system_metrics_summary tool", () => {
+    it("returns system metrics summary for admin including ai token usage", async () => {
+      const pool = {
+        execute: vi.fn(async (sql: string) => {
+          if (sql.includes("FROM megadesk_domain_conversations")) {
+            return [[{ totalAbertas: 5, emTriagemBot: 2, emAtendimentoHumano: 2, filaEspera: 1 }]];
+          }
+          if (sql.includes("FROM chamados")) {
+            return [[{ totalAtivos: 4, criticos: 1, novosAbertos: 2, emAndamento: 1, aguardando: 0 }]];
+          }
+          if (sql.includes("FROM megadesk_domain_operational_records")) {
+            return [[{ total: 3 }]];
+          }
+          if (sql.includes("FROM megadesk_crm_clients")) {
+            return [[{ totalLeads: 7 }]];
+          }
+          if (sql.includes("FROM megadesk_crm_opportunities")) {
+            return [[{ totalOportunidades: 2, valorTotal: 15000 }]];
+          }
+          return [[]];
+        }),
+      };
+
+      const tools = createHermesTools({ clientId: "tenant-test", userRole: "admin", pool });
+      expect(tools.get_system_metrics_summary).toBeDefined();
+      const result = await tools.get_system_metrics_summary.execute({ categoria: "todas" });
+
+      expect(result.success).toBe(true);
+      expect(result.atendimento?.totalAbertas).toBe(5);
+      expect(result.chamados?.criticosUrgentes).toBe(1);
+      expect(result.rastreamentos?.ativos).toBe(3);
+      expect(result.crm?.leadsAtivos).toBe(7);
+      expect(result.crm?.oportunidadesAbertas).toBe(2);
+      expect(result.iaTokens).toBeDefined();
+      expect(result.iaTokens.totalConsumido).toBeDefined();
+    });
+
+    it("restricts full ai token details for non-admin users", async () => {
+      const pool = {
+        execute: vi.fn(async () => [[{}]]),
+      };
+
+      const tools = createHermesTools({ clientId: "tenant-test", userRole: "agent", pool });
+      const result = await tools.get_system_metrics_summary.execute({ categoria: "ia_tokens" });
+
+      expect(result.success).toBe(true);
+      expect(result.iaTokens?.saldoDisponivel).toBeUndefined();
+      expect(result.iaTokens?.observacao).toContain("administradores");
+    });
+  });
 });
 

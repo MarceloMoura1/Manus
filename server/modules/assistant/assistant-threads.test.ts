@@ -167,6 +167,7 @@ describe("Assistant Threads Router & Multi-Chat Sessions", () => {
         userId: "admin@megadesk.online",
         userEmail: "admin@megadesk.online",
         operationalUserId: undefined,
+        userRole: "admin",
       });
     });
 
