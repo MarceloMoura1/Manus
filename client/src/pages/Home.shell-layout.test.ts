@@ -91,5 +91,13 @@ describe("authenticated shell workspace variants", () => {
     // Mobile back button in conversation timeline
     expect(homeSource).toContain('data-testid="mobile-back-to-conversations"');
     expect(homeSource).toContain("setSelectedConversation(null)");
+
+    // Command Center Part 4: AI Assisted Daily Tasks & Contextual Handoff
+    expect(homeSource).toContain("megadesk:assistant:prefill-context");
+    expect(homeSource).toContain("triggerAssistantWithContext");
+    expect(homeSource).toContain("Resolver Prioridades com IA");
+    expect(homeSource).toContain("Sugerir Prioridades");
+    expect(homeSource).toContain("Auxiliar IA");
+    expect(homeSource).toContain("Sugerido pelo Assistente");
   });
 });

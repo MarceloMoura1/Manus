@@ -432,6 +432,224 @@ export const megadeskSettingsRouter = router({
 
     return result;
   }),
+
+  /**
+   * Listar tarefas do dia sugeridas pelo Assistente IA para o tenant
+   */
+  listDailyActionTasks: megadeskProcedure.query(async ({ ctx }) => {
+    const tenantId = ctx.tenantId || "main";
+    let pool: any = null;
+    try {
+      pool = getPool();
+    } catch {
+      return [];
+    }
+
+    try {
+      await pool.execute(
+        `CREATE TABLE IF NOT EXISTS megadesk_daily_action_tasks (
+          id VARCHAR(80) PRIMARY KEY,
+          tenant_id VARCHAR(80) NOT NULL,
+          user_id VARCHAR(80) NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          priority VARCHAR(20) NOT NULL DEFAULT 'media',
+          target_route VARCHAR(50) NOT NULL DEFAULT 'home',
+          completed BOOLEAN NOT NULL DEFAULT FALSE,
+          task_date DATE NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_mddt_tenant_date (tenant_id, task_date)
+        )`
+      );
+
+      const [rows] = (await pool.execute(
+        `SELECT id, title, priority, target_route AS targetRoute, completed, task_date AS taskDate, created_at AS createdAt
+         FROM megadesk_daily_action_tasks
+         WHERE tenant_id = ? AND task_date = CURRENT_DATE()
+         ORDER BY created_at ASC`,
+        [tenantId]
+      )) as any[];
+
+      return (Array.isArray(rows) ? rows : []).map((r) => ({
+        id: String(r.id),
+        title: String(r.title),
+        priority: (r.priority || "media") as "alta" | "media" | "baixa",
+        targetRoute: (r.targetRoute || "home") as string,
+        completed: Boolean(r.completed),
+        suggestedByAi: true,
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+      }));
+    } catch {
+      return [];
+    }
+  }),
+
+  /**
+   * Sugerir até 3 tarefas prioritárias personalizadas com base na operação atual
+   */
+  suggestDailyPlan: megadeskProcedure.mutation(async ({ ctx }) => {
+    const tenantId = ctx.tenantId || "main";
+    const userId = ctx.operationalUserId || "user";
+    let pool: any = null;
+    try {
+      pool = getPool();
+    } catch {
+      return [];
+    }
+
+    try {
+      await pool.execute(
+        `CREATE TABLE IF NOT EXISTS megadesk_daily_action_tasks (
+          id VARCHAR(80) PRIMARY KEY,
+          tenant_id VARCHAR(80) NOT NULL,
+          user_id VARCHAR(80) NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          priority VARCHAR(20) NOT NULL DEFAULT 'media',
+          target_route VARCHAR(50) NOT NULL DEFAULT 'home',
+          completed BOOLEAN NOT NULL DEFAULT FALSE,
+          task_date DATE NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_mddt_tenant_date (tenant_id, task_date)
+        )`
+      );
+
+      // Consulta pendências reais da operação
+      let filaEspera = 0;
+      let criticos = 0;
+      let novosAbertos = 0;
+      let oportunidades = 0;
+      let rastreios = 0;
+
+      try {
+        const [convRows] = (await pool.execute(
+          `SELECT COUNT(*) AS fila FROM megadesk_domain_conversations
+           WHERE client_id = ? AND status = 'waiting'`,
+          [tenantId]
+        )) as any[];
+        filaEspera = Number(convRows?.[0]?.fila || 0);
+      } catch {}
+
+      try {
+        const [chamadosRows] = (await pool.execute(
+          `SELECT 
+             COUNT(CASE WHEN priority IN ('alta', 'urgente') AND status NOT IN ('closed', 'resolvido', 'fechado') THEN 1 END) AS criticos,
+             COUNT(CASE WHEN status IN ('open', 'aberto') THEN 1 END) AS novos
+           FROM megadesk_domain_chamados
+           WHERE client_id = ?`,
+          [tenantId]
+        )) as any[];
+        criticos = Number(chamadosRows?.[0]?.criticos || 0);
+        novosAbertos = Number(chamadosRows?.[0]?.novos || 0);
+      } catch {}
+
+      try {
+        const [oppsRows] = (await pool.execute(
+          `SELECT COUNT(*) AS total FROM megadesk_crm_opportunities
+           WHERE client_id = ? AND status = 'open'`,
+          [tenantId]
+        )) as any[];
+        oportunidades = Number(oppsRows?.[0]?.total || 0);
+      } catch {}
+
+      try {
+        const [trackRows] = (await pool.execute(
+          `SELECT COUNT(*) AS total FROM megadesk_domain_operational_records
+           WHERE client_id = ? AND record_type = 'tracking'
+             AND (status IS NULL OR LOWER(status) NOT IN ('delivered', 'entregue', 'closed', 'fechado'))`,
+          [tenantId]
+        )) as any[];
+        rastreios = Number(trackRows?.[0]?.total || 0);
+      } catch {}
+
+      // Candidatos a tarefas
+      const candidates: Array<{
+        title: string;
+        priority: "alta" | "media" | "baixa";
+        targetRoute: string;
+      }> = [];
+
+      if (filaEspera > 0) {
+        candidates.push({
+          title: `Zerar fila de atendimento do WhatsApp (${filaEspera} aguardando)`,
+          priority: "alta",
+          targetRoute: "conversations",
+        });
+      }
+
+      if (criticos > 0) {
+        candidates.push({
+          title: `Atuar com prioridade nos chamados técnicos críticos (${criticos} pendente(s))`,
+          priority: "alta",
+          targetRoute: "tickets",
+        });
+      }
+
+      if (novosAbertos > 0) {
+        candidates.push({
+          title: `Triar e atribuir os novos chamados recebidos hoje (${novosAbertos} pendente(s))`,
+          priority: "media",
+          targetRoute: "tickets",
+        });
+      }
+
+      if (oportunidades > 0) {
+        candidates.push({
+          title: `Fazer follow-up ativo das propostas comerciais abertas no CRM (${oportunidades})`,
+          priority: "media",
+          targetRoute: "crm-proposals",
+        });
+      }
+
+      if (rastreios > 0) {
+        candidates.push({
+          title: `Verificar status de entrega e trânsito dos envios ativos (${rastreios})`,
+          priority: "baixa",
+          targetRoute: "tracking",
+        });
+      }
+
+      // Preenchimento de rotina caso faltem candidatos
+      if (candidates.length < 3) {
+        candidates.push({
+          title: "Revisar mensagens não lidas e garantir retorno a todos os contatos",
+          priority: "baixa",
+          targetRoute: "conversations",
+        });
+      }
+      if (candidates.length < 3) {
+        candidates.push({
+          title: "Auditar encerramento dos chamados concluídos no turno",
+          priority: "baixa",
+          targetRoute: "tickets",
+        });
+      }
+
+      const tasksToInsert = candidates.slice(0, 3);
+      const insertedList = [];
+
+      for (const t of tasksToInsert) {
+        const id = `ai-task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        await pool.execute(
+          `INSERT INTO megadesk_daily_action_tasks
+            (id, tenant_id, user_id, title, priority, target_route, completed, task_date)
+           VALUES (?, ?, ?, ?, ?, ?, FALSE, CURRENT_DATE())`,
+          [id, tenantId, userId, t.title, t.priority, t.targetRoute]
+        );
+        insertedList.push({
+          id,
+          title: t.title,
+          priority: t.priority,
+          targetRoute: t.targetRoute,
+          completed: false,
+          suggestedByAi: true,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      return insertedList;
+    } catch {
+      return [];
+    }
+  }),
   // ════════════════════════════════════════════════════════════════════════════
   // ABA GERAL — Dados da empresa
   // ════════════════════════════════════════════════════════════════════════════

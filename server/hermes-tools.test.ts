@@ -329,5 +329,40 @@ describe("Hermes Tools (Vercel AI SDK - hermes-tools.ts)", () => {
       expect(result.iaTokens?.observacao).toContain("administradores");
     });
   });
+
+  describe("create_daily_action_task tool", () => {
+    it("creates and registers a daily actionable task successfully", async () => {
+      const executedSqls: string[] = [];
+      const pool = {
+        execute: vi.fn(async (sql: string, params?: any[]) => {
+          executedSqls.push(sql);
+          return [[]];
+        }),
+      };
+
+      const tools = createHermesTools({
+        clientId: "tenant-tasks-test",
+        userId: "user-123",
+        pool,
+      });
+
+      expect(tools.create_daily_action_task).toBeDefined();
+
+      const result = await tools.create_daily_action_task.execute({
+        title: "Atuar nos 3 chamados críticos prioritários",
+        priority: "alta",
+        targetRoute: "tickets",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.task).toBeDefined();
+      expect(result.task.title).toBe("Atuar nos 3 chamados críticos prioritários");
+      expect(result.task.priority).toBe("alta");
+      expect(result.task.targetRoute).toBe("tickets");
+      expect(result.task.suggestedByAi).toBe(true);
+      expect(executedSqls.some((s) => s.includes("CREATE TABLE IF NOT EXISTS megadesk_daily_action_tasks"))).toBe(true);
+      expect(executedSqls.some((s) => s.includes("INSERT INTO megadesk_daily_action_tasks"))).toBe(true);
+    });
+  });
 });
 

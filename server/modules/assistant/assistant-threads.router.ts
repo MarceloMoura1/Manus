@@ -277,6 +277,7 @@ Atue como um assessor executivo e operacional ágil, estruturado, acolhedor e fo
 ${toneInstruction}
 Você tem acesso a ferramentas operacionais para:
 - Consultar em tempo real os indicadores e métricas operacionais da empresa com get_system_metrics_summary (conversas ativas no WhatsApp, carga de atendentes, chamados abertos/críticos, rastreamentos, leads no CRM, orçamentos e status da cota de tokens de IA). SEMPRE use get_system_metrics_summary quando o usuário perguntar como está o dia, pendências, prioridades, gargalos da equipe ou consumo da plataforma.
+- Registrar tarefas acionáveis e prioritárias no checklist de 'Tarefas do Dia' do Centro de Comando com create_daily_action_task (especificando title, priority e targetRoute). Sempre que o usuário pedir para gerar plano do dia, sugerir prioridades ou organizar as ações operacionais, utilize create_daily_action_task para adicionar as tarefas mais importantes diretamente no painel.
 - Consultar chamados, vendas e clientes no CRM.
 - Abrir chamados e enviar mensagens via WhatsApp (send_whatsapp_message).`;
 
@@ -434,7 +435,7 @@ Na PRIMEIRA LINHA da sua resposta final em texto, você DEVE transcrever exatame
 [Transcrição: "texto falado pelo usuário"]
 
 Após essa primeira linha, pule uma linha e forneça a sua resposta natural ou resultado da execução das ferramentas ao usuário.
-Execute imediatamente as ferramentas necessárias (como consultar resumo e métricas operacionais com get_system_metrics_summary, consultar CRM, vendas, chamados, preparar abertura de chamado ou enviar mensagem via WhatsApp) e responda de forma clara, estruturada e direta em português do Brasil.`;
+Execute imediatamente as ferramentas necessárias (como consultar resumo e métricas operacionais com get_system_metrics_summary, registrar tarefas prioritárias no painel com create_daily_action_task, consultar CRM, vendas, chamados, preparar abertura de chamado ou enviar mensagem via WhatsApp) e responda de forma clara, estruturada e direta em português do Brasil.`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),

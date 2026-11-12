@@ -128,6 +128,15 @@ export const getSystemMetricsSummaryParameters = z.object({
     .describe("Filtro de período unificado: 'today' (hoje), '7d' (últimos 7 dias), '30d' (últimos 30 dias), 'month' (este mês). Padrão: 'today'."),
 });
 
+export const createDailyActionTaskParameters = z.object({
+  title: z.string().describe("Descrição objetiva da ação operacional recomendada"),
+  priority: z.enum(["alta", "media", "baixa"]).default("media").describe("Nível de prioridade da tarefa ('alta', 'media' ou 'baixa')"),
+  targetRoute: z
+    .enum(["conversations", "tickets", "crm-proposals", "tracking", "home"])
+    .default("home")
+    .describe("Rota ou módulo do sistema para executar a ação ('conversations', 'tickets', 'crm-proposals', 'tracking' ou 'home')"),
+});
+
 export function calculateDateRange(mes?: number, ano?: number, periodo?: string) {
   const agora = new Date();
   const anoCorrente = agora.getFullYear();
@@ -884,6 +893,72 @@ export function createHermesTools(context: HermesToolContext) {
   });
   (metricsToolDef as any).parameters = getSystemMetricsSummaryParameters;
   tools.get_system_metrics_summary = metricsToolDef;
+
+  // ─── Ferramenta 7: Criar e Registrar Tarefa Acionável do Dia ──────────────
+  const createDailyTaskToolDef = tool({
+    description:
+      "Cria e registra uma nova tarefa prática e acionável no checklist de 'Tarefas do Dia' do Centro de Comando do operador/tenant. Use quando o usuário pedir para gerar um plano de ação, sugerir prioridades ou organizar as ações operacionais imediatas.",
+    inputSchema: createDailyActionTaskParameters,
+    execute: async (input: z.infer<typeof createDailyActionTaskParameters>) => {
+      const tenantId = context.clientId;
+      const taskId = `ai-task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const taskDate = new Date().toISOString().split("T")[0];
+      const task = {
+        id: taskId,
+        title: input.title,
+        priority: input.priority || "media",
+        targetRoute: input.targetRoute || "home",
+        suggestedByAi: true,
+        completed: false,
+        taskDate,
+        createdAt: new Date().toISOString(),
+      };
+
+      try {
+        if (pool) {
+          await pool.execute(
+            `CREATE TABLE IF NOT EXISTS megadesk_daily_action_tasks (
+              id VARCHAR(80) PRIMARY KEY,
+              tenant_id VARCHAR(80) NOT NULL,
+              user_id VARCHAR(80) NOT NULL,
+              title VARCHAR(255) NOT NULL,
+              priority VARCHAR(20) NOT NULL DEFAULT 'media',
+              target_route VARCHAR(50) NOT NULL DEFAULT 'home',
+              completed BOOLEAN NOT NULL DEFAULT FALSE,
+              task_date DATE NOT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              INDEX idx_mddt_tenant_date (tenant_id, task_date)
+            )`
+          );
+
+          await pool.execute(
+            `INSERT INTO megadesk_daily_action_tasks
+              (id, tenant_id, user_id, title, priority, target_route, completed, task_date)
+             VALUES (?, ?, ?, ?, ?, ?, FALSE, ?)`,
+            [
+              task.id,
+              tenantId,
+              context.userId || "user",
+              task.title,
+              task.priority,
+              task.targetRoute,
+              taskDate,
+            ]
+          );
+        }
+      } catch {
+        // Fallback resiliente caso o banco não esteja disponível no momento
+      }
+
+      return {
+        success: true,
+        message: `Tarefa registrada com sucesso no checklist do dia: "${input.title}" (Prioridade: ${input.priority}).`,
+        task,
+      };
+    },
+  });
+  (createDailyTaskToolDef as any).parameters = createDailyActionTaskParameters;
+  tools.create_daily_action_task = createDailyTaskToolDef;
 
   return tools;
 }

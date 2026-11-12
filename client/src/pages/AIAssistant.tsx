@@ -951,67 +951,89 @@ export function AIAssistant() {
     return null;
   };
 
-  const handleSendText = async () => {
-    const text = input.trim();
-    if (!text || isSendingText || isProcessingAudio) return;
+  const sendCustomText = useCallback(
+    async (textToSend: string) => {
+      const text = textToSend.trim();
+      if (!text || isSendingText || isProcessingAudio) return;
 
-    // 1. Limpa o input imediatamente
-    setInput("");
+      setInput("");
 
-    // 2. Cria mensagem otimista temporária do usuário
-    const tempId = `temp-${Date.now()}`;
-    const optimisticMsg: ThreadMessage = {
-      id: tempId,
-      threadId: selectedThreadId || "pending-thread",
-      role: "user",
-      content: text,
-      createdAt: new Date(),
-    };
-
-    // 3. Adiciona imediatamente ao estado local de mensagens
-    setLocalMessages((prev) => [...prev, optimisticMsg]);
-
-    // 4. Ativa estado de carregamento / digitando
-    setIsSendingText(true);
-
-    // 5. Rola suavemente para o rodapé
-    scrollToBottom("smooth");
-
-    try {
-      const targetThreadId = await ensureActiveThreadId();
-      if (!targetThreadId) {
-        setIsSendingText(false);
-        setLocalMessages((prev) => prev.filter((m) => m.id !== tempId));
-        return;
-      }
-
-      const result = await sendMessageMutation.mutateAsync({
-        threadId: targetThreadId,
+      const tempId = `temp-${Date.now()}`;
+      const optimisticMsg: ThreadMessage = {
+        id: tempId,
+        threadId: selectedThreadId || "pending-thread",
+        role: "user",
         content: text,
-        settings: {
-          tone: settingsConfig.tone,
-          hitlRequired: settingsConfig.hitlRequired,
-          handsFreeAudio: settingsConfig.handsFreeAudio,
-          autoTranscribe: settingsConfig.autoTranscribe,
-        },
-      });
+        createdAt: new Date(),
+      };
 
-      // Atualiza com as mensagens reais retornadas pelo servidor
-      if (result?.userMessage && result?.assistantMessage) {
-        setLocalMessages((prev) => {
-          const withoutTemp = prev.filter((m) => m.id !== tempId);
-          return [...withoutTemp, result.userMessage as ThreadMessage, result.assistantMessage as ThreadMessage];
+      setLocalMessages((prev) => [...prev, optimisticMsg]);
+      setIsSendingText(true);
+      scrollToBottom("smooth");
+
+      try {
+        const targetThreadId = await ensureActiveThreadId();
+        if (!targetThreadId) {
+          setIsSendingText(false);
+          setLocalMessages((prev) => prev.filter((m) => m.id !== tempId));
+          return;
+        }
+
+        const result = await sendMessageMutation.mutateAsync({
+          threadId: targetThreadId,
+          content: text,
+          settings: {
+            tone: settingsConfig.tone,
+            hitlRequired: settingsConfig.hitlRequired,
+            handsFreeAudio: settingsConfig.handsFreeAudio,
+            autoTranscribe: settingsConfig.autoTranscribe,
+          },
         });
-      }
 
-      await trpcUtils?.assistantThreads?.getThreadMessages?.invalidate?.({ threadId: targetThreadId });
-      await trpcUtils?.assistantThreads?.listThreads?.invalidate?.();
-    } catch (err) {
-      console.error("[AIAssistant] Falha ao enviar mensagem:", err);
-      setLocalMessages((prev) => prev.filter((m) => m.id !== tempId));
-      setIsSendingText(false);
-    }
+        if (result?.userMessage && result?.assistantMessage) {
+          setLocalMessages((prev) => {
+            const withoutTemp = prev.filter((m) => m.id !== tempId);
+            return [...withoutTemp, result.userMessage as ThreadMessage, result.assistantMessage as ThreadMessage];
+          });
+        }
+
+        await trpcUtils?.assistantThreads?.getThreadMessages?.invalidate?.({ threadId: targetThreadId });
+        await trpcUtils?.assistantThreads?.listThreads?.invalidate?.();
+      } catch (err) {
+        console.error("[AIAssistant] Falha ao enviar mensagem:", err);
+        setLocalMessages((prev) => prev.filter((m) => m.id !== tempId));
+        setIsSendingText(false);
+      }
+    },
+    [ensureActiveThreadId, isProcessingAudio, isSendingText, scrollToBottom, selectedThreadId, sendMessageMutation, settingsConfig, trpcUtils]
+  );
+
+  const handleSendText = async () => {
+    await sendCustomText(input);
   };
+
+  // Processamento de Handoff Contextualizado vindo do Centro de Comando ou outras rotas
+  const prefillHandledRef = useRef(false);
+  useEffect(() => {
+    if (prefillHandledRef.current) return;
+    try {
+      const raw = sessionStorage.getItem("megadesk:assistant:prefill-context");
+      if (raw) {
+        sessionStorage.removeItem("megadesk:assistant:prefill-context");
+        prefillHandledRef.current = true;
+        const parsed = JSON.parse(raw);
+        if (parsed?.prompt) {
+          setActiveTab("chat");
+          if (parsed.autoSend) {
+            void sendCustomText(parsed.prompt);
+          } else {
+            setInput(parsed.prompt);
+            textareaRef.current?.focus();
+          }
+        }
+      }
+    } catch {}
+  }, [sendCustomText]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {

@@ -192,5 +192,9 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
     expect(aiAssistantSource).toContain('data-testid="ai-composer-container"');
     expect(aiAssistantSource).toContain("flex-shrink-0 z-20 w-full");
     expect(aiAssistantSource).toContain("mb-16 md:mb-0");
+
+    // Contextual handoff prefill
+    expect(aiAssistantSource).toContain("megadesk:assistant:prefill-context");
+    expect(aiAssistantSource).toContain("sendCustomText");
   });
 });

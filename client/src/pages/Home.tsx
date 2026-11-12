@@ -123,6 +123,7 @@ import {
   LogOut,
   RotateCcw,
   SlidersHorizontal,
+  Loader2,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -620,6 +621,48 @@ function DashboardPage({
     };
   }, [filaEspera, criticosUrgentes, conversasAbertas, chamadosAtivos]);
 
+  // Handoff contextualizado para o Assistente IA
+  const triggerAssistantWithContext = (prompt: string, autoSend = true) => {
+    try {
+      sessionStorage.setItem(
+        "megadesk:assistant:prefill-context",
+        JSON.stringify({ prompt, autoSend, timestamp: Date.now() })
+      );
+    } catch {}
+    setActive("ai-assistant");
+  };
+
+  // Consulta e mutação de tarefas do dia sugeridas pelo Assistente IA
+  const dailyTasksQuery = trpc.megadeskSettings.listDailyActionTasks.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    staleTime: 10_000,
+  });
+
+  const suggestDailyPlanMutation = trpc.megadeskSettings.suggestDailyPlan.useMutation({
+    onSuccess: () => {
+      void dailyTasksQuery.refetch();
+    },
+  });
+
+  const hasActivePendencies =
+    filaEspera > 0 || criticosUrgentes > 0 || novosAbertos > 0 || oportunidadesAbertas > 0;
+
+  const handleHeroAssistantClick = () => {
+    if (hasActivePendencies) {
+      const pendenciasTxt: string[] = [];
+      if (filaEspera > 0) pendenciasTxt.push(`${filaEspera} conversas na fila do WhatsApp aguardando retorno`);
+      if (criticosUrgentes > 0) pendenciasTxt.push(`${criticosUrgentes} chamados técnicos críticos/urgentes`);
+      if (novosAbertos > 0) pendenciasTxt.push(`${novosAbertos} novos chamados precisando de triagem`);
+      if (oportunidadesAbertas > 0) pendenciasTxt.push(`${oportunidadesAbertas} propostas abertas no CRM (${formatCurrency(valorPipeline)})`);
+      if (rastreamentosAtivos > 0) pendenciasTxt.push(`${rastreamentosAtivos} envios em rastreamento`);
+
+      const prompt = `Olá! Analise as prioridades operacionais atuais da nossa operação:\n- ${pendenciasTxt.join("\n- ")}\n\nConsulte os detalhes com get_system_metrics_summary se necessário e trace um plano de ação imediato para resolver essas pendências com máxima agilidade, sugerindo ações prioritárias.`;
+      triggerAssistantWithContext(prompt, true);
+    } else {
+      setActive("ai-assistant");
+    }
+  };
+
   // Controle de tarefas diárias salvas por dia e tenant
   const todayKey = React.useMemo(() => {
     const d = new Date();
@@ -655,7 +698,24 @@ function DashboardPage({
       urgent?: boolean;
       route?: RouteId;
       actionLabel?: string;
+      suggestedByAi?: boolean;
     }> = [];
+
+    // Tarefas geradas pelo Assistente IA persistidas no banco do tenant
+    const suggested = dailyTasksQuery.data || [];
+    for (const t of suggested) {
+      list.push({
+        id: t.id,
+        title: t.title,
+        description: "Ação estratégica gerada com base nas prioridades operacionais do dia.",
+        badge: "Sugerido pelo Assistente",
+        badgeColor: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300",
+        urgent: t.priority === "alta",
+        route: (t.targetRoute || "home") as RouteId,
+        actionLabel: t.targetRoute === "conversations" ? "Atender" : t.targetRoute === "tickets" ? "Resolver" : t.targetRoute === "crm-proposals" ? "Ver propostas" : "Abrir",
+        suggestedByAi: true,
+      });
+    }
 
     // Pendências reais
     if (filaEspera > 0) {
@@ -758,7 +818,7 @@ function DashboardPage({
     });
 
     return list;
-  }, [filaEspera, criticosUrgentes, novosAbertos, oportunidadesAbertas, valorPipeline, rastreamentosAtivos]);
+  }, [filaEspera, criticosUrgentes, novosAbertos, oportunidadesAbertas, valorPipeline, rastreamentosAtivos, dailyTasksQuery.data]);
 
   const totalTasks = dailyTasks.length;
   const completedTasks = dailyTasks.filter(t => checkedTasks[t.id]).length;
@@ -1018,11 +1078,12 @@ function DashboardPage({
                   <div className="flex flex-wrap items-center gap-3 pt-1">
                     <button
                       type="button"
-                      onClick={() => setActive("ai-assistant")}
+                      onClick={handleHeroAssistantClick}
                       className="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl transition-all duration-200 shadow-lg shadow-blue-500/30 hover:-translate-y-0.5 active:scale-95 cursor-pointer flex items-center gap-2"
+                      title={hasActivePendencies ? "Abrir plano de ação imediato no Assistente IA com as pendências atuais" : "Abrir conversa com o Assistente IA"}
                     >
                       <Sparkles className="w-4 h-4 text-cyan-200" />
-                      <span>Abrir Assistente IA</span>
+                      <span>{hasActivePendencies ? "Resolver Prioridades com IA" : "Abrir Assistente IA"}</span>
                     </button>
 
                     <button
@@ -1361,14 +1422,35 @@ function DashboardPage({
                         </div>
                       </div>
 
-                      {/* Barra sutil de progresso */}
-                      <div className="hidden sm:flex flex-col items-end gap-1">
-                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">{taskProgress}%</span>
-                        <div className="w-16 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-300"
-                            style={{ width: `${taskProgress}%` }}
-                          />
+                      {/* Ações e Progresso do Checklist */}
+                      <div className="flex items-center gap-2.5 sm:gap-3">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await suggestDailyPlanMutation.mutateAsync();
+                            } catch {}
+                          }}
+                          disabled={suggestDailyPlanMutation.isPending}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-all cursor-pointer disabled:opacity-50 shadow-2xs"
+                          title="Sugerir 3 prioridades operacionais personalizadas com o Assistente IA"
+                        >
+                          {suggestDailyPlanMutation.isPending ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                          )}
+                          <span>Sugerir Prioridades</span>
+                        </button>
+
+                        <div className="hidden sm:flex flex-col items-end gap-1">
+                          <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">{taskProgress}%</span>
+                          <div className="w-16 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-300"
+                              style={{ width: `${taskProgress}%` }}
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1430,16 +1512,31 @@ function DashboardPage({
                               </div>
                             </div>
 
-                            {/* Botão de Atalho Rápido para a Ferramenta */}
-                            {task.route && (
+                            {/* Botões de Ação: Auxiliar com IA + Atalho da Rota */}
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
                               <button
                                 type="button"
-                                onClick={() => setActive(task.route!)}
-                                className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shadow-2xs flex-shrink-0 cursor-pointer"
+                                onClick={() => {
+                                  const prompt = `Preciso de auxílio operacional para a seguinte pendência:\n"${task.title}" (${task.description}).\nPor favor, analise a situação e recomende o melhor procedimento ou próximas respostas.`;
+                                  triggerAssistantWithContext(prompt, true);
+                                }}
+                                className="px-2 py-1 text-[11px] font-semibold rounded-lg text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200/60 dark:border-indigo-800/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors flex items-center gap-1 cursor-pointer"
+                                title="Auxiliar na resolução desta pendência com o Assistente IA"
                               >
-                                {task.actionLabel || "Abrir"}
+                                <Sparkles className="w-3 h-3 text-indigo-500" />
+                                <span className="hidden sm:inline">Auxiliar IA</span>
                               </button>
-                            )}
+
+                              {task.route && (
+                                <button
+                                  type="button"
+                                  onClick={() => setActive(task.route!)}
+                                  className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shadow-2xs cursor-pointer"
+                                >
+                                  {task.actionLabel || "Abrir"}
+                                </button>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
