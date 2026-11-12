@@ -70,7 +70,6 @@ export function WhatsAppConfigPage() {
   });
 
   const isConnected =
-    status?.status === "open" ||
     status?.status === "connected" ||
     (status as any)?.state === "open";
 
@@ -131,7 +130,7 @@ export function WhatsAppConfigPage() {
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={() => disconnectMut.mutate({ clientId })}
+                    onClick={() => disconnectMut.mutate({ clientId, confirmation: "DESCONECTAR" })}
                     className="bg-red-600 hover:bg-red-700"
                   >
                     Confirmar Desconexão

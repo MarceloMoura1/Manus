@@ -7,28 +7,18 @@ import {
   Cpu,
   Plus,
   CheckCircle2,
-  XCircle,
   RefreshCw,
   QrCode,
-  ShieldCheck,
   Bot,
   ClipboardList,
-  Clock,
-  MessageSquare,
-  KeyRound,
-  Edit2,
-  Trash2,
-  Power,
-  AlertCircle,
+  ExternalLink,
   Loader2,
-  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AITokenUsagePage } from "@/pages/AITokenUsagePage";
@@ -54,26 +44,28 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
     onSuccess: () => {
       void teamUsersQuery.refetch();
       setIsAddUserOpen(false);
-      setNewUserForm({ name: "", email: "", password: "", role: "atendente" });
+      setNewUserForm({ name: "", email: "", password: "", role: "agent" });
     },
   });
 
   const updateTeamUserMutation = trpc.megadeskSettings.updateTeamUser.useMutation({
     onSuccess: () => {
       void teamUsersQuery.refetch();
-      setEditingUser(null);
     },
   });
 
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
-  const [newUserForm, setNewUserForm] = useState({
+  const [newUserForm, setNewUserForm] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    role: "admin" | "manager" | "agent" | "viewer";
+  }>({
     name: "",
     email: "",
     password: "",
-    role: "atendente" as "admin" | "atendente" | "financeiro" | "tecnico",
+    role: "agent",
   });
-
-  const [editingUser, setEditingUser] = useState<any | null>(null);
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,89 +73,102 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
     try {
       await addTeamUserMutation.mutateAsync({
         clientId: tenantKey,
+        userRole: "admin",
         name: newUserForm.name.trim(),
         email: newUserForm.email.trim(),
         password: newUserForm.password,
         role: newUserForm.role,
       });
-    } catch {}
+    } catch (err) {
+      console.error("[AdminUnifiedHub] Falha ao criar operador:", err);
+    }
   };
 
   const handleToggleUserActive = async (user: any) => {
     try {
       await updateTeamUserMutation.mutateAsync({
         clientId: tenantKey,
-        userId: user.id || user.userId,
-        active: !user.active,
+        userRole: "admin",
+        targetUserId: user.userId,
+        status: user.status === "active" ? "blocked" : "active",
       });
-    } catch {}
+    } catch (err) {
+      console.error("[AdminUnifiedHub] Falha ao alterar status:", err);
+    }
+  };
+
+  const roleLabels: Record<string, string> = {
+    admin: "Administrador",
+    manager: "Gerente",
+    agent: "Atendente",
+    viewer: "Visualizador",
   };
 
   // ──────────────────────────────────────────────────────────────────────────
-  // SUB-ABA 2: ATENDIMENTO & FLUXOS (STATUS DE CHAMADOS + BOT)
+  // SUB-ABA 2: ATENDIMENTO & FLUXOS (STATUS DE CHAMADOS + BOT SCRIPTS)
   // ──────────────────────────────────────────────────────────────────────────
   const ticketStatusesQuery = trpc.megadeskSettings.listTicketStatuses.useQuery(
     { clientId: tenantKey, userRole: "admin" },
     { staleTime: 30_000 }
   );
 
-  const botConfigQuery = trpc.bot.getTenantBotConfig.useQuery(
-    { tenantId: tenantKey },
+  const botScriptsQuery = trpc.botScripts.list.useQuery(
+    { clientId: tenantKey },
     { staleTime: 15_000 }
   );
 
-  const updateBotMutation = trpc.bot.updateTenantBotConfig.useMutation({
+  const botWorkspaceQuery = trpc.bot.getClientWorkspaceUrl.useQuery(
+    { clientId: tenantKey, userRole: "admin" },
+    { staleTime: 60_000 }
+  );
+
+  const activateBotScriptMut = trpc.botScripts.activate.useMutation({
     onSuccess: () => {
-      void botConfigQuery.refetch();
-      setBotSaveSuccess(true);
-      setTimeout(() => setBotSaveSuccess(false), 3000);
+      void botScriptsQuery.refetch();
     },
   });
 
-  const [botSaveSuccess, setBotSaveSuccess] = useState(false);
-  const [botForm, setBotForm] = useState<{
-    enabled: boolean;
-    operationalMode: "hybrid" | "bot_only" | "human_only";
-    businessHoursStart: string;
-    businessHoursEnd: string;
-    welcomeMessage: string;
-    transferMessage: string;
-  }>({
-    enabled: true,
-    operationalMode: "hybrid",
-    businessHoursStart: "08:00",
-    businessHoursEnd: "18:00",
-    welcomeMessage: "Olá! Como posso ajudar você hoje?",
-    transferMessage: "Estou transferindo você para um atendente humano especializado.",
+  const deactivateBotScriptMut = trpc.botScripts.deactivate.useMutation({
+    onSuccess: () => {
+      void botScriptsQuery.refetch();
+    },
   });
 
-  React.useEffect(() => {
-    if (botConfigQuery.data?.config) {
-      const c = botConfigQuery.data.config;
-      setBotForm({
-        enabled: Boolean(c.enabled),
-        operationalMode: (c.operationalMode || "hybrid") as any,
-        businessHoursStart: c.businessHoursStart || "08:00",
-        businessHoursEnd: c.businessHoursEnd || "18:00",
-        welcomeMessage: c.welcomeMessage || "Olá! Como posso ajudar você hoje?",
-        transferMessage: c.transferMessage || "Estou transferindo você para um atendente humano especializado.",
-      });
-    }
-  }, [botConfigQuery.data]);
+  const [isAddScriptOpen, setIsAddScriptOpen] = useState(false);
+  const [newScriptForm, setNewScriptForm] = useState({
+    name: "",
+    description: "",
+    systemPrompt: "Você é um assistente virtual prestativo que atende clientes com cordialidade.",
+    initialMessage: "Olá! Como posso ajudar você hoje?",
+  });
 
-  const handleSaveBotConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await updateBotMutation.mutateAsync({
-        tenantId: tenantKey,
-        enabled: botForm.enabled,
-        operationalMode: botForm.operationalMode,
-        businessHoursStart: botForm.businessHoursStart,
-        businessHoursEnd: botForm.businessHoursEnd,
-        welcomeMessage: botForm.welcomeMessage,
-        transferMessage: botForm.transferMessage,
+  const createBotScriptMut = trpc.botScripts.create.useMutation({
+    onSuccess: () => {
+      void botScriptsQuery.refetch();
+      setIsAddScriptOpen(false);
+      setNewScriptForm({
+        name: "",
+        description: "",
+        systemPrompt: "Você é um assistente virtual prestativo que atende clientes com cordialidade.",
+        initialMessage: "Olá! Como posso ajudar você hoje?",
       });
-    } catch {}
+    },
+  });
+
+  const handleCreateScript = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newScriptForm.name || !newScriptForm.systemPrompt) return;
+    try {
+      await createBotScriptMut.mutateAsync({
+        clientId: tenantKey,
+        name: newScriptForm.name.trim(),
+        description: newScriptForm.description.trim(),
+        systemPrompt: newScriptForm.systemPrompt.trim(),
+        initialMessage: newScriptForm.initialMessage.trim(),
+      });
+    } catch (err) {
+      console.error("[AdminUnifiedHub] Falha ao criar roteiro:", err);
+    }
   };
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -193,16 +198,15 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
   });
 
   const isWhatsAppConnected =
-    whatsappStatusQuery.data?.status === "open" ||
     whatsappStatusQuery.data?.status === "connected" ||
-    whatsappStatusQuery.data?.state === "open";
+    (whatsappStatusQuery.data as any)?.status === "open";
 
-  const connectedPhone = whatsappStatusQuery.data?.phoneNumber || whatsappStatusQuery.data?.phone || null;
+  const connectedPhone = whatsappStatusQuery.data?.phoneNumber || null;
 
   return (
     <div className="space-y-6">
       {/* Navegação por Sub-Abas do Hub Administrativo */}
-      <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 w-fit max-w-full overflow-x-auto no-scrollbar">
+      <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-muted/60 border border-border w-fit max-w-full overflow-x-auto no-scrollbar">
         {[
           { id: "equipe" as const, label: "Equipe & Operadores", icon: Users },
           { id: "fluxos" as const, label: "Atendimento & Fluxos", icon: SlidersHorizontal },
@@ -219,8 +223,8 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
               className={cn(
                 "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
                 isActive
-                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs font-bold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  ? "bg-card text-blue-600 dark:text-blue-400 shadow-xs font-bold"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Icon className="w-3.5 h-3.5" />
@@ -283,9 +287,9 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
                 </div>
               ) : (
                 teamUsersQuery.data?.map((user: any) => {
-                  const isActive = user.active !== false;
+                  const isActive = user.status === "active";
                   return (
-                    <div key={user.id || user.userId} className="p-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors">
+                    <div key={user.userId} className="p-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors">
                       <div className="min-w-0 flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 flex items-center justify-center font-bold text-xs uppercase flex-shrink-0">
                           {user.name ? user.name.slice(0, 2) : "OP"}
@@ -298,12 +302,13 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
 
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <Badge variant="outline" className="text-[10px] uppercase font-bold py-0.5">
-                          {user.role || "atendente"}
+                          {roleLabels[user.role] || user.role}
                         </Badge>
 
                         <button
                           type="button"
                           onClick={() => handleToggleUserActive(user)}
+                          disabled={updateTeamUserMutation.isPending}
                           className={cn(
                             "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer",
                             isActive
@@ -312,7 +317,7 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
                           )}
                           title={isActive ? "Desativar operador" : "Ativar operador"}
                         >
-                          {isActive ? "Ativo" : "Inativo"}
+                          {isActive ? "Ativo" : "Bloqueado"}
                         </button>
                       </div>
                     </div>
@@ -375,16 +380,18 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
                   <Label className="text-xs font-semibold text-foreground">Perfil de Acesso</Label>
                   <Select
                     value={newUserForm.role}
-                    onValueChange={(val: any) => setNewUserForm({ ...newUserForm, role: val })}
+                    onValueChange={(val: "admin" | "manager" | "agent" | "viewer") =>
+                      setNewUserForm({ ...newUserForm, role: val })
+                    }
                   >
                     <SelectTrigger className="text-xs">
                       <SelectValue placeholder="Selecione o perfil" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="atendente">Atendente (Conversas & Chamados)</SelectItem>
-                      <SelectItem value="tecnico">Técnico Operacional</SelectItem>
-                      <SelectItem value="financeiro">Financeiro / CRM</SelectItem>
+                      <SelectItem value="agent">Atendente (Conversas & Chamados)</SelectItem>
+                      <SelectItem value="manager">Gerente / Supervisor</SelectItem>
                       <SelectItem value="admin">Administrador Completo</SelectItem>
+                      <SelectItem value="viewer">Visualizador (Somente Leitura)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -449,112 +456,186 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
             </div>
           </div>
 
-          {/* Card 2: Atendimento Inteligente & Bot */}
+          {/* Card 2: Atendimento Inteligente & Robô de Triagem */}
           <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-xs">
-            <div className="flex items-center justify-between pb-3 mb-5 border-b border-border">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-5 border-b border-border">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400">
                   <Bot className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">Atendimento Inteligente & Triagem</h3>
-                  <p className="text-[11px] text-muted-foreground">Configuração de acolhimento automático e horários.</p>
+                  <h3 className="text-sm font-bold text-foreground">Roteiros de Atendimento Inteligente & Triagem</h3>
+                  <p className="text-[11px] text-muted-foreground">Configuração de fluxos e roteiros automáticos para WhatsApp.</p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-muted-foreground">Robô Ativo</span>
-                <Switch
-                  checked={botForm.enabled}
-                  onCheckedChange={(checked) => setBotForm({ ...botForm, enabled: checked })}
-                />
+                {botWorkspaceQuery.data?.url && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    asChild
+                    className="text-xs gap-1.5 cursor-pointer"
+                  >
+                    <a href={botWorkspaceQuery.data.url} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Construtor de Fluxos</span>
+                    </a>
+                  </Button>
+                )}
+                <Button
+                  onClick={() => setIsAddScriptOpen(true)}
+                  size="sm"
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl shadow-xs gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Novo Roteiro</span>
+                </Button>
               </div>
             </div>
 
-            <form onSubmit={handleSaveBotConfig} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-foreground">Modo de Operação</Label>
-                  <Select
-                    value={botForm.operationalMode}
-                    onValueChange={(val: any) => setBotForm({ ...botForm, operationalMode: val })}
-                  >
-                    <SelectTrigger className="text-xs">
-                      <SelectValue placeholder="Modo" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="hybrid">Híbrido (Triagem + Transbordo Humano)</SelectItem>
-                      <SelectItem value="bot_only">Somente Robô</SelectItem>
-                      <SelectItem value="human_only">Somente Atendimento Humano</SelectItem>
-                    </SelectContent>
-                  </Select>
+            <div className="space-y-3">
+              {botScriptsQuery.isLoading ? (
+                <div className="p-8 text-center text-xs text-muted-foreground">
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-purple-500" />
+                  Carregando roteiros...
                 </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-foreground">Início do Expediente</Label>
-                  <Input
-                    type="time"
-                    value={botForm.businessHoursStart}
-                    onChange={(e) => setBotForm({ ...botForm, businessHoursStart: e.target.value })}
-                    className="text-xs"
-                  />
+              ) : (botScriptsQuery.data?.length ?? 0) === 0 ? (
+                <div className="p-8 text-center text-xs text-muted-foreground bg-muted/20 rounded-xl">
+                  Nenhum roteiro de triagem cadastrado no momento. Crie um roteiro ou use o construtor visual.
                 </div>
+              ) : (
+                botScriptsQuery.data?.map((script: any) => {
+                  const isActive = Boolean(script.active);
+                  return (
+                    <div
+                      key={script.scriptId}
+                      className="p-4 rounded-xl border border-border bg-muted/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-muted/30 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-bold text-foreground truncate">{script.name}</h4>
+                          <Badge className={isActive ? "bg-emerald-500 text-white text-[9px]" : "bg-muted text-muted-foreground text-[9px]"}>
+                            {isActive ? "Em Operação" : "Pausado"}
+                          </Badge>
+                        </div>
+                        {script.description && (
+                          <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{script.description}</p>
+                        )}
+                        {script.initialMessage && (
+                          <p className="text-[11px] text-foreground/80 mt-1 italic">
+                            &quot;{script.initialMessage}&quot;
+                          </p>
+                        )}
+                      </div>
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-foreground">Fim do Expediente</Label>
-                  <Input
-                    type="time"
-                    value={botForm.businessHoursEnd}
-                    onChange={(e) => setBotForm({ ...botForm, businessHoursEnd: e.target.value })}
-                    className="text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-foreground">Mensagem de Boas-Vindas</Label>
-                <Input
-                  value={botForm.welcomeMessage}
-                  onChange={(e) => setBotForm({ ...botForm, welcomeMessage: e.target.value })}
-                  placeholder="Ex: Olá! Seja bem-vindo à nossa central."
-                  className="text-xs"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-foreground">Mensagem de Transbordo (Encaminhamento para Atendente)</Label>
-                <Input
-                  value={botForm.transferMessage}
-                  onChange={(e) => setBotForm({ ...botForm, transferMessage: e.target.value })}
-                  placeholder="Ex: Entendido! Estou transferindo seu atendimento para nossa equipe."
-                  className="text-xs"
-                />
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                {botSaveSuccess ? (
-                  <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5" />
-                    Parâmetros salvos com sucesso!
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-muted-foreground">
-                    As respostas do robô respeitam os limites operacionais e a política de transbordo.
-                  </span>
-                )}
-
-                <Button
-                  type="submit"
-                  disabled={updateBotMutation.isPending}
-                  size="sm"
-                  className="bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl shadow-xs cursor-pointer"
-                >
-                  {updateBotMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
-                  Salvar Parâmetros
-                </Button>
-              </div>
-            </form>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {isActive ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={deactivateBotScriptMut.isPending}
+                            onClick={() => deactivateBotScriptMut.mutate({ clientId: tenantKey, scriptId: script.scriptId })}
+                            className="text-xs text-amber-600 border-amber-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 cursor-pointer"
+                          >
+                            Pausar Roteiro
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            disabled={activateBotScriptMut.isPending}
+                            onClick={() => activateBotScriptMut.mutate({ clientId: tenantKey, scriptId: script.scriptId })}
+                            className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                          >
+                            Ativar no WhatsApp
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
+
+          {/* Modal de Criação de Roteiro */}
+          <Dialog open={isAddScriptOpen} onOpenChange={setIsAddScriptOpen}>
+            <DialogContent className="sm:max-w-lg bg-card border-border">
+              <DialogHeader>
+                <DialogTitle className="text-base font-bold text-foreground flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-purple-600" />
+                  Novo Roteiro de Atendimento
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Defina a instrução e acolhimento que o assistente utilizará para atender novos contatos.
+                </DialogDescription>
+              </DialogHeader>
+
+              <form onSubmit={handleCreateScript} className="space-y-4 py-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-foreground">Nome do Roteiro</Label>
+                  <Input
+                    required
+                    value={newScriptForm.name}
+                    onChange={(e) => setNewScriptForm({ ...newScriptForm, name: e.target.value })}
+                    placeholder="Ex: Triagem Geral de Clientes"
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-foreground">Descrição (Opcional)</Label>
+                  <Input
+                    value={newScriptForm.description}
+                    onChange={(e) => setNewScriptForm({ ...newScriptForm, description: e.target.value })}
+                    placeholder="Ex: Roteiro padrão para acolhimento inicial"
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-foreground">Mensagem Inicial de Acolhimento</Label>
+                  <Input
+                    value={newScriptForm.initialMessage}
+                    onChange={(e) => setNewScriptForm({ ...newScriptForm, initialMessage: e.target.value })}
+                    placeholder="Ex: Olá! Seja bem-vindo à nossa central de atendimento."
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-foreground">Instruções do Assistente (System Prompt)</Label>
+                  <Textarea
+                    required
+                    rows={4}
+                    value={newScriptForm.systemPrompt}
+                    onChange={(e) => setNewScriptForm({ ...newScriptForm, systemPrompt: e.target.value })}
+                    placeholder="Ex: Você é o assistente virtual da empresa. Responda educadamente e solicite o número do pedido ou CPF."
+                    className="text-xs resize-none"
+                  />
+                </div>
+
+                <DialogFooter className="pt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsAddScriptOpen(false)}
+                    className="text-xs cursor-pointer"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={createBotScriptMut.isPending}
+                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold cursor-pointer"
+                  >
+                    {createBotScriptMut.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
+                    Criar Roteiro
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
 
@@ -600,7 +681,7 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => disconnectWhatsAppMutation.mutate({ clientId: tenantKey })}
+                    onClick={() => disconnectWhatsAppMutation.mutate({ clientId: tenantKey, confirmation: "DESCONECTAR" })}
                     disabled={disconnectWhatsAppMutation.isPending}
                     className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
                   >
@@ -629,7 +710,7 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-center">
+                <div className="p-6 rounded-2xl bg-muted/20 border border-border flex flex-col items-center justify-center text-center">
                   {qrCodeData?.base64 ? (
                     <div className="flex flex-col items-center gap-4 py-2">
                       <div className="p-4 bg-white rounded-2xl shadow-md border border-slate-200">
@@ -661,7 +742,7 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
                     </div>
                   ) : (
                     <div className="py-6 flex flex-col items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500">
+                      <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center text-muted-foreground">
                         <QrCode className="w-6 h-6" />
                       </div>
                       <h4 className="text-sm font-bold text-foreground">WhatsApp Desconectado</h4>
@@ -698,5 +779,5 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
     </div>
   );
 }
-export default AdminUnifiedHub;
 
+export default AdminUnifiedHub;

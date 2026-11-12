@@ -35,6 +35,23 @@ describe("AiUsageService", () => {
       expect(daysRemaining).toBeGreaterThan(0);
       expect(daysRemaining).toBeLessThanOrEqual(6);
     });
+
+    it("correctly handles future contractual renewalDate by setting cycleStart 1 month prior", () => {
+      const refDate = new Date(2026, 10, 12); // 12 de Novembro de 2026
+      const renewalDate = new Date(2026, 10, 24, 0, 0, 0, 0); // 24 de Novembro de 2026
+      const { cycleStart, cycleEnd, daysRemaining } = calculateMonthlyBillingCycle(refDate, 1, renewalDate);
+
+      // cycleStart deve ser 24 de Outubro de 2026 (1 mês antes da renovação)
+      expect(cycleStart.getDate()).toBe(24);
+      expect(cycleStart.getMonth()).toBe(9); // Outubro
+      expect(cycleStart.getFullYear()).toBe(2026);
+      expect(cycleStart.getTime()).toBeLessThan(refDate.getTime()); // Passado, nunca futuro
+
+      // cycleEnd deve ser 24 de Novembro de 2026
+      expect(cycleEnd.getDate()).toBe(24);
+      expect(cycleEnd.getMonth()).toBe(10); // Novembro
+      expect(daysRemaining).toBe(12);
+    });
   });
 
   describe("recordAiUsageLog", () => {

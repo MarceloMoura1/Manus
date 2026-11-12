@@ -104,7 +104,8 @@ const FEATURE_LABELS: Record<AiFeatureSource, string> = {
 let tableEnsured = false;
 
 /**
- * Garante idempotentemente a existência da tabela megadesk_ai_usage_logs.
+ * Garante idempotentemente a existência e o tamanho correto das colunas da tabela megadesk_ai_usage_logs.
+ * Também sincroniza retroativamente registros legados de megadesk_ia_token_usage se existirem.
  */
 export async function ensureAiUsageLogsTable(poolOverride?: any): Promise<void> {
   if (tableEnsured) return;
@@ -113,13 +114,14 @@ export async function ensureAiUsageLogsTable(poolOverride?: any): Promise<void> 
     if (!pool) {
       pool = getPool();
     }
+    // Criação da tabela com colunas dimensionadas para IDs longos (ex: "cliente-uuid" = 44 chars)
     await pool.execute(`
       CREATE TABLE IF NOT EXISTS \`megadesk_ai_usage_logs\` (
-        \`id\` varchar(36) NOT NULL,
-        \`tenant_id\` varchar(36) NOT NULL,
-        \`user_id\` varchar(36),
+        \`id\` varchar(100) NOT NULL,
+        \`tenant_id\` varchar(100) NOT NULL,
+        \`user_id\` varchar(191),
         \`feature_source\` varchar(32) NOT NULL,
-        \`conversation_id\` varchar(36),
+        \`conversation_id\` varchar(191),
         \`prompt_tokens\` int NOT NULL,
         \`completion_tokens\` int NOT NULL,
         \`total_tokens\` int NOT NULL,
@@ -129,6 +131,19 @@ export async function ensureAiUsageLogsTable(poolOverride?: any): Promise<void> 
         KEY \`idx_ai_usage_tenant_user\` (\`tenant_id\`, \`user_id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    // Altera colunas existentes caso a tabela tenha sido criada anteriormente com varchar(36)
+    try {
+      await pool.execute(`
+        ALTER TABLE \`megadesk_ai_usage_logs\`
+        MODIFY \`id\` varchar(100) NOT NULL,
+        MODIFY \`tenant_id\` varchar(100) NOT NULL,
+        MODIFY \`user_id\` varchar(191) NULL,
+        MODIFY \`conversation_id\` varchar(191) NULL;
+      `);
+    } catch {
+      // Ignora erro se as colunas já estiverem no formato correto
+    }
 
     try {
       await pool.execute(`
@@ -148,6 +163,28 @@ export async function ensureAiUsageLogsTable(poolOverride?: any): Promise<void> 
       // Coluna já existente ou permissão restrita
     }
 
+    // Migração transparente de dados legados de megadesk_ia_token_usage se existirem
+    try {
+      await pool.execute(`
+        INSERT IGNORE INTO \`megadesk_ai_usage_logs\`
+          (\`id\`, \`tenant_id\`, \`user_id\`, \`feature_source\`, \`conversation_id\`, \`prompt_tokens\`, \`completion_tokens\`, \`total_tokens\`, \`created_at\`)
+        SELECT
+          \`id\`,
+          \`client_id\`,
+          \`user_email\`,
+          'assistant_chat',
+          \`conversation_id\`,
+          \`prompt_tokens\`,
+          \`completion_tokens\`,
+          \`total_tokens\`,
+          FROM_UNIXTIME(\`created_at\` / 1000)
+        FROM \`megadesk_ia_token_usage\`
+        WHERE \`created_at\` > 0;
+      `);
+    } catch {
+      // Tabela de origem pode não existir em outros ambientes
+    }
+
     tableEnsured = true;
   } catch (err) {
     console.warn("[AiUsageService] Aviso ao verificar tabela megadesk_ai_usage_logs:", err);
@@ -155,10 +192,10 @@ export async function ensureAiUsageLogsTable(poolOverride?: any): Promise<void> 
 }
 
 /**
- * Registra o consumo de tokens de forma não-bloqueante e assíncrona.
+ * Registra o consumo de tokens de forma persistente.
  * Suporta contagem real nativa e fallback seguro por estimativa de caracteres.
  */
-export async function recordAiUsageLog(input: RecordAiUsageInput): Promise<void> {
+export async function recordAiUsageLog(input: RecordAiUsageInput, poolOverride?: any): Promise<void> {
   const fromUsage = input.usage ? extractAiTokens(input.usage) : null;
   let promptTokens = Math.max(0, Math.round(input.promptTokens ?? fromUsage?.promptTokens ?? 0));
   let completionTokens = Math.max(0, Math.round(input.completionTokens ?? fromUsage?.completionTokens ?? 0));
@@ -191,8 +228,13 @@ export async function recordAiUsageLog(input: RecordAiUsageInput): Promise<void>
   const cleanTenantId = String(input.tenantId || "main").trim();
 
   try {
-    await ensureAiUsageLogsTable();
-    const pool = getPool();
+    await ensureAiUsageLogsTable(poolOverride);
+    let pool = poolOverride;
+    if (!pool) {
+      pool = getPool();
+    }
+    if (!pool) return;
+
     const id = randomUUID();
 
     await pool.execute(
@@ -210,17 +252,44 @@ export async function recordAiUsageLog(input: RecordAiUsageInput): Promise<void>
         totalTokens,
       ]
     );
+
+    // Gravação retrocompatível em megadesk_ia_token_usage (se existir a tabela)
+    try {
+      await pool.execute(
+        `INSERT INTO megadesk_ia_token_usage
+          (id, client_id, user_email, conversation_id, prompt_tokens, completion_tokens, total_tokens, model, function_calls_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          `tu-${id.slice(0, 20)}`,
+          cleanTenantId,
+          input.userId || "",
+          input.conversationId || "",
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          "ai-model",
+          0,
+          Date.now(),
+        ]
+      );
+    } catch {
+      // Ignora falha na tabela legada
+    }
   } catch (err) {
     console.error("[AiUsageService] Erro ao registrar log de consumo de IA:", err);
+    throw err;
   }
 }
 
 /**
  * Calcula as datas do ciclo mensal (início e término/renovação).
+ * Se houver renewalDate no futuro (ex: 24/11/2026), o início do ciclo é SEMPRE 1 mês antes (24/10/2026),
+ * garantindo que registros de hoje nunca sejam descartados pelo WHERE.
  */
 export function calculateMonthlyBillingCycle(
   referenceDate = new Date(),
-  billingDay = 1
+  billingDay = 1,
+  renewalDate?: Date | null
 ): { cycleStart: Date; cycleEnd: Date; daysRemaining: number } {
   const now = new Date(referenceDate);
   const currentYear = now.getFullYear();
@@ -230,12 +299,38 @@ export function calculateMonthlyBillingCycle(
   let cycleStart: Date;
   let cycleEnd: Date;
 
-  if (currentDay >= billingDay) {
-    cycleStart = new Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0);
-    cycleEnd = new Date(currentYear, currentMonth + 1, billingDay, 23, 59, 59, 999);
+  if (renewalDate && !isNaN(renewalDate.getTime())) {
+    const renTime = renewalDate.getTime();
+    if (renTime > now.getTime()) {
+      // Data de renovação contratual futura (ex: 24/11/2026)
+      cycleEnd = new Date(renewalDate);
+      // O início do ciclo é 1 mês antes da data de renovação
+      cycleStart = new Date(renewalDate.getFullYear(), renewalDate.getMonth() - 1, renewalDate.getDate(), 0, 0, 0, 0);
+
+      // Proteção de contingência: se cycleStart ainda estiver no futuro, fallback para o dia 1 do mês corrente
+      if (cycleStart.getTime() > now.getTime()) {
+        cycleStart = new Date(currentYear, currentMonth, 1, 0, 0, 0, 0);
+      }
+    } else {
+      // Data de renovação informada já passou; calcula próximo vencimento com base no dia correspondente
+      const renDay = Math.min(28, renewalDate.getDate());
+      if (currentDay >= renDay) {
+        cycleStart = new Date(currentYear, currentMonth, renDay, 0, 0, 0, 0);
+        cycleEnd = new Date(currentYear, currentMonth + 1, renDay, 23, 59, 59, 999);
+      } else {
+        cycleStart = new Date(currentYear, currentMonth - 1, renDay, 0, 0, 0, 0);
+        cycleEnd = new Date(currentYear, currentMonth, renDay, 23, 59, 59, 999);
+      }
+    }
   } else {
-    cycleStart = new Date(currentYear, currentMonth - 1, billingDay, 0, 0, 0, 0);
-    cycleEnd = new Date(currentYear, currentMonth, billingDay, 23, 59, 59, 999);
+    // Sem data explícita de renovação: calcula a partir de billingDay (default: 1)
+    if (currentDay >= billingDay) {
+      cycleStart = new Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0);
+      cycleEnd = new Date(currentYear, currentMonth + 1, billingDay, 23, 59, 59, 999);
+    } else {
+      cycleStart = new Date(currentYear, currentMonth - 1, billingDay, 0, 0, 0, 0);
+      cycleEnd = new Date(currentYear, currentMonth, billingDay, 23, 59, 59, 999);
+    }
   }
 
   const diffMs = cycleEnd.getTime() - now.getTime();
@@ -246,9 +341,14 @@ export function calculateMonthlyBillingCycle(
 
 /**
  * Consulta e consolida os dados de consumo de tokens para a empresa/tenant.
+ * Aceita tanto tenantId com prefixo "cliente-" quanto sem prefixo, unificando a busca.
  */
 export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: any): Promise<AiTokenUsageSummary> {
   const cleanTenantId = String(tenantId || "main").trim();
+  const altTenantId = cleanTenantId.startsWith("cliente-")
+    ? cleanTenantId.replace(/^cliente-/, "")
+    : `cliente-${cleanTenantId}`;
+
   await ensureAiUsageLogsTable(poolOverride);
   let pool = poolOverride;
   if (!pool) {
@@ -279,22 +379,35 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
   // 1. Obtém cota e dados do cliente/tenant
   let monthlyLimit = 1_000_000;
   let billingDay = 1;
+  let cycleRenewalDate: Date | null = null;
+  let canonicalClientId = cleanTenantId;
+  let internalClientId = cleanTenantId;
 
   try {
     const [clientRows] = await pool.execute(
-      `SELECT ai_monthly_token_limit, ai_cycle_renewal_date, created_at
+      `SELECT client_id, internal_id, ai_monthly_token_limit, ai_cycle_renewal_date, created_at
        FROM megadesk_domain_clients
-       WHERE client_id = ?
+       WHERE client_id IN (?, ?) OR internal_id IN (?, ?)
        LIMIT 1`,
-      [cleanTenantId]
+      [cleanTenantId, altTenantId, cleanTenantId, altTenantId]
     ) as any[];
 
     if (clientRows?.[0]) {
-      if (typeof clientRows[0].ai_monthly_token_limit === "number" && clientRows[0].ai_monthly_token_limit > 0) {
-        monthlyLimit = clientRows[0].ai_monthly_token_limit;
+      const client = clientRows[0];
+      if (client.client_id) canonicalClientId = client.client_id;
+      if (client.internal_id) internalClientId = client.internal_id;
+
+      if (typeof client.ai_monthly_token_limit === "number" && client.ai_monthly_token_limit > 0) {
+        monthlyLimit = client.ai_monthly_token_limit;
       }
-      if (clientRows[0].created_at) {
-        const created = new Date(clientRows[0].created_at);
+      if (client.ai_cycle_renewal_date) {
+        const ren = new Date(client.ai_cycle_renewal_date);
+        if (!isNaN(ren.getTime())) {
+          cycleRenewalDate = ren;
+        }
+      }
+      if (client.created_at) {
+        const created = new Date(client.created_at);
         if (!isNaN(created.getDate())) {
           billingDay = Math.min(28, created.getDate()); // Evita overflow de fevereiro
         }
@@ -304,7 +417,17 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
     console.warn("[AiUsageService] Aviso ao consultar limite do tenant em megadesk_domain_clients:", err);
   }
 
-  const { cycleStart, cycleEnd, daysRemaining } = calculateMonthlyBillingCycle(new Date(), billingDay);
+  const { cycleStart, cycleEnd, daysRemaining } = calculateMonthlyBillingCycle(
+    new Date(),
+    billingDay,
+    cycleRenewalDate
+  );
+
+  // Lista normalizada de identificadores de tenant para consulta abrangente
+  const tenantIds = Array.from(
+    new Set([cleanTenantId, altTenantId, canonicalClientId, internalClientId].filter(Boolean))
+  );
+  const tenantPlaceholders = tenantIds.map(() => "?").join(", ");
 
   // 2. Consulta o total consumido no ciclo atual
   let totalUsed = 0;
@@ -312,8 +435,8 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
     const [totalRows] = await pool.execute(
       `SELECT COALESCE(SUM(total_tokens), 0) as total_used
        FROM megadesk_ai_usage_logs
-       WHERE tenant_id = ? AND created_at >= ? AND created_at <= ?`,
-      [cleanTenantId, cycleStart, cycleEnd]
+       WHERE tenant_id IN (${tenantPlaceholders}) AND created_at >= ? AND created_at <= ?`,
+      [...tenantIds, cycleStart, cycleEnd]
     ) as any[];
 
     if (totalRows?.[0]?.total_used) {
@@ -338,9 +461,9 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
     const [sourceRows] = await pool.execute(
       `SELECT feature_source, COALESCE(SUM(total_tokens), 0) as tokens
        FROM megadesk_ai_usage_logs
-       WHERE tenant_id = ? AND created_at >= ? AND created_at <= ?
+       WHERE tenant_id IN (${tenantPlaceholders}) AND created_at >= ? AND created_at <= ?
        GROUP BY feature_source`,
-      [cleanTenantId, cycleStart, cycleEnd]
+      [...tenantIds, cycleStart, cycleEnd]
     ) as any[];
 
     for (const row of sourceRows || []) {
@@ -379,34 +502,36 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
     const [operatorRows] = await pool.execute(
       `SELECT user_id, COALESCE(SUM(total_tokens), 0) as tokens
        FROM megadesk_ai_usage_logs
-       WHERE tenant_id = ? AND created_at >= ? AND created_at <= ?
+       WHERE tenant_id IN (${tenantPlaceholders}) AND created_at >= ? AND created_at <= ?
        GROUP BY user_id
        ORDER BY tokens DESC`,
-      [cleanTenantId, cycleStart, cycleEnd]
+      [...tenantIds, cycleStart, cycleEnd]
     ) as any[];
 
-    // Tenta mapear nomes dos operadores em megadesk_domain_client_users ou users
-    const [userNames] = await pool.execute(
-      `SELECT user_id, name, email
-       FROM megadesk_domain_client_users
-       WHERE client_id = ?`,
-      [cleanTenantId]
-    ) as any[];
+    // Tenta mapear nomes dos operadores em megadesk_domain_client_users
+    try {
+      const [userNames] = await pool.execute(
+        `SELECT user_id, name, email
+         FROM megadesk_domain_client_users
+         WHERE client_id IN (${tenantPlaceholders})`,
+        [...tenantIds]
+      ) as any[];
 
-    for (const u of userNames || []) {
-      if (u.user_id) {
-        userNameMap.set(String(u.user_id).toLowerCase(), {
-          name: u.name || u.email || "Operador",
-          email: u.email,
-        });
+      for (const u of userNames || []) {
+        if (u.user_id) {
+          userNameMap.set(String(u.user_id).toLowerCase(), {
+            name: u.name || u.email || "Operador",
+            email: u.email,
+          });
+        }
+        if (u.email) {
+          userNameMap.set(String(u.email).toLowerCase(), {
+            name: u.name || u.email || "Operador",
+            email: u.email,
+          });
+        }
       }
-      if (u.email) {
-        userNameMap.set(String(u.email).toLowerCase(), {
-          name: u.name || u.email || "Operador",
-          email: u.email,
-        });
-      }
-    }
+    } catch {}
 
     for (const row of operatorRows || []) {
       const rawUserId = row.user_id ? String(row.user_id).trim() : null;
@@ -461,10 +586,10 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
     const [recentRows] = await pool.execute(
       `SELECT id, user_id, feature_source, prompt_tokens, completion_tokens, total_tokens, created_at
        FROM megadesk_ai_usage_logs
-       WHERE tenant_id = ?
+       WHERE tenant_id IN (${tenantPlaceholders})
        ORDER BY created_at DESC
        LIMIT 10`,
-      [cleanTenantId]
+      [...tenantIds]
     ) as any[];
 
     for (const row of recentRows || []) {
@@ -504,4 +629,3 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
     recent_activity: recentActivity,
   };
 }
-

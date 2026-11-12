@@ -289,15 +289,19 @@ Você tem acesso a ferramentas operacionais para:
             stopWhen: isStepCount(5),
           });
 
-          void recordAiUsageLog({
-            tenantId,
-            userId,
-            featureSource: "assistant_chat",
-            conversationId: input.threadId,
-            usage: aiResult.usage,
-            promptText: input.content,
-            completionText: aiResult.text || "",
-          });
+          try {
+            await recordAiUsageLog({
+              tenantId,
+              userId,
+              featureSource: "assistant_chat",
+              conversationId: input.threadId,
+              usage: aiResult.usage,
+              promptText: input.content,
+              completionText: aiResult.text || "",
+            });
+          } catch (usageErr) {
+            console.error("[ai-usage] failed to record in assistant-threads text:", usageErr);
+          }
 
           const toolMetadata = extractToolMetadata(aiResult);
           const pendingReq = toolMetadata?.pendingActionRequest as any;
@@ -447,15 +451,19 @@ Execute imediatamente as ferramentas necessárias (como consultar resumo e métr
             stopWhen: isStepCount(5),
           });
 
-          void recordAiUsageLog({
-            tenantId,
-            userId,
-            featureSource: "assistant_chat",
-            conversationId: input.threadId,
-            usage: aiResult.usage,
-            fallbackPromptChars: 200,
-            completionText: aiResult.text || "",
-          });
+          try {
+            await recordAiUsageLog({
+              tenantId,
+              userId,
+              featureSource: "assistant_chat",
+              conversationId: input.threadId,
+              usage: aiResult.usage,
+              fallbackPromptChars: 200,
+              completionText: aiResult.text || "",
+            });
+          } catch (usageErr) {
+            console.error("[ai-usage] failed to record in assistant-threads audio:", usageErr);
+          }
 
           let rawText = aiResult.text?.trim() || "";
           let transcription = "";

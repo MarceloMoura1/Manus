@@ -390,13 +390,14 @@ export const megadeskSettingsRouter = router({
 
         // Atividades recentes de IA
         try {
+          const altTenant = tenantId.startsWith("cliente-") ? tenantId.replace(/^cliente-/, "") : `cliente-${tenantId}`;
           const [iaRecentes] = (await pool.execute(
             `SELECT id, feature_source, total_tokens, created_at
-             FROM megadesk_ai_token_usage
-            WHERE tenant_id = ?
+             FROM megadesk_ai_usage_logs
+            WHERE tenant_id IN (?, ?)
             ORDER BY created_at DESC
             LIMIT 4`,
-            [tenantId]
+            [tenantId, altTenant]
           )) as any[];
           for (const ia of (iaRecentes || [])) {
             const d = new Date(ia.created_at || Date.now());

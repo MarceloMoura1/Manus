@@ -190,13 +190,19 @@ Execute imediatamente as ferramentas necessárias do tenant (consultar CRM, vend
       stopWhen: isStepCount(5),
     });
 
-    void recordAiUsageLog({
-      tenantId,
-      userId,
-      featureSource: "voice_shortcut",
-      conversationId: dailyThread.id,
-      usage: aiResult.usage,
-    });
+    try {
+      await recordAiUsageLog({
+        tenantId,
+        userId,
+        featureSource: "voice_shortcut",
+        conversationId: dailyThread.id,
+        usage: aiResult.usage,
+        promptText: rawText,
+        completionText: aiResult.text || "",
+      });
+    } catch (usageErr) {
+      console.error("[ai-usage] failed to record in voice-shortcut:", usageErr);
+    }
 
     const toolMetadata = extractToolMetadata(aiResult);
     const pendingReq = toolMetadata?.pendingActionRequest as any;

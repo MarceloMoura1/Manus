@@ -4000,15 +4000,19 @@ async function chatWithClientGeminiInternal(
     clientId, userId, userMessage, finalResponse, tokensUsed
   );
 
-  void recordAiUsageLog({
-    tenantId: clientId,
-    userId: userId || undefined,
-    featureSource: "assistant_chat",
-    conversationId: String(conversationId || ""),
-    usage: aiResult?.usage,
-    promptText: userMessage,
-    completionText: finalResponse,
-  });
+  try {
+    await recordAiUsageLog({
+      tenantId: clientId,
+      userId: userId || undefined,
+      featureSource: "assistant_chat",
+      conversationId: String(conversationId || ""),
+      usage: aiResult?.usage,
+      promptText: userMessage,
+      completionText: finalResponse,
+    });
+  } catch (usageErr) {
+    console.error("[ai-usage] failed to record in gemini-client:", usageErr);
+  }
 
   if (tokensUsed > 0) {
     try {

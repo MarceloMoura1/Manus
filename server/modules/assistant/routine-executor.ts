@@ -85,15 +85,19 @@ Não gere mensagens de confirmação de aprovação nem faça perguntas ao usuá
         aiResult.text?.trim() ||
         `Rotina "${routine.title}" executada com sucesso. Nenhuma ação pendente ou anomalia detectada.`;
 
-      void recordAiUsageLog({
-        tenantId: routine.tenantId,
-        userId: routine.userId,
-        featureSource: "automation",
-        conversationId: routine.id,
-        usage: aiResult.usage,
-        promptText,
-        completionText: outputSummary,
-      });
+      try {
+        await recordAiUsageLog({
+          tenantId: routine.tenantId,
+          userId: routine.userId,
+          featureSource: "automation",
+          conversationId: routine.id,
+          usage: aiResult.usage,
+          promptText,
+          completionText: outputSummary,
+        });
+      } catch (usageErr) {
+        console.error("[ai-usage] failed to record in routine-executor:", usageErr);
+      }
     }
 
     // 1. Salvar na thread "Operações do Dia" se o canal for chat_thread (ou default)

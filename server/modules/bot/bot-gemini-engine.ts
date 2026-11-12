@@ -263,14 +263,18 @@ Diretrizes obrigatórias de comportamento:
 
     let replyText = (aiResult.text || "").trim();
 
-    void recordAiUsageLog({
-      tenantId,
-      featureSource: "whatsapp_bot",
-      conversationId,
-      usage: aiResult.usage,
-      promptText: text,
-      completionText: replyText,
-    });
+    try {
+      await recordAiUsageLog({
+        tenantId,
+        featureSource: "whatsapp_bot",
+        conversationId,
+        usage: aiResult.usage,
+        promptText: text,
+        completionText: replyText,
+      });
+    } catch (usageErr) {
+      console.error("[ai-usage] failed to record in bot-gemini-engine:", usageErr);
+    }
 
     // 6. Se o transbordo humano foi acionado por ferramenta ou detecção
     if (requestedHumanTransfer) {
