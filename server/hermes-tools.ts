@@ -782,12 +782,12 @@ export function createHermesTools(context: HermesToolContext) {
           const [ticketsSummary] = (await pool.execute(
             `SELECT
                COUNT(*) AS totalAtivos,
-               SUM(CASE WHEN prioridade IN ('urgent', 'urgente', 'high', 'alta') THEN 1 ELSE 0 END) AS criticos,
-               SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS novosAbertos,
-               SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS emAndamento,
-               SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) AS aguardando
-             FROM chamados
-            WHERE client_id = ? AND status <> 'closed'`,
+               SUM(CASE WHEN LOWER(priority) IN ('critica', 'crítica', 'urgent', 'urgente', 'alta', 'high') THEN 1 ELSE 0 END) AS criticos,
+               SUM(CASE WHEN LOWER(status) IN ('open', 'aberto') THEN 1 ELSE 0 END) AS novosAbertos,
+               SUM(CASE WHEN LOWER(status) IN ('in_progress', 'em_andamento', 'andamento') THEN 1 ELSE 0 END) AS emAndamento,
+               SUM(CASE WHEN LOWER(status) IN ('waiting', 'aguardando') THEN 1 ELSE 0 END) AS aguardando
+             FROM megadesk_domain_chamados
+            WHERE clientId = ? AND LOWER(status) NOT IN ('closed', 'fechado', 'resolvido', 'concluido', 'concluído')`,
             [tenantId]
           )) as any[];
 
@@ -809,7 +809,9 @@ export function createHermesTools(context: HermesToolContext) {
           const [trackingRows] = (await pool.execute(
             `SELECT COUNT(*) AS total
              FROM megadesk_domain_operational_records
-            WHERE client_id = ? AND record_type = 'tracking'`,
+            WHERE client_id = ?
+              AND record_type = 'tracking'
+              AND (status IS NULL OR LOWER(status) NOT IN ('delivered', 'entregue', 'closed', 'fechado', 'finalizado', 'concluido', 'concluído'))`,
             [tenantId]
           )) as any[];
           result.rastreamentos = {

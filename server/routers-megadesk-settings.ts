@@ -74,6 +74,13 @@ export const megadeskSettingsRouter = router({
         oportunidadesAbertas: 0,
         valorPipelineEstimado: 0,
       },
+      atividadesRecentes: [] as Array<{
+        id: string;
+        tipo: "chamado" | "conversa" | "crm" | "assistente";
+        titulo: string;
+        descricao: string;
+        timestamp: number;
+      }>,
       iaTokens: null as {
         total_limit: number;
         total_used: number;
@@ -132,12 +139,12 @@ export const megadeskSettingsRouter = router({
       const [ticketsSummary] = (await pool.execute(
         `SELECT
            COUNT(*) AS totalAtivos,
-           SUM(CASE WHEN prioridade IN ('urgent', 'urgente', 'high', 'alta', 'critica') THEN 1 ELSE 0 END) AS criticos,
-           SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS novosAbertos,
-           SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS emAndamento,
-           SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) AS aguardando
-         FROM chamados
-        WHERE client_id = ? AND status <> 'closed'`,
+           SUM(CASE WHEN LOWER(priority) IN ('critica', 'crítica', 'urgent', 'urgente', 'alta', 'high') THEN 1 ELSE 0 END) AS criticos,
+           SUM(CASE WHEN LOWER(status) IN ('open', 'aberto') THEN 1 ELSE 0 END) AS novosAbertos,
+           SUM(CASE WHEN LOWER(status) IN ('in_progress', 'em_andamento', 'andamento') THEN 1 ELSE 0 END) AS emAndamento,
+           SUM(CASE WHEN LOWER(status) IN ('waiting', 'aguardando') THEN 1 ELSE 0 END) AS aguardando
+         FROM megadesk_domain_chamados
+        WHERE clientId = ? AND LOWER(status) NOT IN ('closed', 'fechado', 'resolvido', 'concluido', 'concluído')`,
         [tenantId]
       )) as any[];
 
@@ -157,7 +164,9 @@ export const megadeskSettingsRouter = router({
       const [trackingRows] = (await pool.execute(
         `SELECT COUNT(*) AS total
          FROM megadesk_domain_operational_records
-        WHERE client_id = ? AND record_type = 'tracking'`,
+        WHERE client_id = ?
+          AND record_type = 'tracking'
+          AND (status IS NULL OR LOWER(status) NOT IN ('delivered', 'entregue', 'closed', 'fechado', 'finalizado', 'concluido', 'concluído'))`,
         [tenantId]
       )) as any[];
       result.rastreamentos = {
@@ -190,6 +199,113 @@ export const megadeskSettingsRouter = router({
       };
     } catch {
       // Ignora falha individual de consulta
+    }
+
+    // 5. Linha do Tempo de Atividades Recentes do Tenant
+    try {
+      const rawEvents: Array<{
+        id: string;
+        tipo: "chamado" | "conversa" | "crm" | "assistente";
+        titulo: string;
+        descricao: string;
+        timestamp: number;
+      }> = [];
+
+      // Atividades recentes de chamados
+      try {
+        const [chamadosRecentes] = (await pool.execute(
+          `SELECT chamadoId, chamadoNumber, title, status, priority, updatedAt, createdAt
+           FROM megadesk_domain_chamados
+          WHERE clientId = ?
+          ORDER BY updatedAt DESC
+          LIMIT 4`,
+          [tenantId]
+        )) as any[];
+        for (const c of (chamadosRecentes || [])) {
+          const d = new Date(c.updatedAt || c.createdAt || Date.now());
+          const statusLabel = c.status === "open" ? "Aberto" : c.status === "in_progress" ? "Em andamento" : c.status === "waiting" ? "Aguardando" : c.status === "closed" ? "Fechado" : String(c.status);
+          rawEvents.push({
+            id: `ticket-${c.chamadoId}`,
+            tipo: "chamado",
+            titulo: `Chamado #${c.chamadoNumber}: ${c.title || "Sem título"}`,
+            descricao: `Status: ${statusLabel} • Prioridade: ${c.priority || "média"}`,
+            timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
+          });
+        }
+      } catch {}
+
+      // Atividades recentes de conversas
+      try {
+        const [convsRecentes] = (await pool.execute(
+          `SELECT conversation_id, customer_name, phone, status, last_message, updated_at, created_at
+           FROM megadesk_domain_conversations
+          WHERE client_id = ?
+          ORDER BY updated_at DESC
+          LIMIT 4`,
+          [tenantId]
+        )) as any[];
+        for (const conv of (convsRecentes || [])) {
+          const d = new Date(conv.updated_at || conv.created_at || Date.now());
+          rawEvents.push({
+            id: `conv-${conv.conversation_id}`,
+            tipo: "conversa",
+            titulo: `Conversa com ${conv.customer_name || conv.phone || "Cliente"}`,
+            descricao: conv.last_message ? String(conv.last_message).slice(0, 70) : `Status: ${conv.status}`,
+            timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
+          });
+        }
+      } catch {}
+
+      // Atividades recentes de CRM
+      try {
+        const [crmRecentes] = (await pool.execute(
+          `SELECT id, public_id, title, status, value_cents, updated_at, created_at
+           FROM megadesk_crm_opportunities
+          WHERE client_id = ?
+          ORDER BY updated_at DESC
+          LIMIT 4`,
+          [tenantId]
+        )) as any[];
+        for (const opp of (crmRecentes || [])) {
+          const d = new Date(opp.updated_at || opp.created_at || Date.now());
+          const valorFormatado = opp.value_cents ? (opp.value_cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null;
+          rawEvents.push({
+            id: `crm-${opp.id || opp.public_id}`,
+            tipo: "crm",
+            titulo: `Oportunidade: ${opp.title || "Sem título"}`,
+            descricao: valorFormatado ? `${opp.status} • ${valorFormatado}` : `Status: ${opp.status}`,
+            timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
+          });
+        }
+      } catch {}
+
+      // Atividades recentes de IA
+      try {
+        const [iaRecentes] = (await pool.execute(
+          `SELECT id, feature_source, total_tokens, created_at
+           FROM megadesk_ai_token_usage
+          WHERE tenant_id = ?
+          ORDER BY created_at DESC
+          LIMIT 4`,
+          [tenantId]
+        )) as any[];
+        for (const ia of (iaRecentes || [])) {
+          const d = new Date(ia.created_at || Date.now());
+          const sourceLabel = ia.feature_source === "whatsapp_bot" ? "Triagem WhatsApp" : ia.feature_source === "assistant_chat" ? "Assistente IA" : ia.feature_source === "voice_shortcut" ? "Voz" : "Automação";
+          rawEvents.push({
+            id: `ia-${ia.id}`,
+            tipo: "assistente",
+            titulo: `Execução de IA • ${sourceLabel}`,
+            descricao: `${ia.total_tokens || 0} tokens processados`,
+            timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
+          });
+        }
+      } catch {}
+
+      rawEvents.sort((a, b) => b.timestamp - a.timestamp);
+      result.atividadesRecentes = rawEvents.slice(0, 6);
+    } catch {
+      // Ignora falha na consolidação de atividades
     }
 
     // 5. Cota e Consumo de Tokens de IA (para perfil admin)

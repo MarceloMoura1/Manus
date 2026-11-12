@@ -286,7 +286,7 @@ describe("Hermes Tools (Vercel AI SDK - hermes-tools.ts)", () => {
           if (sql.includes("FROM megadesk_domain_conversations")) {
             return [[{ totalAbertas: 5, emTriagemBot: 2, emAtendimentoHumano: 2, filaEspera: 1 }]];
           }
-          if (sql.includes("FROM chamados")) {
+          if (sql.includes("FROM megadesk_domain_chamados")) {
             return [[{ totalAtivos: 4, criticos: 1, novosAbertos: 2, emAndamento: 1, aguardando: 0 }]];
           }
           if (sql.includes("FROM megadesk_domain_operational_records")) {

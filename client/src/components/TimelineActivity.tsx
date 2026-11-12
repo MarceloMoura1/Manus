@@ -203,7 +203,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities, 
           const details = renderActivityMetadata(metadata, chamadoId);
           
           return (
-            <div key={activity.id} data-testid={`timeline-activity-${activity.id}`} className="relative pl-20">
+            <div key={activity.id} data-testid={`timeline-activity-${activity.id}`} className="relative pl-20 min-w-0">
               {/* Ícone */}
                <div className="absolute left-0 top-0 flex h-16 w-16 items-center justify-center rounded-full border-4 border-white bg-white dark:border-slate-950 dark:bg-slate-950">
                 <div className={`rounded-full p-1.5 ${getActivityTintClass(activity.actionType)}`}>
@@ -212,7 +212,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities, 
               </div>
 
               {/* Conteúdo */}
-              <div data-testid={`timeline-activity-surface-${activity.id}`} className={`overflow-hidden rounded-lg border border-l-2 border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${getActivityAccentClass(activity.actionType)}`}>
+              <div data-testid={`timeline-activity-surface-${activity.id}`} className={`overflow-hidden rounded-lg border border-l-2 border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${getActivityAccentClass(activity.actionType)} min-w-0 break-words`}>
                 <div data-testid={`timeline-activity-header-${activity.id}`} className={`flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5 dark:border-slate-800 ${getActivityTintClass(activity.actionType)}`}>
                 {/* Data e Hora */}
                   <div className="flex items-center gap-2">
