@@ -12,6 +12,10 @@ export interface RecordAiUsageInput {
   completionTokens?: number | null;
   totalTokens?: number | null;
   usage?: unknown;
+  promptText?: string | null;
+  completionText?: string | null;
+  fallbackPromptChars?: number | null;
+  fallbackCompletionChars?: number | null;
 }
 
 export function extractAiTokens(usage: unknown): {
@@ -20,12 +24,35 @@ export function extractAiTokens(usage: unknown): {
   totalTokens: number;
 } {
   const u = (usage || {}) as Record<string, unknown>;
-  const promptTokens = Number(u.promptTokens ?? u.inputTokens ?? 0);
-  const completionTokens = Number(u.completionTokens ?? u.outputTokens ?? 0);
-  let totalTokens = Number(u.totalTokens ?? 0);
+  const meta = (u.usageMetadata || {}) as Record<string, unknown>;
+
+  const promptTokens = Number(
+    u.promptTokens ??
+      u.inputTokens ??
+      u.promptTokenCount ??
+      meta.promptTokenCount ??
+      0
+  );
+
+  const completionTokens = Number(
+    u.completionTokens ??
+      u.outputTokens ??
+      u.candidatesTokenCount ??
+      meta.candidatesTokenCount ??
+      0
+  );
+
+  let totalTokens = Number(
+    u.totalTokens ??
+      u.totalTokenCount ??
+      meta.totalTokenCount ??
+      0
+  );
+
   if (totalTokens === 0 && (promptTokens > 0 || completionTokens > 0)) {
     totalTokens = promptTokens + completionTokens;
   }
+
   return {
     promptTokens: isNaN(promptTokens) ? 0 : Math.max(0, Math.round(promptTokens)),
     completionTokens: isNaN(completionTokens) ? 0 : Math.max(0, Math.round(completionTokens)),
@@ -129,21 +156,39 @@ export async function ensureAiUsageLogsTable(poolOverride?: any): Promise<void> 
 
 /**
  * Registra o consumo de tokens de forma não-bloqueante e assíncrona.
+ * Suporta contagem real nativa e fallback seguro por estimativa de caracteres.
  */
 export async function recordAiUsageLog(input: RecordAiUsageInput): Promise<void> {
   const fromUsage = input.usage ? extractAiTokens(input.usage) : null;
-  const promptTokens = Math.max(0, Math.round(input.promptTokens ?? fromUsage?.promptTokens ?? 0));
-  const completionTokens = Math.max(0, Math.round(input.completionTokens ?? fromUsage?.completionTokens ?? 0));
+  let promptTokens = Math.max(0, Math.round(input.promptTokens ?? fromUsage?.promptTokens ?? 0));
+  let completionTokens = Math.max(0, Math.round(input.completionTokens ?? fromUsage?.completionTokens ?? 0));
   let totalTokens = Math.max(0, Math.round(input.totalTokens ?? fromUsage?.totalTokens ?? 0));
+
+  // Fallback seguro de estimativa (Math.ceil(chars / 4)) APENAS se o provedor não reportou tokens reais
+  if (promptTokens === 0 && (input.promptText || input.fallbackPromptChars)) {
+    const chars = input.promptText ? input.promptText.length : (input.fallbackPromptChars ?? 0);
+    if (chars > 0) {
+      promptTokens = Math.max(1, Math.ceil(chars / 4));
+    }
+  }
+
+  if (completionTokens === 0 && (input.completionText || input.fallbackCompletionChars)) {
+    const chars = input.completionText ? input.completionText.length : (input.fallbackCompletionChars ?? 0);
+    if (chars > 0) {
+      completionTokens = Math.max(1, Math.ceil(chars / 4));
+    }
+  }
 
   if (totalTokens === 0 && (promptTokens > 0 || completionTokens > 0)) {
     totalTokens = promptTokens + completionTokens;
   }
 
-  // Se não houve consumo de tokens nem valores informados, não grava log vazio
+  // Se não houve consumo computável nem texto de fallback, não grava log
   if (totalTokens <= 0 && promptTokens <= 0 && completionTokens <= 0) {
     return;
   }
+
+  const cleanTenantId = String(input.tenantId || "main").trim();
 
   try {
     await ensureAiUsageLogsTable();
@@ -156,7 +201,7 @@ export async function recordAiUsageLog(input: RecordAiUsageInput): Promise<void>
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         id,
-        input.tenantId,
+        cleanTenantId,
         input.userId || null,
         input.featureSource,
         input.conversationId || null,
@@ -203,6 +248,7 @@ export function calculateMonthlyBillingCycle(
  * Consulta e consolida os dados de consumo de tokens para a empresa/tenant.
  */
 export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: any): Promise<AiTokenUsageSummary> {
+  const cleanTenantId = String(tenantId || "main").trim();
   await ensureAiUsageLogsTable(poolOverride);
   let pool = poolOverride;
   if (!pool) {
@@ -240,7 +286,7 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
        FROM megadesk_domain_clients
        WHERE client_id = ?
        LIMIT 1`,
-      [tenantId]
+      [cleanTenantId]
     ) as any[];
 
     if (clientRows?.[0]) {
@@ -267,7 +313,7 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
       `SELECT COALESCE(SUM(total_tokens), 0) as total_used
        FROM megadesk_ai_usage_logs
        WHERE tenant_id = ? AND created_at >= ? AND created_at <= ?`,
-      [tenantId, cycleStart, cycleEnd]
+      [cleanTenantId, cycleStart, cycleEnd]
     ) as any[];
 
     if (totalRows?.[0]?.total_used) {
@@ -294,7 +340,7 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
        FROM megadesk_ai_usage_logs
        WHERE tenant_id = ? AND created_at >= ? AND created_at <= ?
        GROUP BY feature_source`,
-      [tenantId, cycleStart, cycleEnd]
+      [cleanTenantId, cycleStart, cycleEnd]
     ) as any[];
 
     for (const row of sourceRows || []) {
@@ -336,7 +382,7 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
        WHERE tenant_id = ? AND created_at >= ? AND created_at <= ?
        GROUP BY user_id
        ORDER BY tokens DESC`,
-      [tenantId, cycleStart, cycleEnd]
+      [cleanTenantId, cycleStart, cycleEnd]
     ) as any[];
 
     // Tenta mapear nomes dos operadores em megadesk_domain_client_users ou users
@@ -344,7 +390,7 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
       `SELECT user_id, name, email
        FROM megadesk_domain_client_users
        WHERE client_id = ?`,
-      [tenantId]
+      [cleanTenantId]
     ) as any[];
 
     for (const u of userNames || []) {
@@ -418,7 +464,7 @@ export async function getAiTokenUsageSummary(tenantId: string, poolOverride?: an
        WHERE tenant_id = ?
        ORDER BY created_at DESC
        LIMIT 10`,
-      [tenantId]
+      [cleanTenantId]
     ) as any[];
 
     for (const row of recentRows || []) {

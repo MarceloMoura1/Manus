@@ -17,6 +17,7 @@ import { dropEmptyArgs } from "./hermes-sanitize";
 import { evoGetStatus } from "./evolution/client";
 import { instanceNameFor } from "./evolution/session-store";
 import { createHermesTools, resolveClientInCRM } from "./hermes-tools";
+import { recordAiUsageLog } from "./modules/ai-usage/ai-usage.service";
 
 async function safeAiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const res: any = await (globalThis.fetch as any)(input, init);
@@ -3998,6 +3999,16 @@ async function chatWithClientGeminiInternal(
   const conversationId = await logIAConversation(
     clientId, userId, userMessage, finalResponse, tokensUsed
   );
+
+  void recordAiUsageLog({
+    tenantId: clientId,
+    userId: userId || undefined,
+    featureSource: "assistant_chat",
+    conversationId: String(conversationId || ""),
+    usage: aiResult?.usage,
+    promptText: userMessage,
+    completionText: finalResponse,
+  });
 
   if (tokensUsed > 0) {
     try {

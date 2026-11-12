@@ -261,14 +261,16 @@ Diretrizes obrigatórias de comportamento:
       stopWhen: isStepCount(5),
     });
 
+    let replyText = (aiResult.text || "").trim();
+
     void recordAiUsageLog({
       tenantId,
       featureSource: "whatsapp_bot",
       conversationId,
       usage: aiResult.usage,
+      promptText: text,
+      completionText: replyText,
     });
-
-    let replyText = (aiResult.text || "").trim();
 
     // 6. Se o transbordo humano foi acionado por ferramenta ou detecção
     if (requestedHumanTransfer) {

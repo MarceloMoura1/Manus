@@ -38,7 +38,7 @@ describe("AiUsageService", () => {
   });
 
   describe("recordAiUsageLog", () => {
-    it("ignores calls when all token counts are 0", async () => {
+    it("ignores calls when all token counts are 0 and no fallback text is provided", async () => {
       const executeMock = vi.fn();
       vi.spyOn(dbModule, "getPool").mockReturnValue({
         execute: executeMock,
@@ -53,6 +53,60 @@ describe("AiUsageService", () => {
       });
 
       expect(executeMock).not.toHaveBeenCalled();
+    });
+
+    it("applies safe estimation fallback when usage tokens are 0 but promptText/completionText are present", async () => {
+      const executeMock = vi.fn().mockResolvedValue([{ affectedRows: 1 }]);
+      vi.spyOn(dbModule, "getPool").mockReturnValue({
+        execute: executeMock,
+      } as any);
+
+      await recordAiUsageLog({
+        tenantId: "tenant-test-1",
+        featureSource: "assistant_chat",
+        promptTokens: 0,
+        completionTokens: 0,
+        promptText: "Olá! Como está o dia hoje?", // 27 chars -> ceil(27/4) = 7 tokens
+        completionText: "Tudo sob controle na operação.", // 30 chars -> ceil(30/4) = 8 tokens
+      });
+
+      expect(executeMock).toHaveBeenCalled();
+      const insertCall = executeMock.mock.calls.find((call) =>
+        String(call[0]).includes("INSERT INTO megadesk_ai_usage_logs")
+      );
+      expect(insertCall).toBeDefined();
+      const args = insertCall![1];
+      expect(args[5]).toBe(7); // promptTokens estimado
+      expect(args[6]).toBe(8); // completionTokens estimado
+      expect(args[7]).toBe(15); // totalTokens
+    });
+
+    it("extracts tokens from Google usageMetadata format correctly", async () => {
+      const executeMock = vi.fn().mockResolvedValue([{ affectedRows: 1 }]);
+      vi.spyOn(dbModule, "getPool").mockReturnValue({
+        execute: executeMock,
+      } as any);
+
+      await recordAiUsageLog({
+        tenantId: "tenant-test-1",
+        featureSource: "whatsapp_bot",
+        usage: {
+          usageMetadata: {
+            promptTokenCount: 140,
+            candidatesTokenCount: 60,
+            totalTokenCount: 200,
+          },
+        },
+      });
+
+      const insertCall = executeMock.mock.calls.find((call) =>
+        String(call[0]).includes("INSERT INTO megadesk_ai_usage_logs")
+      );
+      expect(insertCall).toBeDefined();
+      const args = insertCall![1];
+      expect(args[5]).toBe(140);
+      expect(args[6]).toBe(60);
+      expect(args[7]).toBe(200);
     });
 
     it("persists log in megadesk_ai_usage_logs when token counts are positive", async () => {

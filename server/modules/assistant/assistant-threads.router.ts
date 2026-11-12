@@ -295,6 +295,8 @@ Você tem acesso a ferramentas operacionais para:
             featureSource: "assistant_chat",
             conversationId: input.threadId,
             usage: aiResult.usage,
+            promptText: input.content,
+            completionText: aiResult.text || "",
           });
 
           const toolMetadata = extractToolMetadata(aiResult);
@@ -451,6 +453,8 @@ Execute imediatamente as ferramentas necessárias (como consultar resumo e métr
             featureSource: "assistant_chat",
             conversationId: input.threadId,
             usage: aiResult.usage,
+            fallbackPromptChars: 200,
+            completionText: aiResult.text || "",
           });
 
           let rawText = aiResult.text?.trim() || "";

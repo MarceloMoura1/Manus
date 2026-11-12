@@ -81,17 +81,19 @@ Não gere mensagens de confirmação de aprovação nem faça perguntas ao usuá
         stopWhen: isStepCount(6),
       });
 
+      outputSummary =
+        aiResult.text?.trim() ||
+        `Rotina "${routine.title}" executada com sucesso. Nenhuma ação pendente ou anomalia detectada.`;
+
       void recordAiUsageLog({
         tenantId: routine.tenantId,
         userId: routine.userId,
         featureSource: "automation",
         conversationId: routine.id,
         usage: aiResult.usage,
+        promptText,
+        completionText: outputSummary,
       });
-
-      outputSummary =
-        aiResult.text?.trim() ||
-        `Rotina "${routine.title}" executada com sucesso. Nenhuma ação pendente ou anomalia detectada.`;
     }
 
     // 1. Salvar na thread "Operações do Dia" se o canal for chat_thread (ou default)

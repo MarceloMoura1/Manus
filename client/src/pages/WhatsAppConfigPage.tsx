@@ -1,13 +1,22 @@
 /**
- * WhatsAppConfigPage — Configuração de conta WhatsApp Business por cliente.
- * Admins podem conectar e gerenciar a integração WhatsApp.
+ * WhatsAppConfigPage — Conexão WhatsApp 100% White-Label para o Cliente
+ * Interface limpa e unificada para conectar e gerenciar o WhatsApp empresarial.
  */
 import React, { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Smartphone,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  RefreshCw,
+  QrCode,
+  Loader2,
+  Check,
+} from "lucide-react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,578 +28,195 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  Smartphone,
-  Plus,
-  Trash2,
-  Eye,
-  EyeOff,
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
-  Copy,
-  ExternalLink,
-  RefreshCw,
-  Info,
-} from "lucide-react";
-import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
-/**
- * Componente para exibir QR Code da Evolution API
- */
-function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [qrCodeData, setQrCodeData] = React.useState<{ code?: string; base64: string } | null>(null);
-  const [logoutConfirmation, setLogoutConfirmation] = React.useState("");
-  const operationalRole = (() => { try { return JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}").userRole; } catch { return null; } })();
-  const canAdministerEvolution = operationalRole === "admin" || operationalRole === "manager";
+export function WhatsAppConfigPage() {
+  const session = JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}");
+  const clientId: string = session?.tenantId || session?.clientId || "main";
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [qrCodeData, setQrCodeData] = useState<{ code?: string; base64: string } | null>(null);
+
+  // Status da conexão
+  const { data: status, isLoading, refetch } = trpc.evolution.getStatus.useQuery(
+    { clientId },
+    { enabled: !!clientId, refetchInterval: 5000 }
+  );
 
   // Mutation para conectar e obter QR Code
   const connectMut = trpc.evolution.connect.useMutation({
     onSuccess: (data: any) => {
-      if (data.webhookConfigured === false) toast.warning("Instância disponível, mas o webhook está degradado. Use Reparar integração.");
-      if (data.qrCode) {
-        toast.success("QR Code gerado! Escaneie com seu WhatsApp.");
+      if (data?.qrCode) {
+        toast.success("QR Code gerado com sucesso! Escaneie com seu WhatsApp.");
         setQrCodeData({ base64: data.qrCode, code: data.code });
-      } else if (data.status === "connected") {
+      } else if (data?.status === "connected" || data?.status === "open") {
         toast.info("WhatsApp já está conectado.");
       } else {
-        toast.error("A Evolution não retornou um QR Code. Tente gerar novamente.");
+        toast.error("Não foi possível obter o QR Code. Tente novamente.");
       }
+      refetch();
     },
-    onError: (e: any) => toast.error(e?.message || "Erro ao conectar"),
+    onError: (e: any) => toast.error(e?.message || "Erro ao conectar WhatsApp"),
   });
-
-  // Query para obter status
-  const { data: status, isLoading, refetch } = trpc.evolution.getStatus.useQuery(
-    { clientId },
-    { enabled: !!clientId, refetchInterval: 3000 }
-  );
-  const { data: health } = trpc.evolution.health.useQuery(
-    { clientId },
-    { enabled: !!clientId, refetchInterval: 30_000 }
-  );
 
   // Mutation para desconectar
   const disconnectMut = trpc.evolution.disconnect.useMutation({
-    onSuccess: (data: any) => {
-      if (data.auditStatus === "degraded") toast.warning("WhatsApp desconectado, mas o registro final de auditoria ficou degradado.");
-      else toast.success("WhatsApp desconectado com sucesso!");
-      setLogoutConfirmation("");
+    onSuccess: () => {
+      toast.success("WhatsApp desconectado com sucesso.");
       setQrCodeData(null);
       refetch();
     },
-    onError: (e: any) => toast.error(e?.message || "Erro ao desconectar"),
-  });
-  const repairMut = trpc.evolution.repair.useMutation({
-    onSuccess: (data: any) => {
-      if (data.qrCode) setQrCodeData({ base64: data.qrCode });
-      if (data.integrationStatus === "webhook_degraded") toast.warning("A instância respondeu, mas o webhook continua degradado.");
-      else if (data.integrationStatus === "provider_unavailable") toast.error("A Evolution API continua indisponível.");
-      else if (data.auditStatus === "degraded") toast.warning("Integração reparada com auditoria final degradada.");
-      else toast.success("Integração reparada e auditada.");
-      refetch();
-    },
-    onError: (e: any) => toast.error(e?.message || "Erro ao reparar integração"),
+    onError: (e: any) => toast.error(e?.message || "Erro ao desconectar WhatsApp"),
   });
 
-  // Query para obter novo QR Code
-  const getQRCodeQuery = trpc.evolution.getQRCode.useQuery(
-    { clientId },
-    { enabled: false } // Só executa quando chamado manualmente
-  );
+  const isConnected =
+    status?.status === "open" ||
+    status?.status === "connected" ||
+    (status as any)?.state === "open";
 
-  const handleStartSession = async () => {
-    setRefreshing(true);
-    try {
-      await connectMut.mutateAsync({ clientId });
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const handleRefreshQR = async () => {
-    setRefreshing(true);
-    try {
-      const data = await getQRCodeQuery.refetch();
-      if (data.data?.qrCode) {
-        setQrCodeData({ base64: data.data.qrCode });
-        toast.success("Novo QR Code gerado!");
-      } else if (data.data?.status === "connected") {
-        setQrCodeData(null);
-        toast.info("WhatsApp já está conectado.");
-      } else {
-        toast.error("QR Code ainda não disponível. Tente novamente em alguns segundos.");
-      }
-    } catch (e: any) {
-      toast.error(e?.message || "Erro ao gerar QR Code");
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
+  const connectedNumber = (status as any)?.phoneNumber || (status as any)?.phone || null;
   const displayQR = qrCodeData?.base64 || (status as any)?.qrCode;
-  const integrationStatus = (health as any)?.integrationStatus || (status as any)?.integrationStatus || (status as any)?.status;
-  const logoutControl = canAdministerEvolution ? <AlertDialog onOpenChange={(open) => { if (!open) setLogoutConfirmation(""); }}>
-    <AlertDialogTrigger asChild><Button disabled={disconnectMut.isPending || repairMut.isPending} variant="outline" size="sm" className="gap-1 text-red-600 border-red-200 hover:bg-red-50"><XCircle className="w-3 h-3" /> Desconectar</Button></AlertDialogTrigger>
-    <AlertDialogContent>
-      <AlertDialogHeader><AlertDialogTitle>Desconectar o WhatsApp real?</AlertDialogTitle><AlertDialogDescription>Esta ação encerra a sessão real do WhatsApp. Será necessário escanear um novo QR Code. Ela não é uma limpeza local.</AlertDialogDescription></AlertDialogHeader>
-      <label className="text-sm font-medium text-slate-700">Digite <strong>DESCONECTAR</strong> para confirmar<Input autoFocus value={logoutConfirmation} onChange={(event) => setLogoutConfirmation(event.target.value)} className="mt-2" aria-label="Confirmação de logout do WhatsApp" /></label>
-      <AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction disabled={logoutConfirmation !== "DESCONECTAR" || disconnectMut.isPending} onClick={() => disconnectMut.mutate({ clientId, confirmation: "DESCONECTAR" })} className="bg-red-600 hover:bg-red-700">Desconectar sessão real</AlertDialogAction></AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog> : null;
-
-  return (
-    <div className="space-y-4">
-      {health && (!health.providerReachable || !health.webhookHealthy) && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          <p className="font-medium">A integração precisa de atenção.</p>
-          <p>{health.providerReachable ? "O webhook está incorreto ou incompleto." : "A Evolution API não está acessível."}</p>
-          <Button type="button" variant="outline" size="sm" className="mt-2" disabled={repairMut.isPending} onClick={() => repairMut.mutate({ clientId })}>
-            <RefreshCw className={`mr-1 h-3 w-3 ${repairMut.isPending ? "animate-spin" : ""}`} /> Reparar integração
-          </Button>
-        </div>
-      )}
-      {isLoading || refreshing ? (
-        <div className="flex items-center justify-center py-12 text-slate-400">
-          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando QR Code...
-        </div>
-      ) : integrationStatus === "provider_unavailable" ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-8 text-center"><AlertCircle className="mx-auto h-10 w-10 text-amber-600" /><p className="mt-3 font-semibold text-slate-900">Provedor indisponível</p><p className="text-sm text-slate-600">Não é possível confirmar se o WhatsApp está conectado. Nenhum logout foi executado.</p></div>
-      ) : integrationStatus === "connected" || integrationStatus === "webhook_degraded" ? (
-        <div className="flex flex-col items-center gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-8 text-center">
-          <CheckCircle2 className="h-12 w-12 text-emerald-600" />
-          <div><p className="font-semibold text-slate-900">WhatsApp conectado</p><p className="text-sm text-slate-600">{integrationStatus === "webhook_degraded" ? "A sessão está conectada, mas o webhook precisa de reparo." : "Instância e webhook confirmados."}</p></div>
-          <div className="flex gap-2"><Button type="button" disabled={repairMut.isPending || disconnectMut.isPending} onClick={() => repairMut.mutate({ clientId })}><RefreshCw className={`mr-1 h-3 w-3 ${repairMut.isPending ? "animate-spin" : ""}`} />{repairMut.isPending ? "Reparando..." : "Reparar integração"}</Button>{logoutControl}</div>
-        </div>
-      ) : displayQR ? (
-        <div className="flex flex-col items-center gap-4">
-          <div className="bg-white p-4 rounded-lg border border-slate-200">
-            <img
-              src={displayQR.startsWith('data:') ? displayQR : `data:image/png;base64,${displayQR}`}
-              alt="QR Code"
-              className="w-64 h-64 object-contain"
-            />
-          </div>
-          <p className="text-sm text-slate-600 text-center max-w-xs">
-            Abra o WhatsApp no seu telefone e escaneie este codigo para conectar.
-          </p>
-          <div className="flex gap-2">
-            <Button
-              onClick={handleRefreshQR}
-              disabled={getQRCodeQuery.isFetching || refreshing}
-              variant="outline"
-              size="sm"
-              className="gap-1"
-            >
-              <RefreshCw className="w-3 h-3" /> Atualizar QR Code
-            </Button>
-            {logoutControl}
-          </div>
-        </div>
-      ) : integrationStatus === "connecting" || integrationStatus === "qr_required" ? (
-        <div className="flex flex-col items-center justify-center py-12 gap-3"><RefreshCw className="h-8 w-8 animate-spin text-blue-600" /><p className="font-medium text-slate-900">Aguardando QR Code</p><Button onClick={handleRefreshQR} disabled={getQRCodeQuery.isFetching || refreshing}>Atualizar QR Code</Button></div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-12 gap-4">
-          <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center">
-            <Smartphone className="w-10 h-10 text-blue-600" />
-          </div>
-          <div className="text-center">
-            <p className="font-medium text-slate-900">WhatsApp nao conectado</p>
-            <p className="text-sm text-slate-500 mt-1">Clique abaixo para gerar um QR Code</p>
-          </div>
-          <Button
-            onClick={handleStartSession}
-            disabled={connectMut.isPending}
-            className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <Plus className="w-4 h-4" />
-            {connectMut.isPending ? "Gerando..." : "Conectar WhatsApp"}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function WhatsAppConfigPage() {
-  const session = JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}");
-  const clientId: string = session?.clientId ?? "";
-
-  const [showModal, setShowModal] = useState(false);
-  const [showToken, setShowToken] = useState(false);
-  const [showWebhookToken, setShowWebhookToken] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    phoneNumberId: "",
-    businessAccountId: "",
-    accessToken: "",
-    webhookVerifyToken: "",
-    phoneNumber: "",
-  });
-
-  // ─── Queries ────────────────────────────────────────────────────────────────
-
-  const { data: config, isLoading, refetch } = trpc.whatsapp.getConfig.useQuery(
-    { clientId },
-    { enabled: !!clientId, refetchInterval: 30_000 }
-  );
-
-  // ─── Mutations ──────────────────────────────────────────────────────────────
-
-  const saveMut = trpc.whatsapp.saveConfig.useMutation({
-    onSuccess: () => {
-      toast.success("Configuração WhatsApp salva com sucesso!");
-      setShowModal(false);
-      setForm({
-        phoneNumberId: "",
-        businessAccountId: "",
-        accessToken: "",
-        webhookVerifyToken: "",
-        phoneNumber: "",
-      });
-      refetch();
-    },
-    onError: (e: any) => setFormError(e?.message || "Erro ao salvar configuração"),
-  });
-
-  const testMut = trpc.whatsapp.testConnection.useMutation({
-    onSuccess: (data: any) => {
-      if (data.success) {
-        toast.success(data.message);
-      } else {
-        toast.error(data.message);
-      }
-    },
-    onError: (e: any) => toast.error(e?.message || "Erro ao testar conexão"),
-  });
-
-  const deleteMut = trpc.whatsapp.deleteConfig.useMutation({
-    onSuccess: () => {
-      toast.success("Configuração WhatsApp removida.");
-      refetch();
-    },
-    onError: (e: any) => toast.error(e?.message || "Erro ao remover configuração"),
-  });
-
-  // ─── Handlers ───────────────────────────────────────────────────────────────
-
-  function handleSubmit() {
-    setFormError(null);
-    if (!form.phoneNumberId.trim()) return setFormError("Phone Number ID é obrigatório.");
-    if (!form.businessAccountId.trim()) return setFormError("Business Account ID é obrigatório.");
-    if (!form.accessToken.trim()) return setFormError("Access Token é obrigatório.");
-
-    saveMut.mutate({
-      clientId,
-      phoneNumberId: form.phoneNumberId.trim(),
-      businessAccountId: form.businessAccountId.trim(),
-      accessToken: form.accessToken.trim(),
-      webhookVerifyToken: form.webhookVerifyToken.trim() || "",
-      phoneNumber: form.phoneNumber.trim() || "",
-      webhookUrl: `${window.location.origin}/api/webhooks/meta`,
-    });
-  }
-
-  function copyWebhookUrl() {
-    const url = `${window.location.origin}/api/webhooks/meta`;
-    navigator.clipboard.writeText(url).then(() => toast.success("URL copiada!"));
-  }
-
-  // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <Smartphone className="w-6 h-6 text-emerald-600" />
-            Configuração WhatsApp
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Conecte seu número WhatsApp Business via Meta Cloud API.
-          </p>
-        </div>
-        <Button onClick={() => setShowModal(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
-          <Plus className="w-4 h-4" />
-          {config ? "Atualizar" : "Conectar"}
-        </Button>
-      </div>
-
-      {/* Webhook info */}
-      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
-        <Info className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-blue-800">URL do Webhook Meta</p>
-          <p className="text-xs text-blue-600 mt-0.5">
-            Configure esta URL no painel da Meta para receber mensagens em tempo real.
-          </p>
-          <div className="flex items-center gap-2 mt-2">
-            <code className="text-xs bg-white border border-blue-200 rounded px-2 py-1 text-blue-700 font-mono truncate flex-1">
-              {window.location.origin}/api/webhooks/meta
-            </code>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={copyWebhookUrl}
-              className="flex-shrink-0 gap-1 text-xs border-blue-300 text-blue-700 hover:bg-blue-100"
-            >
-              <Copy className="w-3 h-3" /> Copiar
-            </Button>
-            <a
-              href="https://developers.facebook.com/apps"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-shrink-0"
-            >
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1 text-xs border-blue-300 text-blue-700 hover:bg-blue-100"
-              >
-                <ExternalLink className="w-3 h-3" /> Meta
-              </Button>
-            </a>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+            <Smartphone className="w-6 h-6" />
           </div>
-        </div>
-      </div>
-
-      {/* Status */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16 text-slate-400">
-          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando...
-        </div>
-      ) : !config ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50">
-          <Smartphone className="w-12 h-12 opacity-30" />
-          <p className="text-sm font-medium">Nenhuma conta conectada</p>
-          <p className="text-xs text-center max-w-xs">
-            Clique em "Conectar" para configurar seu número WhatsApp Business.
-          </p>
-        </div>
-      ) : (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-6">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-                  <Smartphone className="w-5 h-5 text-emerald-600" />
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">WhatsApp Business</p>
-                  <p className="text-sm text-slate-500">{config.phoneNumber || "Número não configurado"}</p>
-                </div>
-              </div>
-
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-600">Phone Number ID:</span>
-                  <code className="bg-slate-100 px-2 py-1 rounded text-xs font-mono text-slate-700">
-                    {config.phoneNumberId}
-                  </code>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-600">Business Account ID:</span>
-                  <code className="bg-slate-100 px-2 py-1 rounded text-xs font-mono text-slate-700">
-                    {config.businessAccountId}
-                  </code>
-                </div>
-                <div className="flex items-center gap-2 mt-4">
-                  <span className="text-slate-600">Status da conexão:</span>
-                  <Badge className={config.connectionStatus ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}>
-                    {config.connectionStatus ? "✓ Ativo" : "○ Inativo"}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Button
-                onClick={() => testMut.mutate({ clientId })}
-                disabled={testMut.isPending}
-                variant="outline"
-                size="sm"
-                className="gap-1"
-              >
-                <RefreshCw className="w-3 h-3" /> Testar
-              </Button>
-              <Button
-                onClick={() => setShowModal(true)}
-                variant="outline"
-                size="sm"
-              >
-                Editar
-              </Button>
-              <AlertDialog>
-                <Button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    const dialog = document.querySelector('[role="alertdialog"]');
-                    if (dialog) {
-                      const trigger = dialog.querySelector('[role="button"]');
-                      if (trigger) trigger.dispatchEvent(new Event("click"));
-                    }
-                  }}
-                  variant="outline"
-                  size="sm"
-                  className="text-red-600 border-red-200 hover:bg-red-50"
-                >
-                  Remover
-                </Button>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Remover configuração WhatsApp?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Esta ação não pode ser desfeita. Você perderá a integração WhatsApp.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() => deleteMut.mutate({ clientId })}
-                      className="bg-red-600 hover:bg-red-700"
-                    >
-                      Remover
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Evolution API Section ─────────────────────────────────────────── */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-6">
-        <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Smartphone className="w-5 h-5 text-blue-600" />
-              Evolution API (WhatsApp Direto)
-            </h2>
-            <p className="text-sm text-slate-500 mt-1">
-              Conecte seu WhatsApp diretamente via Evolution API. Escaneie o QR Code com seu telefone.
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              Conexão WhatsApp da Empresa
+              <Badge className={isConnected ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"}>
+                {isConnected ? "Conectado" : "Desconectado"}
+              </Badge>
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Canal oficial para atendimento de clientes e envio de mensagens operacionais.
             </p>
           </div>
         </div>
 
-        <EvolutionQRCodeSection clientId={clientId} />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            className="text-xs cursor-pointer"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", isLoading && "animate-spin")} />
+            Atualizar Status
+          </Button>
+
+          {isConnected && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={disconnectMut.isPending}
+                  className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                >
+                  Desconectar WhatsApp
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Desconectar WhatsApp?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Esta ação desconectará o número da plataforma. Para reconectar, será necessário escanear um novo QR Code.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => disconnectMut.mutate({ clientId })}
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    Confirmar Desconexão
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+        </div>
       </div>
 
-      {/* ─── Modal ─────────────────────────────────────────────────────────── */}
-      <Dialog open={showModal} onOpenChange={(o) => { if (!o) { setShowModal(false); setFormError(null); } }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Smartphone className="w-5 h-5 text-emerald-600" />
-              {config ? "Atualizar" : "Conectar"} WhatsApp
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {formError && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
-                {formError}
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Phone Number ID *
-              </label>
-              <Input
-                placeholder="123456789"
-                value={form.phoneNumberId}
-                onChange={(e) => setForm({ ...form, phoneNumberId: e.target.value })}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Business Account ID *
-              </label>
-              <Input
-                placeholder="987654321"
-                value={form.businessAccountId}
-                onChange={(e) => setForm({ ...form, businessAccountId: e.target.value })}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Access Token *
-              </label>
-              <div className="relative">
-                <Input
-                  type={showToken ? "text" : "password"}
-                  placeholder="EAA..."
-                  value={form.accessToken}
-                  onChange={(e) => setForm({ ...form, accessToken: e.target.value })}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowToken(!showToken)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
-                >
-                  {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Webhook Verify Token
-              </label>
-              <div className="relative">
-                <Input
-                  type={showWebhookToken ? "text" : "password"}
-                  placeholder="seu-token-secreto"
-                  value={form.webhookVerifyToken}
-                  onChange={(e) => setForm({ ...form, webhookVerifyToken: e.target.value })}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowWebhookToken(!showWebhookToken)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
-                >
-                  {showWebhookToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Número de Telefone (opcional)
-              </label>
-              <Input
-                placeholder="+55 11 99999-9999"
-                value={form.phoneNumber}
-                onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
-              />
-            </div>
-
-            <div className="flex gap-2 pt-4">
-              <Button
-                onClick={handleSubmit}
-                disabled={saveMut.isPending}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-              >
-                {saveMut.isPending ? "Salvando..." : "Salvar"}
-              </Button>
-              <Button
-                onClick={() => setShowModal(false)}
-                variant="outline"
-                className="flex-1"
-              >
-                Cancelar
-              </Button>
-            </div>
+      {/* Conteúdo Principal */}
+      {isConnected ? (
+        <div className="p-8 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-center flex flex-col items-center gap-4">
+          <CheckCircle2 className="w-12 h-12 text-emerald-600 dark:text-emerald-400" />
+          <div className="space-y-1">
+            <h2 className="text-base font-bold text-emerald-950 dark:text-emerald-100">
+              WhatsApp Conectado e Operacional
+            </h2>
+            <p className="text-xs text-emerald-700 dark:text-emerald-400">
+              {connectedNumber ? `Número vinculado: ${connectedNumber}` : "Sua empresa está pronta para enviar e receber mensagens."}
+            </p>
           </div>
-        </DialogContent>
-      </Dialog>
+          <Badge variant="outline" className="border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 bg-white dark:bg-emerald-950/80 px-3 py-1">
+            Pronto para Atendimento
+          </Badge>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center flex flex-col items-center justify-center">
+          {displayQR ? (
+            <div className="flex flex-col items-center gap-4 max-w-sm">
+              <div className="p-4 bg-white rounded-2xl shadow-md border border-slate-200">
+                <img
+                  src={displayQR.startsWith("data:") ? displayQR : `data:image/png;base64,${displayQR}`}
+                  alt="QR Code WhatsApp"
+                  className="w-56 h-56 object-contain"
+                />
+              </div>
+
+              <div className="space-y-1 text-center">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Escaneie o QR Code com seu celular</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  1. Abra o WhatsApp no smartphone &gt; Menu &gt; <strong>Aparelhos Conectados</strong><br />
+                  2. Toque em <strong>Conectar um aparelho</strong> e aponte para a tela.
+                </p>
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => connectMut.mutate({ clientId })}
+                disabled={connectMut.isPending}
+                className="mt-2 text-xs cursor-pointer"
+              >
+                <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", connectMut.isPending && "animate-spin")} />
+                Gerar Novo QR Code
+              </Button>
+            </div>
+          ) : (
+            <div className="py-8 flex flex-col items-center gap-3 max-w-md">
+              <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500">
+                <QrCode className="w-7 h-7" />
+              </div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">WhatsApp Desconectado</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Gere o QR Code de autenticação para conectar o WhatsApp oficial da sua empresa à plataforma.
+              </p>
+              <Button
+                onClick={() => connectMut.mutate({ clientId })}
+                disabled={connectMut.isPending}
+                className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl shadow-xs gap-2 px-5 py-2.5 cursor-pointer"
+              >
+                {connectMut.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Smartphone className="w-4 h-4" />
+                )}
+                <span>Conectar WhatsApp</span>
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+export default WhatsAppConfigPage;

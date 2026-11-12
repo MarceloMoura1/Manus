@@ -99,5 +99,9 @@ describe("authenticated shell workspace variants", () => {
     expect(homeSource).toContain("Sugerir Prioridades");
     expect(homeSource).toContain("Auxiliar IA");
     expect(homeSource).toContain("Sugerido pelo Assistente");
+
+    // Unified Admin Hub
+    expect(homeSource).toContain("<AdminUnifiedHub");
+    expect(homeSource).not.toContain('setActive("admin-settings")');
   });
 });

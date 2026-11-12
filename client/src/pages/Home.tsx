@@ -13,6 +13,7 @@ import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
 import { AIAssistant } from "./AIAssistant";
 import { AITokenUsagePage } from "./AITokenUsagePage";
+import { AdminUnifiedHub } from "@/components/AdminUnifiedHub";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
 import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorkspace";
 import { Users } from "lucide-react";
@@ -1791,73 +1792,7 @@ function DashboardPage({
       {/* Aba 2: Administração (Restrito a Perfil Admin) */}
       {homeTab === "admin" && isAdmin && (
         <div className="space-y-6 animate-fade-in">
-          {/* Barra de Acesso Rápido Administrativo */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <button
-              type="button"
-              onClick={() => setActive("admin-settings")}
-              className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-indigo-500/50 hover:shadow-md transition-all text-left group cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform">
-                  <Cog className="w-5 h-5" />
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
-              </div>
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Configurações Gerais</h4>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Parâmetros da empresa e regras do tenant.</p>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActive("whatsapp-config")}
-              className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-emerald-500/50 hover:shadow-md transition-all text-left group cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform">
-                  <Smartphone className="w-5 h-5" />
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all" />
-              </div>
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Conexão WhatsApp</h4>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Status de QR Code, instâncias e sessões.</p>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActive("bot-config")}
-              className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-purple-500/50 hover:shadow-md transition-all text-left group cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform">
-                  <Bot className="w-5 h-5" />
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 group-hover:translate-x-1 transition-all" />
-              </div>
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Atendimento Inteligente</h4>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Regras de triagem, transbordo e horários.</p>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActive("notifications")}
-              className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-amber-500/50 hover:shadow-md transition-all text-left group cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform">
-                  <Bell className="w-5 h-5" />
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-amber-500 group-hover:translate-x-1 transition-all" />
-              </div>
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white">Alertas & Notificações</h4>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Disparos operacionais e avisos críticos.</p>
-            </button>
-          </div>
-
-          {/* Painel Embutido de Consumo e Auditoria de Tokens de IA */}
-          <div className="min-h-[580px]">
-            <AITokenUsagePage embedded={true} />
-          </div>
+          <AdminUnifiedHub tenantKey={tenantKey} userName={userName} />
         </div>
       )}
     </div>
