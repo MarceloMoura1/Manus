@@ -54,7 +54,8 @@ import { operatorDisplayName } from "@/lib/conversation-operator-name";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import {
@@ -120,6 +121,8 @@ import {
   Paperclip,
   Reply,
   LogOut,
+  RotateCcw,
+  SlidersHorizontal,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -399,6 +402,28 @@ function LoginPage({ onLoginSuccess }: { onLoginSuccess: (session: MegaDeskSessi
   return <MegaDeskLoginGate onLogin={onLoginSuccess} />;
 }
 
+export type CockpitPeriod = "today" | "7d" | "30d" | "month";
+
+export type CockpitWidgetVisibility = {
+  heroBanner: boolean;
+  cardAtendimento: boolean;
+  cardChamados: boolean;
+  cardCrm: boolean;
+  cardIaTokens: boolean;
+  tarefasDoDia: boolean;
+  atividadesRecentes: boolean;
+};
+
+export const DEFAULT_COCKPIT_WIDGETS: CockpitWidgetVisibility = {
+  heroBanner: true,
+  cardAtendimento: true,
+  cardChamados: true,
+  cardCrm: true,
+  cardIaTokens: true,
+  tarefasDoDia: true,
+  atividadesRecentes: true,
+};
+
 function DashboardPage({
   setActive,
   indicadores,
@@ -410,14 +435,53 @@ function DashboardPage({
 }) {
   const [homeTab, setHomeTab] = useState<"overview" | "admin">("overview");
   const [isAiAuditOpen, setIsAiAuditOpen] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState<CockpitPeriod>("today");
+  const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
   const isAdmin = session?.role === "admin" || session?.userRole === "admin";
 
-  // Consulta do Cockpit Operacional em Tempo Real
-  const { data: cockpitData, isLoading: isCockpitLoading } =
-    trpc.megadeskSettings.getOperationalCockpit.useQuery(undefined, {
-      refetchInterval: 15_000,
-      staleTime: 5_000,
+  // Chaves de escopo para preferências do usuário e tenant
+  const userKey = (session as any)?.userId || session?.userEmail || "user";
+  const tenantKey = (session as any)?.tenantId || session?.clientId || "main";
+  const widgetsStorageKey = `megadesk:cockpit:widgets:${tenantKey}:${userKey}`;
+
+  // Estado das preferências de visibilidade dos widgets
+  const [widgets, setWidgets] = useState<CockpitWidgetVisibility>(() => {
+    try {
+      const saved = localStorage.getItem(widgetsStorageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...DEFAULT_COCKPIT_WIDGETS, ...parsed };
+      }
+    } catch {}
+    return DEFAULT_COCKPIT_WIDGETS;
+  });
+
+  const updateWidgetVisibility = (key: keyof CockpitWidgetVisibility, visible: boolean) => {
+    setWidgets((prev) => {
+      const next = { ...prev, [key]: visible };
+      try {
+        localStorage.setItem(widgetsStorageKey, JSON.stringify(next));
+      } catch {}
+      return next;
     });
+  };
+
+  const resetWidgetsToDefault = () => {
+    setWidgets(DEFAULT_COCKPIT_WIDGETS);
+    try {
+      localStorage.setItem(widgetsStorageKey, JSON.stringify(DEFAULT_COCKPIT_WIDGETS));
+    } catch {}
+  };
+
+  // Consulta do Cockpit Operacional em Tempo Real com Período Unificado
+  const { data: cockpitData, isLoading: isCockpitLoading } =
+    trpc.megadeskSettings.getOperationalCockpit.useQuery(
+      { period: selectedPeriod },
+      {
+        refetchInterval: 15_000,
+        staleTime: 5_000,
+      }
+    );
 
   // Nome do usuário para a saudação personalizada
   const userName =
@@ -442,6 +506,24 @@ function DashboardPage({
   const leadsAtivos = cockpitData?.crm?.leadsAtivos ?? 0;
   const oportunidadesAbertas = cockpitData?.crm?.oportunidadesAbertas ?? 0;
   const valorPipeline = cockpitData?.crm?.valorPipelineEstimado ?? 0;
+
+  // Métricas temporais vinculadas ao período
+  const atendimentosNoPeriodo = cockpitData?.atendimento?.totalNoPeriodo ?? 0;
+  const criadosNoPeriodo = cockpitData?.chamados?.criadosNoPeriodo ?? 0;
+  const fechadosNoPeriodo = cockpitData?.chamados?.fechadosNoPeriodo ?? 0;
+  const rastreamentosNoPeriodo = cockpitData?.rastreamentos?.atualizadosNoPeriodo ?? 0;
+  const leadsNoPeriodo = cockpitData?.crm?.leadsNoPeriodo ?? 0;
+  const oportunidadesNoPeriodo = cockpitData?.crm?.oportunidadesNoPeriodo ?? 0;
+  const valorNoPeriodo = cockpitData?.crm?.valorNoPeriodo ?? 0;
+
+  const periodShortBadge =
+    selectedPeriod === "today"
+      ? "Hoje"
+      : selectedPeriod === "7d"
+      ? "7 dias"
+      : selectedPeriod === "30d"
+      ? "30 dias"
+      : "Mês";
 
   const formatCurrency = (val?: number) => {
     return (val || 0).toLocaleString("pt-BR", {
@@ -539,7 +621,6 @@ function DashboardPage({
   }, [filaEspera, criticosUrgentes, conversasAbertas, chamadosAtivos]);
 
   // Controle de tarefas diárias salvas por dia e tenant
-  const tenantKey = (session as any)?.tenantId || session?.clientId || "main";
   const todayKey = React.useMemo(() => {
     const d = new Date();
     return `megadesk_daily_tasks_${tenantKey}_${d.getFullYear()}_${d.getMonth() + 1}_${d.getDate()}`;
@@ -761,10 +842,31 @@ function DashboardPage({
     }
   };
 
+  const visibleCardsCount =
+    (widgets.cardAtendimento ? 1 : 0) +
+    (widgets.cardChamados ? 1 : 0) +
+    (widgets.cardCrm ? 1 : 0) +
+    (isAdmin && widgets.cardIaTokens ? 1 : 0);
+
+  const cardsGridColsClass =
+    visibleCardsCount === 4
+      ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
+      : visibleCardsCount === 3
+      ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+      : visibleCardsCount === 2
+      ? "grid-cols-1 sm:grid-cols-2"
+      : "grid-cols-1 max-w-xl";
+
+  const allWidgetsHidden =
+    !widgets.heroBanner &&
+    visibleCardsCount === 0 &&
+    !widgets.tarefasDoDia &&
+    !widgets.atividadesRecentes;
+
   return (
     <div className="space-y-6">
-      {/* Cabeçalho Enxuto: Centro de Comando com Abas de Navegação */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+      {/* Cabeçalho Enxuto: Centro de Comando com Abas, Filtro de Período e Personalização */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/20">
             <Zap className="w-5 h-5" />
@@ -782,35 +884,82 @@ function DashboardPage({
           </div>
         </div>
 
-        {/* Abas Superiores do Centro de Comando */}
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setHomeTab("overview")}
-            className={cn(
-              "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-              homeTab === "overview"
-                ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            )}
-          >
-            <LayoutDashboard className="w-3.5 h-3.5 text-blue-500" />
-            <span>Visão Geral</span>
-          </button>
-
-          {isAdmin && (
+        {/* Controles do Cabeçalho: Abas + Seletor de Período + Personalizar */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Abas Superiores do Centro de Comando */}
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 self-start sm:self-auto">
             <button
               type="button"
-              onClick={() => setHomeTab("admin")}
+              onClick={() => setHomeTab("overview")}
               className={cn(
-                "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                homeTab === "admin"
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                homeTab === "overview"
                   ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               )}
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Administração</span>
+              <LayoutDashboard className="w-3.5 h-3.5 text-blue-500" />
+              <span>Visão Geral</span>
+            </button>
+
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setHomeTab("admin")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                  homeTab === "admin"
+                    ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Administração</span>
+              </button>
+            )}
+          </div>
+
+          {/* Seletor de Período Unificado (visível na aba Visão Geral) */}
+          {homeTab === "overview" && (
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800">
+              {(
+                [
+                  { id: "today", label: "Hoje" },
+                  { id: "7d", label: "7 dias" },
+                  { id: "30d", label: "30 dias" },
+                  { id: "month", label: "Mês atual" },
+                ] as const
+              ).map((p) => {
+                const isSelected = selectedPeriod === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setSelectedPeriod(p.id)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer",
+                      isSelected
+                        ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 font-bold shadow-xs"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Botão Personalizar Painel */}
+          {homeTab === "overview" && (
+            <button
+              type="button"
+              onClick={() => setIsCustomizeModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+              title="Personalizar Widgets da Visão Geral"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
+              <span className="hidden sm:inline">Personalizar</span>
             </button>
           )}
         </div>
@@ -819,280 +968,323 @@ function DashboardPage({
       {/* Aba 1: Visão Geral */}
       {homeTab === "overview" && (
         <div className="space-y-6 animate-fade-in">
-          {/* Hero Section Inteligente (Degradê Azul Preservado + Briefing com IA) */}
-          <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900 p-6 sm:p-8 lg:p-10 shadow-xs border border-blue-800/40">
-            <div className="absolute inset-0 opacity-20 pointer-events-none">
-              <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
-              <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-500 rounded-full blur-3xl" />
+          {/* Empty State caso todos os widgets sejam desativados */}
+          {allWidgetsHidden && (
+            <div className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 p-12 text-center animate-fade-in flex flex-col items-center justify-center">
+              <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 mb-4">
+                <LayoutDashboard className="w-8 h-8" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Nenhum widget visível no momento</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mt-1 mb-5">
+                Você personalizou o painel ocultando todos os blocos. Reative os widgets desejados para acompanhar seus indicadores operacionais.
+              </p>
+              <button
+                type="button"
+                onClick={resetWidgetsToDefault}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Restaurar Widgets Padrão</span>
+              </button>
             </div>
-            <div className="relative z-10 grid gap-6 lg:grid-cols-2 lg:items-center">
-              <div className="space-y-4 sm:space-y-5 animate-fade-in">
-                <div className="space-y-2.5">
-                  <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/20 backdrop-blur px-3 py-1 border border-blue-400/30">
-                    <Sparkles className="h-3.5 w-3.5 text-cyan-300 animate-pulse" />
-                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-200">
-                      Briefing do Assistente IA • Tempo Real
-                    </span>
+          )}
+
+          {/* Hero Section Inteligente (Degradê Azul Preservado + Briefing com IA) */}
+          {widgets.heroBanner && (
+            <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900 p-6 sm:p-8 lg:p-10 shadow-xs border border-blue-800/40">
+              <div className="absolute inset-0 opacity-20 pointer-events-none">
+                <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
+                <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-500 rounded-full blur-3xl" />
+              </div>
+              <div className="relative z-10 grid gap-6 lg:grid-cols-2 lg:items-center">
+                <div className="space-y-4 sm:space-y-5 animate-fade-in">
+                  <div className="space-y-2.5">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/20 backdrop-blur px-3 py-1 border border-blue-400/30">
+                      <Sparkles className="h-3.5 w-3.5 text-cyan-300 animate-pulse" />
+                      <span className="text-xs font-semibold uppercase tracking-wider text-blue-200">
+                        Briefing do Assistente IA • Tempo Real
+                      </span>
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white leading-tight">
+                      Olá, <span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">{userName}</span>!
+                    </h2>
+                    <p className="text-sm sm:text-base text-blue-100 font-medium">
+                      Gestão Integrada & Cockpit Operacional
+                    </p>
                   </div>
-                  <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white leading-tight">
-                    Olá, <span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">{userName}</span>!
-                  </h2>
-                  <p className="text-sm sm:text-base text-blue-100 font-medium">
-                    Gestão Integrada & Cockpit Operacional
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-xl">
+                    {briefingSummary}
                   </p>
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setActive("ai-assistant")}
+                      className="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl transition-all duration-200 shadow-lg shadow-blue-500/30 hover:-translate-y-0.5 active:scale-95 cursor-pointer flex items-center gap-2"
+                    >
+                      <Sparkles className="w-4 h-4 text-cyan-200" />
+                      <span>Abrir Assistente IA</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActive(primaryPendencyAction.route)}
+                      className={cn(
+                        "px-5 py-2.5 font-bold text-xs sm:text-sm rounded-xl transition-all duration-200 shadow-lg hover:-translate-y-0.5 active:scale-95 cursor-pointer flex items-center gap-2",
+                        primaryPendencyAction.className
+                      )}
+                    >
+                      <primaryPendencyAction.icon className="w-4 h-4" />
+                      <span>{primaryPendencyAction.label}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActive("tickets")}
+                      className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-medium text-xs sm:text-sm rounded-xl border border-white/20 transition-all duration-200 backdrop-blur hover:shadow-lg cursor-pointer"
+                    >
+                      Chamados
+                    </button>
+                  </div>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-xl">
-                  {briefingSummary}
-                </p>
-                <div className="flex flex-wrap items-center gap-3 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setActive("ai-assistant")}
-                    className="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl transition-all duration-200 shadow-lg shadow-blue-500/30 hover:-translate-y-0.5 active:scale-95 cursor-pointer flex items-center gap-2"
-                  >
-                    <Sparkles className="w-4 h-4 text-cyan-200" />
-                    <span>Abrir Assistente IA</span>
-                  </button>
+
+                {/* Ícone Lateral Animado (Preservado fielmente com degrade e bounce) */}
+                <div className="hidden lg:flex items-center justify-center animate-float">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl blur-2xl opacity-40 animate-pulse" />
+                    <div className="relative bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl p-8 lg:p-10 shadow-2xl flex items-center justify-center">
+                      <Zap className="w-20 h-20 lg:w-24 lg:h-24 text-white opacity-90 animate-bounce" style={{ animationDuration: "2s" }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Cockpit Operacional Compacto com Grid Responsivo */}
+          {visibleCardsCount > 0 && (
+            <section className={cn("grid gap-4", cardsGridColsClass)}>
+              {/* Card 1: Atendimento & Carga da Equipe */}
+              {widgets.cardAtendimento && (
+                <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+                        <MessageCircle className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        WhatsApp
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Atendimento & Equipe
+                    </h4>
+                    <div className="mt-1 flex items-baseline gap-2">
+                      <span className="text-3xl font-black text-slate-900 dark:text-white">
+                        {conversasAbertas}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">conversas ativas</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      <span
+                        className={cn(
+                          "px-2 py-0.5 rounded-md text-[11px] font-semibold",
+                          filaEspera > 0
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 animate-pulse font-bold"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                        )}
+                      >
+                        Fila: {filaEspera}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300">
+                        Bot: {emTriagemBot}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                        Humano: {emAtendimentoHumano}
+                      </span>
+                    </div>
+
+                    {atendimentosNoPeriodo > 0 && (
+                      <div className="mt-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">+{atendimentosNoPeriodo}</span> contatos no período ({periodShortBadge})
+                      </div>
+                    )}
+
+                    {/* Carga por Atendente */}
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Carga por Atendente
+                      </p>
+                      {cargaOperadores.length > 0 ? (
+                        cargaOperadores.slice(0, 3).map((op) => (
+                          <div key={op.operador} className="flex items-center justify-between text-xs">
+                            <span className="truncate max-w-[140px] text-slate-700 dark:text-slate-300 font-medium">
+                              {op.operador}
+                            </span>
+                            <span className="font-bold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[11px]">
+                              {op.conversas} {op.conversas === 1 ? "chat" : "chats"}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">Nenhum operador com conversa</p>
+                      )}
+                    </div>
+                  </div>
 
                   <button
                     type="button"
-                    onClick={() => setActive(primaryPendencyAction.route)}
-                    className={cn(
-                      "px-5 py-2.5 font-bold text-xs sm:text-sm rounded-xl transition-all duration-200 shadow-lg hover:-translate-y-0.5 active:scale-95 cursor-pointer flex items-center gap-2",
-                      primaryPendencyAction.className
-                    )}
+                    onClick={() => setActive("conversations")}
+                    className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
                   >
-                    <primaryPendencyAction.icon className="w-4 h-4" />
-                    <span>{primaryPendencyAction.label}</span>
+                    <span>Acessar Atendimento</span>
+                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                   </button>
+                </div>
+              )}
+
+              {/* Card 2: Chamados & Rastreamento */}
+              {widgets.cardChamados && (
+                <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400">
+                        <ClipboardList className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        Tickets
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Chamados & Rastreio
+                    </h4>
+                    <div className="mt-1 flex items-baseline gap-2">
+                      <span className="text-3xl font-black text-slate-900 dark:text-white">
+                        {chamadosAtivos}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">chamados abertos</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      <span
+                        className={cn(
+                          "px-2 py-0.5 rounded-md text-[11px] font-semibold",
+                          criticosUrgentes > 0
+                            ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 font-bold"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                        )}
+                      >
+                        Urgentes: {criticosUrgentes}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                        Andamento: {emAndamento}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                        Aguardando: {aguardandoCliente}
+                      </span>
+                    </div>
+
+                    <div className="mt-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">+{criadosNoPeriodo}</span> abertos • <span className="font-semibold text-blue-600 dark:text-blue-400">{fechadosNoPeriodo}</span> resolvidos ({periodShortBadge})
+                    </div>
+
+                    {/* Rastreamentos Ativos */}
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5 font-medium">
+                        <PackageSearch className="w-3.5 h-3.5 text-slate-400" />
+                        Rastreios ativos:
+                      </span>
+                      <span className="font-bold text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[11px]">
+                        {rastreamentosAtivos}
+                      </span>
+                    </div>
+                  </div>
 
                   <button
                     type="button"
                     onClick={() => setActive("tickets")}
-                    className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-medium text-xs sm:text-sm rounded-xl border border-white/20 transition-all duration-200 backdrop-blur hover:shadow-lg cursor-pointer"
+                    className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
                   >
-                    Chamados
+                    <span>Acessar Chamados</span>
+                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                   </button>
                 </div>
-              </div>
+              )}
 
-              {/* Ícone Lateral Animado (Preservado fielmente com degrade e bounce) */}
-              <div className="hidden lg:flex items-center justify-center animate-float">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl blur-2xl opacity-40 animate-pulse" />
-                  <div className="relative bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl p-8 lg:p-10 shadow-2xl flex items-center justify-center">
-                    <Zap className="w-20 h-20 lg:w-24 lg:h-24 text-white opacity-90 animate-bounce" style={{ animationDuration: "2s" }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Cockpit Operacional Compacto */}
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {/* Card 1: Atendimento & Carga da Equipe */}
-            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
-                    <MessageCircle className="w-5 h-5" />
-                  </div>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                    WhatsApp
-                  </span>
-                </div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Atendimento & Equipe
-                </h4>
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-3xl font-black text-slate-900 dark:text-white">
-                    {conversasAbertas}
-                  </span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">conversas ativas</span>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  <span
-                    className={cn(
-                      "px-2 py-0.5 rounded-md text-[11px] font-semibold",
-                      filaEspera > 0
-                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 animate-pulse font-bold"
-                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-                    )}
-                  >
-                    Fila: {filaEspera}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300">
-                    Bot: {emTriagemBot}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                    Humano: {emAtendimentoHumano}
-                  </span>
-                </div>
-
-                {/* Carga por Atendente */}
-                <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Carga por Atendente
-                  </p>
-                  {cargaOperadores.length > 0 ? (
-                    cargaOperadores.slice(0, 3).map((op) => (
-                      <div key={op.operador} className="flex items-center justify-between text-xs">
-                        <span className="truncate max-w-[140px] text-slate-700 dark:text-slate-300 font-medium">
-                          {op.operador}
-                        </span>
-                        <span className="font-bold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[11px]">
-                          {op.conversas} {op.conversas === 1 ? "chat" : "chats"}
-                        </span>
+              {/* Card 3: Comercial (CRM & Orçamentos) */}
+              {widgets.cardCrm && (
+                <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
+                        <TrendingUp className="w-5 h-5" />
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-slate-400 italic">Nenhum operador com conversa</p>
-                  )}
-                </div>
-              </div>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        Funil
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Comercial & CRM
+                    </h4>
+                    <div className="mt-1 flex items-baseline gap-2">
+                      <span className="text-2xl font-black text-slate-900 dark:text-white truncate">
+                        {formatCurrency(valorPipeline)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-medium">pipeline em aberto</p>
 
-              <button
-                type="button"
-                onClick={() => setActive("conversations")}
-                className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
-              >
-                <span>Acessar Atendimento</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-              </button>
-            </div>
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
+                        Leads: {leadsAtivos}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                        Orçamentos: {oportunidadesAbertas}
+                      </span>
+                    </div>
 
-            {/* Card 2: Chamados & Rastreamento */}
-            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400">
-                    <ClipboardList className="w-5 h-5" />
+                    <div className="mt-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span className="font-semibold text-purple-600 dark:text-purple-400">+{leadsNoPeriodo}</span> leads • <span className="font-semibold text-emerald-600 dark:text-emerald-400">+{oportunidadesNoPeriodo}</span> orçamentos ({periodShortBadge})
+                    </div>
+
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                      <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                        <span>Propostas ativas:</span>
+                        <span className="font-bold text-slate-900 dark:text-white">{oportunidadesAbertas}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                        <span>Base de leads:</span>
+                        <span className="font-bold text-slate-900 dark:text-white">{leadsAtivos}</span>
+                      </div>
+                    </div>
                   </div>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                    Tickets
-                  </span>
-                </div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Chamados & Rastreio
-                </h4>
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-3xl font-black text-slate-900 dark:text-white">
-                    {chamadosAtivos}
-                  </span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">chamados abertos</span>
-                </div>
 
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  <span
-                    className={cn(
-                      "px-2 py-0.5 rounded-md text-[11px] font-semibold",
-                      criticosUrgentes > 0
-                        ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 font-bold"
-                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-                    )}
+                  <button
+                    type="button"
+                    onClick={() => setActive("crm-pipeline")}
+                    className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
                   >
-                    Urgentes: {criticosUrgentes}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
-                    Andamento: {emAndamento}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
-                    Aguardando: {aguardandoCliente}
-                  </span>
+                    <span>Acessar CRM</span>
+                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                  </button>
                 </div>
+              )}
 
-                {/* Rastreamentos Ativos */}
-                <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                  <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5 font-medium">
-                    <PackageSearch className="w-3.5 h-3.5 text-slate-400" />
-                    Rastreamentos ativos:
-                  </span>
-                  <span className="font-bold text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[11px]">
-                    {rastreamentosAtivos}
-                  </span>
-                </div>
-              </div>
+              {/* Card 4: Saúde & Consumo de IA (Visível para Admin) */}
+              {isAdmin && widgets.cardIaTokens && (
+                <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="p-2 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400">
+                        <Cpu className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        Cota IA
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Consumo de IA
+                    </h4>
 
-              <button
-                type="button"
-                onClick={() => setActive("tickets")}
-                className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
-              >
-                <span>Acessar Chamados</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-              </button>
-            </div>
-
-            {/* Card 3: Comercial (CRM & Orçamentos) */}
-            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
-                    <TrendingUp className="w-5 h-5" />
-                  </div>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                    Funil
-                  </span>
-                </div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Comercial & CRM
-                </h4>
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-2xl font-black text-slate-900 dark:text-white truncate">
-                    {formatCurrency(valorPipeline)}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-medium">pipeline em aberto</p>
-
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
-                    Leads: {leadsAtivos}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                    Orçamentos: {oportunidadesAbertas}
-                  </span>
-                </div>
-
-                <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1">
-                  <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
-                    <span>Propostas ativas:</span>
-                    <span className="font-bold text-slate-900 dark:text-white">{oportunidadesAbertas}</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
-                    <span>Base de leads:</span>
-                    <span className="font-bold text-slate-900 dark:text-white">{leadsAtivos}</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setActive("crm-pipeline")}
-                className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
-              >
-                <span>Acessar CRM</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-              </button>
-            </div>
-
-            {/* Card 4: Saúde & Consumo de IA (Visível para Admin) ou Atalhos Operacionais */}
-            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="p-2 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400">
-                    <Cpu className="w-5 h-5" />
-                  </div>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                    {isAdmin ? "Cota IA" : "Copiloto"}
-                  </span>
-                </div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  {isAdmin ? "Consumo de IA" : "Assistente IA"}
-                </h4>
-
-                {isAdmin ? (
-                  <>
                     <div className="mt-2 space-y-1.5">
                       <div className="flex justify-between items-baseline text-xs">
                         <span className="font-bold text-slate-900 dark:text-white">
@@ -1133,215 +1325,351 @@ function DashboardPage({
                       <Layers className="w-3.5 h-3.5" />
                       <span>Abrir Detalhes de Consumo</span>
                     </button>
-                  </>
-                ) : (
-                  <>
-                    <div className="mt-2 space-y-2">
-                      <p className="text-xs text-slate-600 dark:text-slate-400">
-                        Copiloto inteligente pronto para consultas operacionais, triagem e envio de WhatsApp.
-                      </p>
-                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-indigo-500" />
-                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Assistente IA ativo</span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setActive("ai-assistant")}
-                      className="mt-4 w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <span>Abrir Assistente</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </section>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Tarefas do Dia & Atividades Recentes */}
-          <section className="grid gap-6 lg:grid-cols-2">
-            {/* Coluna 1: Tarefas do Dia */}
-            <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs border border-slate-200/80 dark:border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
-                      <CheckCircle2 className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        Tarefas do Dia
-                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                          {completedTasks}/{totalTasks}
-                        </span>
-                      </h3>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Pendências críticas e rotinas do expediente operacional
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Barra sutil de progresso */}
-                  <div className="hidden sm:flex flex-col items-end gap-1">
-                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">{taskProgress}%</span>
-                    <div className="w-16 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-300"
-                        style={{ width: `${taskProgress}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Lista de Tarefas */}
-                <div className="space-y-2.5">
-                  {dailyTasks.map((task) => {
-                    const isChecked = !!checkedTasks[task.id];
-                    return (
-                      <div
-                        key={task.id}
-                        className={cn(
-                          "group flex items-start justify-between gap-3 p-3 rounded-xl border transition-all duration-200",
-                          isChecked
-                            ? "bg-slate-50/70 dark:bg-slate-800/30 border-slate-200/60 dark:border-slate-800/60 opacity-70"
-                            : task.urgent
-                            ? "bg-red-50/40 dark:bg-red-950/20 border-red-200/60 dark:border-red-900/40 hover:border-red-300"
-                            : "bg-slate-50/50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
-                        )}
-                      >
-                        <div className="flex items-start gap-3 min-w-0 flex-1">
-                          {/* Checkbox interativo */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTask(task.id)}
-                            className={cn(
-                              "mt-0.5 w-4 h-4 rounded flex items-center justify-center transition-all cursor-pointer flex-shrink-0 border",
-                              isChecked
-                                ? "bg-emerald-600 border-emerald-600 text-white"
-                                : "border-slate-300 dark:border-slate-600 hover:border-blue-500 bg-white dark:bg-slate-800"
-                            )}
-                            title={isChecked ? "Marcar como pendente" : "Marcar como concluída"}
-                            aria-label={isChecked ? "Marcar como pendente" : "Marcar como concluída"}
-                          >
-                            {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
-                          </button>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p
-                                className={cn(
-                                  "text-xs font-semibold leading-tight",
-                                  isChecked
-                                    ? "line-through text-slate-400 dark:text-slate-500"
-                                    : "text-slate-900 dark:text-slate-100"
-                                )}
-                              >
-                                {task.title}
-                              </p>
-                              {task.badge && (
-                                <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-md", task.badgeColor)}>
-                                  {task.badge}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
-                              {task.description}
-                            </p>
-                          </div>
+          {(widgets.tarefasDoDia || widgets.atividadesRecentes) && (
+            <section
+              className={cn(
+                "grid gap-6",
+                widgets.tarefasDoDia && widgets.atividadesRecentes ? "lg:grid-cols-2" : "grid-cols-1"
+              )}
+            >
+              {/* Coluna 1: Tarefas do Dia */}
+              {widgets.tarefasDoDia && (
+                <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs border border-slate-200/80 dark:border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                          <CheckCircle2 className="w-5 h-5" />
                         </div>
-
-                        {/* Botão de Atalho Rápido para a Ferramenta */}
-                        {task.route && (
-                          <button
-                            type="button"
-                            onClick={() => setActive(task.route!)}
-                            className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shadow-2xs flex-shrink-0 cursor-pointer"
-                          >
-                            {task.actionLabel || "Abrir"}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Dica inferior da coluna de tarefas */}
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
-                <span>Clique no checklist para registrar o progresso diário.</span>
-                <span className="font-medium text-slate-500 dark:text-slate-400">{new Date().toLocaleDateString("pt-BR", { weekday: "short", day: "numeric", month: "short" })}</span>
-              </div>
-            </div>
-
-            {/* Coluna 2: Atividades Recentes */}
-            <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs border border-slate-200/80 dark:border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
-                      <Clock className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        Atividades Recentes
-                        <span className="flex h-2 w-2 relative">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                        </span>
-                      </h3>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Histórico operacional e eventos recentes do tenant
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-                    Ao vivo
-                  </span>
-                </div>
-
-                {/* Timeline de Eventos */}
-                <div className="relative pl-6 space-y-3.5 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-800">
-                  {recentActivities.map((act) => {
-                    const { icon: ActIcon, bg: actBg } = getActivityIconAndColor(act.tipo);
-                    return (
-                      <div key={act.id} className="relative group">
-                        {/* Marcador na Timeline */}
-                        <div className={cn("absolute -left-6 top-1 w-5 h-5 rounded-full border flex items-center justify-center bg-white dark:bg-slate-900 shadow-2xs", actBg)}>
-                          <ActIcon className="w-2.5 h-2.5" />
-                        </div>
-
-                        {/* Conteúdo do Evento */}
-                        <div className="p-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 hover:border-slate-200 dark:hover:border-slate-700 transition-all">
-                          <div className="flex items-baseline justify-between gap-2">
-                            <p className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-snug">
-                              {act.titulo}
-                            </p>
-                            <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 whitespace-nowrap flex-shrink-0">
-                              {formatRelativeTime(act.timestamp)}
+                        <div>
+                          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            Tarefas do Dia
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              {completedTasks}/{totalTasks}
                             </span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                            {act.descricao}
+                          </h3>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Pendências críticas e rotinas do expediente operacional
                           </p>
                         </div>
                       </div>
+
+                      {/* Barra sutil de progresso */}
+                      <div className="hidden sm:flex flex-col items-end gap-1">
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">{taskProgress}%</span>
+                        <div className="w-16 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-300"
+                            style={{ width: `${taskProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Lista de Tarefas */}
+                    <div className="space-y-2.5">
+                      {dailyTasks.map((task) => {
+                        const isChecked = !!checkedTasks[task.id];
+                        return (
+                          <div
+                            key={task.id}
+                            className={cn(
+                              "group flex items-start justify-between gap-3 p-3 rounded-xl border transition-all duration-200",
+                              isChecked
+                                ? "bg-slate-50/70 dark:bg-slate-800/30 border-slate-200/60 dark:border-slate-800/60 opacity-70"
+                                : task.urgent
+                                ? "bg-red-50/40 dark:bg-red-950/20 border-red-200/60 dark:border-red-900/40 hover:border-red-300"
+                                : "bg-slate-50/50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                            )}
+                          >
+                            <div className="flex items-start gap-3 min-w-0 flex-1">
+                              {/* Checkbox interativo */}
+                              <button
+                                type="button"
+                                onClick={() => toggleTask(task.id)}
+                                className={cn(
+                                  "mt-0.5 w-4 h-4 rounded flex items-center justify-center transition-all cursor-pointer flex-shrink-0 border",
+                                  isChecked
+                                    ? "bg-emerald-600 border-emerald-600 text-white"
+                                    : "border-slate-300 dark:border-slate-600 hover:border-blue-500 bg-white dark:bg-slate-800"
+                                )}
+                                title={isChecked ? "Marcar como pendente" : "Marcar como concluída"}
+                                aria-label={isChecked ? "Marcar como pendente" : "Marcar como concluída"}
+                              >
+                                {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                              </button>
+
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p
+                                    className={cn(
+                                      "text-xs font-semibold leading-tight",
+                                      isChecked
+                                        ? "line-through text-slate-400 dark:text-slate-500"
+                                        : "text-slate-900 dark:text-slate-100"
+                                    )}
+                                  >
+                                    {task.title}
+                                  </p>
+                                  {task.badge && (
+                                    <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-md", task.badgeColor)}>
+                                      {task.badge}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                                  {task.description}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Botão de Atalho Rápido para a Ferramenta */}
+                            {task.route && (
+                              <button
+                                type="button"
+                                onClick={() => setActive(task.route!)}
+                                className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shadow-2xs flex-shrink-0 cursor-pointer"
+                              >
+                                {task.actionLabel || "Abrir"}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Dica inferior da coluna de tarefas */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
+                    <span>Clique no checklist para registrar o progresso diário.</span>
+                    <span className="font-medium text-slate-500 dark:text-slate-400">{new Date().toLocaleDateString("pt-BR", { weekday: "short", day: "numeric", month: "short" })}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Coluna 2: Atividades Recentes */}
+              {widgets.atividadesRecentes && (
+                <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs border border-slate-200/80 dark:border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            Atividades Recentes
+                            <span className="flex h-2 w-2 relative">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Histórico operacional e eventos recentes do tenant
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                        {periodShortBadge}
+                      </span>
+                    </div>
+
+                    {/* Timeline de Eventos */}
+                    <div className="relative pl-6 space-y-3.5 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-800">
+                      {recentActivities.map((act) => {
+                        const { icon: ActIcon, bg: actBg } = getActivityIconAndColor(act.tipo);
+                        return (
+                          <div key={act.id} className="relative group">
+                            {/* Marcador na Timeline */}
+                            <div className={cn("absolute -left-6 top-1 w-5 h-5 rounded-full border flex items-center justify-center bg-white dark:bg-slate-900 shadow-2xs", actBg)}>
+                              <ActIcon className="w-2.5 h-2.5" />
+                            </div>
+
+                            {/* Conteúdo do Evento */}
+                            <div className="p-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 hover:border-slate-200 dark:hover:border-slate-700 transition-all">
+                              <div className="flex items-baseline justify-between gap-2">
+                                <p className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-snug">
+                                  {act.titulo}
+                                </p>
+                                <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 whitespace-nowrap flex-shrink-0">
+                                  {formatRelativeTime(act.timestamp)}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                                {act.descricao}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Rodapé da Coluna de Atividades */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
+                    <span>Eventos sincronizados automaticamente com o banco de dados.</span>
+                    <span className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Operacional
+                    </span>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Drawer / Sheet Lateral de Auditoria de Consumo de IA */}
+          <Sheet open={isAiAuditOpen} onOpenChange={setIsAiAuditOpen}>
+            <SheetContent side="right" className="w-full sm:max-w-2xl md:max-w-3xl lg:max-w-4xl p-0 overflow-y-auto">
+              <SheetHeader className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                <SheetTitle className="text-lg font-bold flex items-center gap-2 text-slate-900 dark:text-white">
+                  <Cpu className="w-5 h-5 text-indigo-500" />
+                  Auditoria de Consumo de IA
+                </SheetTitle>
+                <SheetDescription className="text-xs text-slate-500 dark:text-slate-400">
+                  Detalhamento em tempo real do uso de inteligência artificial por ferramenta, módulo e operador.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="p-4 sm:p-6">
+                <AITokenUsagePage embedded={true} isDrawer={true} />
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          {/* Modal / Dialog de Personalização de Widgets */}
+          <Dialog open={isCustomizeModalOpen} onOpenChange={setIsCustomizeModalOpen}>
+            <DialogContent className="sm:max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0 overflow-hidden">
+              <DialogHeader className="p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                    <SlidersHorizontal className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-base font-bold text-slate-900 dark:text-white">
+                      Personalizar Painel
+                    </DialogTitle>
+                    <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Ative ou oculte os blocos da tela inicial. As preferências são salvas para seu usuário.
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+
+              <div className="p-5 space-y-3.5 max-h-[60vh] overflow-y-auto">
+                {[
+                  {
+                    key: "heroBanner" as const,
+                    title: "Briefing Inteligente",
+                    desc: "Hero Banner com saudação e resumo em tempo real da IA.",
+                    icon: Sparkles,
+                    color: "text-blue-500",
+                    show: true,
+                  },
+                  {
+                    key: "cardAtendimento" as const,
+                    title: "Atendimento & Equipe",
+                    desc: "Métricas de conversas WhatsApp, fila de espera e atendentes.",
+                    icon: MessageCircle,
+                    color: "text-emerald-500",
+                    show: true,
+                  },
+                  {
+                    key: "cardChamados" as const,
+                    title: "Chamados & Rastreamento",
+                    desc: "Tickets em aberto, prioridades urgentes e rastreios.",
+                    icon: ClipboardList,
+                    color: "text-blue-500",
+                    show: true,
+                  },
+                  {
+                    key: "cardCrm" as const,
+                    title: "Comercial & CRM",
+                    desc: "Leads ativos, orçamentos e valor do pipeline.",
+                    icon: TrendingUp,
+                    color: "text-purple-500",
+                    show: true,
+                  },
+                  {
+                    key: "cardIaTokens" as const,
+                    title: "Saúde & Consumo de IA",
+                    desc: "Cota contratual de tokens e auditoria executiva.",
+                    icon: Cpu,
+                    color: "text-indigo-500",
+                    show: isAdmin,
+                  },
+                  {
+                    key: "tarefasDoDia" as const,
+                    title: "Tarefas do Dia",
+                    desc: "Pendências críticas imediatas e checklist operacional.",
+                    icon: CheckCircle2,
+                    color: "text-emerald-500",
+                    show: true,
+                  },
+                  {
+                    key: "atividadesRecentes" as const,
+                    title: "Atividades Recentes",
+                    desc: "Linha do tempo com os últimos eventos do tenant.",
+                    icon: Clock,
+                    color: "text-indigo-500",
+                    show: true,
+                  },
+                ]
+                  .filter((w) => w.show)
+                  .map((w) => {
+                    const Icon = w.icon;
+                    const isChecked = widgets[w.key];
+                    return (
+                      <div
+                        key={w.key}
+                        className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-800/30 hover:border-slate-200 dark:hover:border-slate-700 transition-colors"
+                      >
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700 flex-shrink-0 mt-0.5">
+                            <Icon className={cn("w-4 h-4", w.color)} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{w.title}</p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{w.desc}</p>
+                          </div>
+                        </div>
+
+                        <Switch
+                          checked={isChecked}
+                          onCheckedChange={(checked) => updateWidgetVisibility(w.key, checked)}
+                          aria-label={`Alternar visibilidade de ${w.title}`}
+                        />
+                      </div>
                     );
                   })}
-                </div>
               </div>
 
-              {/* Rodapé da Coluna de Atividades */}
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
-                <span>Eventos sincronizados automaticamente com o banco de dados.</span>
-                <span className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Operacional
-                </span>
+              <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={resetWidgetsToDefault}
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Restaurar Padrão</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsCustomizeModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                >
+                  Concluir
+                </button>
               </div>
-            </div>
-          </section>
+            </DialogContent>
+          </Dialog>
 
           {/* Drawer / Sheet Lateral de Auditoria de Consumo de IA */}
           <Sheet open={isAiAuditOpen} onOpenChange={setIsAiAuditOpen}>

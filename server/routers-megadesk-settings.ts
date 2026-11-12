@@ -41,272 +41,383 @@ export const AVAILABLE_PERMISSIONS = [
 export const megadeskSettingsRouter = router({
   /**
    * Resumo consolidado do cockpit operacional para a tela inicial (Centro de Comando)
+   * Suporta filtro opcional por período: 'today' | '7d' | '30d' | 'month'
    */
-  getOperationalCockpit: megadeskProcedure.query(async ({ ctx }) => {
-    const tenantId = ctx.tenantId || "main";
-    let pool: any = null;
-    try {
-      pool = getPool();
-    } catch {
-      // Sem banco de dados disponível (ex: testes)
-    }
+  getOperationalCockpit: megadeskProcedure
+    .input(
+      z
+        .object({
+          period: z.enum(["today", "7d", "30d", "month"]).default("today"),
+        })
+        .optional()
+    )
+    .query(async ({ input, ctx }) => {
+      const tenantId = ctx.tenantId || "main";
+      const period = input?.period || "today";
 
-    const result = {
-      atendimento: {
-        totalAbertas: 0,
-        emTriagemBot: 0,
-        emAtendimentoHumano: 0,
-        filaEspera: 0,
-        cargaPorAtendente: [] as Array<{ operador: string; conversas: number }>,
-      },
-      chamados: {
-        totalAtivos: 0,
-        criticosUrgentes: 0,
-        novosAbertos: 0,
-        emAndamento: 0,
-        aguardandoCliente: 0,
-      },
-      rastreamentos: {
-        ativos: 0,
-      },
-      crm: {
-        leadsAtivos: 0,
-        oportunidadesAbertas: 0,
-        valorPipelineEstimado: 0,
-      },
-      atividadesRecentes: [] as Array<{
-        id: string;
-        tipo: "chamado" | "conversa" | "crm" | "assistente";
-        titulo: string;
-        descricao: string;
-        timestamp: number;
-      }>,
-      iaTokens: null as {
-        total_limit: number;
-        total_used: number;
-        remaining_tokens: number;
-        percent_used: number;
-        cycle_renewal_date: string;
-        days_remaining: number;
-      } | null,
-    };
+      const now = new Date();
+      let startDate: Date;
+      if (period === "7d") {
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else if (period === "30d") {
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      } else if (period === "month") {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      } else {
+        // "today" (início do dia atual às 00:00:00)
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      }
+      const startDateSql = startDate.toISOString().slice(0, 19).replace("T", " ");
 
-    if (!pool) {
-      return result;
-    }
-
-    // 1. Atendimento (Conversas WhatsApp)
-    try {
-      const [convSummary] = (await pool.execute(
-        `SELECT
-           COUNT(*) AS totalAbertas,
-           SUM(CASE WHEN status = 'bot' THEN 1 ELSE 0 END) AS emTriagemBot,
-           SUM(CASE WHEN status <> 'bot' AND (assigned_user_id IS NOT NULL OR assigned_user_name IS NOT NULL) THEN 1 ELSE 0 END) AS emAtendimentoHumano,
-           SUM(CASE WHEN status <> 'bot' AND assigned_user_id IS NULL AND assigned_user_name IS NULL THEN 1 ELSE 0 END) AS filaEspera
-         FROM megadesk_domain_conversations
-        WHERE client_id = ? AND status <> 'closed'`,
-        [tenantId]
-      )) as any[];
-
-      const [operatorLoad] = (await pool.execute(
-        `SELECT
-           COALESCE(assigned_user_name, assigned_user_id, 'Sem atendente') AS operador,
-           COUNT(*) AS conversasAtivas
-         FROM megadesk_domain_conversations
-        WHERE client_id = ? AND status <> 'closed' AND (assigned_user_id IS NOT NULL OR assigned_user_name IS NOT NULL)
-        GROUP BY operador
-        ORDER BY conversasAtivas DESC
-        LIMIT 5`,
-        [tenantId]
-      )) as any[];
-
-      result.atendimento = {
-        totalAbertas: Number(convSummary?.[0]?.totalAbertas || 0),
-        emTriagemBot: Number(convSummary?.[0]?.emTriagemBot || 0),
-        emAtendimentoHumano: Number(convSummary?.[0]?.emAtendimentoHumano || 0),
-        filaEspera: Number(convSummary?.[0]?.filaEspera || 0),
-        cargaPorAtendente: (operatorLoad || []).map((op: any) => ({
-          operador: String(op.operador),
-          conversas: Number(op.conversasAtivas || 0),
-        })),
-      };
-    } catch {
-      // Ignora falha individual de consulta
-    }
-
-    // 2. Chamados (Tickets)
-    try {
-      const [ticketsSummary] = (await pool.execute(
-        `SELECT
-           COUNT(*) AS totalAtivos,
-           SUM(CASE WHEN LOWER(priority) IN ('critica', 'crítica', 'urgent', 'urgente', 'alta', 'high') THEN 1 ELSE 0 END) AS criticos,
-           SUM(CASE WHEN LOWER(status) IN ('open', 'aberto') THEN 1 ELSE 0 END) AS novosAbertos,
-           SUM(CASE WHEN LOWER(status) IN ('in_progress', 'em_andamento', 'andamento') THEN 1 ELSE 0 END) AS emAndamento,
-           SUM(CASE WHEN LOWER(status) IN ('waiting', 'aguardando') THEN 1 ELSE 0 END) AS aguardando
-         FROM megadesk_domain_chamados
-        WHERE clientId = ? AND LOWER(status) NOT IN ('closed', 'fechado', 'resolvido', 'concluido', 'concluído')`,
-        [tenantId]
-      )) as any[];
-
-      result.chamados = {
-        totalAtivos: Number(ticketsSummary?.[0]?.totalAtivos || 0),
-        criticosUrgentes: Number(ticketsSummary?.[0]?.criticos || 0),
-        novosAbertos: Number(ticketsSummary?.[0]?.novosAbertos || 0),
-        emAndamento: Number(ticketsSummary?.[0]?.emAndamento || 0),
-        aguardandoCliente: Number(ticketsSummary?.[0]?.aguardando || 0),
-      };
-    } catch {
-      // Ignora falha individual de consulta
-    }
-
-    // 3. Rastreamentos Operacionais
-    try {
-      const [trackingRows] = (await pool.execute(
-        `SELECT COUNT(*) AS total
-         FROM megadesk_domain_operational_records
-        WHERE client_id = ?
-          AND record_type = 'tracking'
-          AND (status IS NULL OR LOWER(status) NOT IN ('delivered', 'entregue', 'closed', 'fechado', 'finalizado', 'concluido', 'concluído'))`,
-        [tenantId]
-      )) as any[];
-      result.rastreamentos = {
-        ativos: Number(trackingRows?.[0]?.total || 0),
-      };
-    } catch {
-      // Ignora falha individual de consulta
-    }
-
-    // 4. CRM & Vendas (Leads & Oportunidades/Orçamentos)
-    try {
-      const [leadsRows] = (await pool.execute(
-        `SELECT COUNT(*) AS totalLeads
-         FROM megadesk_crm_clients
-        WHERE client_id = ? AND status = 'lead' AND (lifecycle_state IS NULL OR lifecycle_state <> 'archived')`,
-        [tenantId]
-      )) as any[];
-
-      const [oppsRows] = (await pool.execute(
-        `SELECT COUNT(*) AS totalOportunidades, COALESCE(SUM(estimated_value), 0) AS valorTotal
-         FROM megadesk_crm_opportunities
-        WHERE client_id = ? AND status = 'open'`,
-        [tenantId]
-      )) as any[];
-
-      result.crm = {
-        leadsAtivos: Number(leadsRows?.[0]?.totalLeads || 0),
-        oportunidadesAbertas: Number(oppsRows?.[0]?.totalOportunidades || 0),
-        valorPipelineEstimado: Number(oppsRows?.[0]?.valorTotal || 0),
-      };
-    } catch {
-      // Ignora falha individual de consulta
-    }
-
-    // 5. Linha do Tempo de Atividades Recentes do Tenant
-    try {
-      const rawEvents: Array<{
-        id: string;
-        tipo: "chamado" | "conversa" | "crm" | "assistente";
-        titulo: string;
-        descricao: string;
-        timestamp: number;
-      }> = [];
-
-      // Atividades recentes de chamados
+      let pool: any = null;
       try {
-        const [chamadosRecentes] = (await pool.execute(
-          `SELECT chamadoId, chamadoNumber, title, status, priority, updatedAt, createdAt
-           FROM megadesk_domain_chamados
-          WHERE clientId = ?
-          ORDER BY updatedAt DESC
-          LIMIT 4`,
-          [tenantId]
-        )) as any[];
-        for (const c of (chamadosRecentes || [])) {
-          const d = new Date(c.updatedAt || c.createdAt || Date.now());
-          const statusLabel = c.status === "open" ? "Aberto" : c.status === "in_progress" ? "Em andamento" : c.status === "waiting" ? "Aguardando" : c.status === "closed" ? "Fechado" : String(c.status);
-          rawEvents.push({
-            id: `ticket-${c.chamadoId}`,
-            tipo: "chamado",
-            titulo: `Chamado #${c.chamadoNumber}: ${c.title || "Sem título"}`,
-            descricao: `Status: ${statusLabel} • Prioridade: ${c.priority || "média"}`,
-            timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
-          });
-        }
-      } catch {}
+        pool = getPool();
+      } catch {
+        // Sem banco de dados disponível (ex: testes)
+      }
 
-      // Atividades recentes de conversas
+      const result = {
+        period,
+        periodLabel:
+          period === "today"
+            ? "Hoje"
+            : period === "7d"
+            ? "Últimos 7 dias"
+            : period === "30d"
+            ? "Últimos 30 dias"
+            : "Este Mês",
+        periodStartDate: startDate.toISOString(),
+        atendimento: {
+          totalAbertas: 0,
+          emTriagemBot: 0,
+          emAtendimentoHumano: 0,
+          filaEspera: 0,
+          totalNoPeriodo: 0,
+          cargaPorAtendente: [] as Array<{ operador: string; conversas: number }>,
+        },
+        chamados: {
+          totalAtivos: 0,
+          criticosUrgentes: 0,
+          novosAbertos: 0,
+          emAndamento: 0,
+          aguardandoCliente: 0,
+          criadosNoPeriodo: 0,
+          fechadosNoPeriodo: 0,
+        },
+        rastreamentos: {
+          ativos: 0,
+          atualizadosNoPeriodo: 0,
+        },
+        crm: {
+          leadsAtivos: 0,
+          oportunidadesAbertas: 0,
+          valorPipelineEstimado: 0,
+          leadsNoPeriodo: 0,
+          oportunidadesNoPeriodo: 0,
+          valorNoPeriodo: 0,
+        },
+        atividadesRecentes: [] as Array<{
+          id: string;
+          tipo: "chamado" | "conversa" | "crm" | "assistente";
+          titulo: string;
+          descricao: string;
+          timestamp: number;
+        }>,
+        iaTokens: null as {
+          total_limit: number;
+          total_used: number;
+          remaining_tokens: number;
+          percent_used: number;
+          cycle_renewal_date: string;
+          days_remaining: number;
+        } | null,
+      };
+
+      if (!pool) {
+        return result;
+      }
+
+      // 1. Atendimento (Conversas WhatsApp)
       try {
-        const [convsRecentes] = (await pool.execute(
-          `SELECT conversation_id, customer_name, phone, status, last_message, updated_at, created_at
+        const [convSummary] = (await pool.execute(
+          `SELECT
+             COUNT(*) AS totalAbertas,
+             SUM(CASE WHEN status = 'bot' THEN 1 ELSE 0 END) AS emTriagemBot,
+             SUM(CASE WHEN status <> 'bot' AND (assigned_user_id IS NOT NULL OR assigned_user_name IS NOT NULL) THEN 1 ELSE 0 END) AS emAtendimentoHumano,
+             SUM(CASE WHEN status <> 'bot' AND assigned_user_id IS NULL AND assigned_user_name IS NULL THEN 1 ELSE 0 END) AS filaEspera
            FROM megadesk_domain_conversations
-          WHERE client_id = ?
-          ORDER BY updated_at DESC
-          LIMIT 4`,
+          WHERE client_id = ? AND status <> 'closed'`,
           [tenantId]
         )) as any[];
-        for (const conv of (convsRecentes || [])) {
-          const d = new Date(conv.updated_at || conv.created_at || Date.now());
-          rawEvents.push({
-            id: `conv-${conv.conversation_id}`,
-            tipo: "conversa",
-            titulo: `Conversa com ${conv.customer_name || conv.phone || "Cliente"}`,
-            descricao: conv.last_message ? String(conv.last_message).slice(0, 70) : `Status: ${conv.status}`,
-            timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
-          });
-        }
-      } catch {}
 
-      // Atividades recentes de CRM
+        const [operatorLoad] = (await pool.execute(
+          `SELECT
+             COALESCE(assigned_user_name, assigned_user_id, 'Sem atendente') AS operador,
+             COUNT(*) AS conversasAtivas
+           FROM megadesk_domain_conversations
+          WHERE client_id = ? AND status <> 'closed' AND (assigned_user_id IS NOT NULL OR assigned_user_name IS NOT NULL)
+          GROUP BY operador
+          ORDER BY conversasAtivas DESC
+          LIMIT 5`,
+          [tenantId]
+        )) as any[];
+
+        let totalNoPeriodo = 0;
+        try {
+          const [periodConvs] = (await pool.execute(
+            `SELECT COUNT(*) AS total
+             FROM megadesk_domain_conversations
+            WHERE client_id = ? AND (created_at >= ? OR updated_at >= ?)`,
+            [tenantId, startDateSql, startDateSql]
+          )) as any[];
+          totalNoPeriodo = Number(periodConvs?.[0]?.total || 0);
+        } catch {}
+
+        result.atendimento = {
+          totalAbertas: Number(convSummary?.[0]?.totalAbertas || 0),
+          emTriagemBot: Number(convSummary?.[0]?.emTriagemBot || 0),
+          emAtendimentoHumano: Number(convSummary?.[0]?.emAtendimentoHumano || 0),
+          filaEspera: Number(convSummary?.[0]?.filaEspera || 0),
+          totalNoPeriodo,
+          cargaPorAtendente: (operatorLoad || []).map((op: any) => ({
+            operador: String(op.operador),
+            conversas: Number(op.conversasAtivas || 0),
+          })),
+        };
+      } catch {
+        // Ignora falha individual de consulta
+      }
+
+      // 2. Chamados (Tickets)
       try {
-        const [crmRecentes] = (await pool.execute(
-          `SELECT id, public_id, title, status, value_cents, updated_at, created_at
+        const [ticketsSummary] = (await pool.execute(
+          `SELECT
+             COUNT(*) AS totalAtivos,
+             SUM(CASE WHEN LOWER(priority) IN ('critica', 'crítica', 'urgent', 'urgente', 'alta', 'high') THEN 1 ELSE 0 END) AS criticos,
+             SUM(CASE WHEN LOWER(status) IN ('open', 'aberto') THEN 1 ELSE 0 END) AS novosAbertos,
+             SUM(CASE WHEN LOWER(status) IN ('in_progress', 'em_andamento', 'andamento') THEN 1 ELSE 0 END) AS emAndamento,
+             SUM(CASE WHEN LOWER(status) IN ('waiting', 'aguardando') THEN 1 ELSE 0 END) AS aguardando
+           FROM megadesk_domain_chamados
+          WHERE clientId = ? AND LOWER(status) NOT IN ('closed', 'fechado', 'resolvido', 'concluido', 'concluído')`,
+          [tenantId]
+        )) as any[];
+
+        let criadosNoPeriodo = 0;
+        let fechadosNoPeriodo = 0;
+        try {
+          const [periodTickets] = (await pool.execute(
+            `SELECT
+               SUM(CASE WHEN createdAt >= ? THEN 1 ELSE 0 END) AS criados,
+               SUM(CASE WHEN LOWER(status) IN ('closed', 'fechado', 'resolvido', 'concluido', 'concluído') AND updatedAt >= ? THEN 1 ELSE 0 END) AS fechados
+             FROM megadesk_domain_chamados
+            WHERE clientId = ?`,
+            [startDateSql, startDateSql, tenantId]
+          )) as any[];
+          criadosNoPeriodo = Number(periodTickets?.[0]?.criados || 0);
+          fechadosNoPeriodo = Number(periodTickets?.[0]?.fechados || 0);
+        } catch {}
+
+        result.chamados = {
+          totalAtivos: Number(ticketsSummary?.[0]?.totalAtivos || 0),
+          criticosUrgentes: Number(ticketsSummary?.[0]?.criticos || 0),
+          novosAbertos: Number(ticketsSummary?.[0]?.novosAbertos || 0),
+          emAndamento: Number(ticketsSummary?.[0]?.emAndamento || 0),
+          aguardandoCliente: Number(ticketsSummary?.[0]?.aguardando || 0),
+          criadosNoPeriodo,
+          fechadosNoPeriodo,
+        };
+      } catch {
+        // Ignora falha individual de consulta
+      }
+
+      // 3. Rastreamentos Operacionais
+      try {
+        const [trackingRows] = (await pool.execute(
+          `SELECT COUNT(*) AS total
+           FROM megadesk_domain_operational_records
+          WHERE client_id = ?
+            AND record_type = 'tracking'
+            AND (status IS NULL OR LOWER(status) NOT IN ('delivered', 'entregue', 'closed', 'fechado', 'finalizado', 'concluido', 'concluído'))`,
+          [tenantId]
+        )) as any[];
+
+        let atualizadosNoPeriodo = 0;
+        try {
+          const [periodTrackings] = (await pool.execute(
+            `SELECT COUNT(*) AS total
+             FROM megadesk_domain_operational_records
+            WHERE client_id = ? AND record_type = 'tracking' AND updated_at >= ?`,
+            [tenantId, startDateSql]
+          )) as any[];
+          atualizadosNoPeriodo = Number(periodTrackings?.[0]?.total || 0);
+        } catch {}
+
+        result.rastreamentos = {
+          ativos: Number(trackingRows?.[0]?.total || 0),
+          atualizadosNoPeriodo,
+        };
+      } catch {
+        // Ignora falha individual de consulta
+      }
+
+      // 4. CRM & Vendas (Leads & Oportunidades/Orçamentos)
+      try {
+        const [leadsRows] = (await pool.execute(
+          `SELECT COUNT(*) AS totalLeads
+           FROM megadesk_crm_clients
+          WHERE client_id = ? AND status = 'lead' AND (lifecycle_state IS NULL OR lifecycle_state <> 'archived')`,
+          [tenantId]
+        )) as any[];
+
+        const [oppsRows] = (await pool.execute(
+          `SELECT COUNT(*) AS totalOportunidades, COALESCE(SUM(estimated_value), 0) AS valorTotal
            FROM megadesk_crm_opportunities
-          WHERE client_id = ?
-          ORDER BY updated_at DESC
-          LIMIT 4`,
+          WHERE client_id = ? AND status = 'open'`,
           [tenantId]
         )) as any[];
-        for (const opp of (crmRecentes || [])) {
-          const d = new Date(opp.updated_at || opp.created_at || Date.now());
-          const valorFormatado = opp.value_cents ? (opp.value_cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null;
-          rawEvents.push({
-            id: `crm-${opp.id || opp.public_id}`,
-            tipo: "crm",
-            titulo: `Oportunidade: ${opp.title || "Sem título"}`,
-            descricao: valorFormatado ? `${opp.status} • ${valorFormatado}` : `Status: ${opp.status}`,
-            timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
-          });
-        }
-      } catch {}
 
-      // Atividades recentes de IA
+        let leadsNoPeriodo = 0;
+        let oportunidadesNoPeriodo = 0;
+        let valorNoPeriodo = 0;
+        try {
+          const [periodLeads] = (await pool.execute(
+            `SELECT COUNT(*) AS total
+             FROM megadesk_crm_clients
+            WHERE client_id = ? AND created_at >= ?`,
+            [tenantId, startDateSql]
+          )) as any[];
+          leadsNoPeriodo = Number(periodLeads?.[0]?.total || 0);
+
+          const [periodOpps] = (await pool.execute(
+            `SELECT COUNT(*) AS total, COALESCE(SUM(value_cents), 0) AS valorTotalCents
+             FROM megadesk_crm_opportunities
+            WHERE client_id = ? AND created_at >= ?`,
+            [tenantId, startDateSql]
+          )) as any[];
+          oportunidadesNoPeriodo = Number(periodOpps?.[0]?.total || 0);
+          valorNoPeriodo = Number(periodOpps?.[0]?.valorTotalCents || 0) / 100;
+        } catch {}
+
+        result.crm = {
+          leadsAtivos: Number(leadsRows?.[0]?.totalLeads || 0),
+          oportunidadesAbertas: Number(oppsRows?.[0]?.totalOportunidades || 0),
+          valorPipelineEstimado: Number(oppsRows?.[0]?.valorTotal || 0),
+          leadsNoPeriodo,
+          oportunidadesNoPeriodo,
+          valorNoPeriodo,
+        };
+      } catch {
+        // Ignora falha individual de consulta
+      }
+
+      // 5. Linha do Tempo de Atividades Recentes do Tenant
       try {
-        const [iaRecentes] = (await pool.execute(
-          `SELECT id, feature_source, total_tokens, created_at
-           FROM megadesk_ai_token_usage
-          WHERE tenant_id = ?
-          ORDER BY created_at DESC
-          LIMIT 4`,
-          [tenantId]
-        )) as any[];
-        for (const ia of (iaRecentes || [])) {
-          const d = new Date(ia.created_at || Date.now());
-          const sourceLabel = ia.feature_source === "whatsapp_bot" ? "Triagem WhatsApp" : ia.feature_source === "assistant_chat" ? "Assistente IA" : ia.feature_source === "voice_shortcut" ? "Voz" : "Automação";
-          rawEvents.push({
-            id: `ia-${ia.id}`,
-            tipo: "assistente",
-            titulo: `Execução de IA • ${sourceLabel}`,
-            descricao: `${ia.total_tokens || 0} tokens processados`,
-            timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
-          });
-        }
-      } catch {}
+        const rawEvents: Array<{
+          id: string;
+          tipo: "chamado" | "conversa" | "crm" | "assistente";
+          titulo: string;
+          descricao: string;
+          timestamp: number;
+        }> = [];
 
-      rawEvents.sort((a, b) => b.timestamp - a.timestamp);
-      result.atividadesRecentes = rawEvents.slice(0, 6);
-    } catch {
-      // Ignora falha na consolidação de atividades
-    }
+        // Atividades recentes de chamados
+        try {
+          const [chamadosRecentes] = (await pool.execute(
+            `SELECT chamadoId, chamadoNumber, title, status, priority, updatedAt, createdAt
+             FROM megadesk_domain_chamados
+            WHERE clientId = ?
+            ORDER BY updatedAt DESC
+            LIMIT 4`,
+            [tenantId]
+          )) as any[];
+          for (const c of (chamadosRecentes || [])) {
+            const d = new Date(c.updatedAt || c.createdAt || Date.now());
+            const statusLabel = c.status === "open" ? "Aberto" : c.status === "in_progress" ? "Em andamento" : c.status === "waiting" ? "Aguardando" : c.status === "closed" ? "Fechado" : String(c.status);
+            rawEvents.push({
+              id: `ticket-${c.chamadoId}`,
+              tipo: "chamado",
+              titulo: `Chamado #${c.chamadoNumber}: ${c.title || "Sem título"}`,
+              descricao: `Status: ${statusLabel} • Prioridade: ${c.priority || "média"}`,
+              timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
+            });
+          }
+        } catch {}
+
+        // Atividades recentes de conversas
+        try {
+          const [convsRecentes] = (await pool.execute(
+            `SELECT conversation_id, customer_name, phone, status, last_message, updated_at, created_at
+             FROM megadesk_domain_conversations
+            WHERE client_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 4`,
+            [tenantId]
+          )) as any[];
+          for (const conv of (convsRecentes || [])) {
+            const d = new Date(conv.updated_at || conv.created_at || Date.now());
+            rawEvents.push({
+              id: `conv-${conv.conversation_id}`,
+              tipo: "conversa",
+              titulo: `Conversa com ${conv.customer_name || conv.phone || "Cliente"}`,
+              descricao: conv.last_message ? String(conv.last_message).slice(0, 70) : `Status: ${conv.status}`,
+              timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
+            });
+          }
+        } catch {}
+
+        // Atividades recentes de CRM
+        try {
+          const [crmRecentes] = (await pool.execute(
+            `SELECT id, public_id, title, status, value_cents, updated_at, created_at
+             FROM megadesk_crm_opportunities
+            WHERE client_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 4`,
+            [tenantId]
+          )) as any[];
+          for (const opp of (crmRecentes || [])) {
+            const d = new Date(opp.updated_at || opp.created_at || Date.now());
+            const valorFormatado = opp.value_cents ? (opp.value_cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null;
+            rawEvents.push({
+              id: `crm-${opp.id || opp.public_id}`,
+              tipo: "crm",
+              titulo: `Oportunidade: ${opp.title || "Sem título"}`,
+              descricao: valorFormatado ? `${opp.status} • ${valorFormatado}` : `Status: ${opp.status}`,
+              timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
+            });
+          }
+        } catch {}
+
+        // Atividades recentes de IA
+        try {
+          const [iaRecentes] = (await pool.execute(
+            `SELECT id, feature_source, total_tokens, created_at
+             FROM megadesk_ai_token_usage
+            WHERE tenant_id = ?
+            ORDER BY created_at DESC
+            LIMIT 4`,
+            [tenantId]
+          )) as any[];
+          for (const ia of (iaRecentes || [])) {
+            const d = new Date(ia.created_at || Date.now());
+            const sourceLabel = ia.feature_source === "whatsapp_bot" ? "Triagem WhatsApp" : ia.feature_source === "assistant_chat" ? "Assistente IA" : ia.feature_source === "voice_shortcut" ? "Voz" : "Automação";
+            rawEvents.push({
+              id: `ia-${ia.id}`,
+              tipo: "assistente",
+              titulo: `Execução de IA • ${sourceLabel}`,
+              descricao: `${ia.total_tokens || 0} tokens processados`,
+              timestamp: isNaN(d.getTime()) ? Date.now() : d.getTime(),
+            });
+          }
+        } catch {}
+
+        rawEvents.sort((a, b) => b.timestamp - a.timestamp);
+        // Filtra pela data inicial ou usa os mais recentes se a janela do período ainda estiver vazia
+        const inWindow = rawEvents.filter((ev) => ev.timestamp >= startDate.getTime());
+        result.atividadesRecentes = (inWindow.length > 0 ? inWindow : rawEvents).slice(0, 6);
+      } catch {
+        // Ignora falha na consolidação de atividades
+      }
 
     // 5. Cota e Consumo de Tokens de IA (para perfil admin)
     try {

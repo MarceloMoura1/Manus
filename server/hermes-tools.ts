@@ -122,6 +122,10 @@ export const getSystemMetricsSummaryParameters = z.object({
     .enum(["todas", "atendimento", "chamados", "crm", "ia_tokens"])
     .optional()
     .describe("Foco opcional da consulta: 'todas', 'atendimento', 'chamados', 'crm', 'ia_tokens'. Padrão: 'todas'."),
+  periodo: z
+    .enum(["today", "7d", "30d", "month"])
+    .optional()
+    .describe("Filtro de período unificado: 'today' (hoje), '7d' (últimos 7 dias), '30d' (últimos 30 dias), 'month' (este mês). Padrão: 'today'."),
 });
 
 export function calculateDateRange(mes?: number, ano?: number, periodo?: string) {
@@ -720,7 +724,7 @@ export function createHermesTools(context: HermesToolContext) {
     description:
       "Consulta em tempo real o resumo operacional da empresa (conversas ativas e carga por atendente, chamados abertos/críticos, rastreamentos ativos, leads/orçamentos recentes e status da cota de tokens de IA) para auxiliar o usuário nas prioridades e tarefas do dia.",
     inputSchema: getSystemMetricsSummaryParameters,
-    execute: async ({ categoria = "todas" }) => {
+    execute: async ({ categoria = "todas", periodo = "today" }) => {
       if (!pool) {
         return {
           success: false,
@@ -732,6 +736,7 @@ export function createHermesTools(context: HermesToolContext) {
       const result: Record<string, any> = {
         success: true,
         tenantId,
+        periodo,
         dataHora: new Date().toISOString(),
       };
 

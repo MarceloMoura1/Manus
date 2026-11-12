@@ -50,4 +50,20 @@ describe("MegaDesk settings authorization", () => {
       .resolves.toBeNull();
     expect(mocks.execute).toHaveBeenCalledTimes(1);
   });
+
+  it("supports period filter in getOperationalCockpit with default today", async () => {
+    const adminCaller = caller("admin");
+    const resultToday = await adminCaller.getOperationalCockpit();
+    expect(resultToday.period).toBe("today");
+    expect(resultToday.periodLabel).toBe("Hoje");
+    expect(resultToday.atendimento).toBeDefined();
+
+    const result7d = await adminCaller.getOperationalCockpit({ period: "7d" });
+    expect(result7d.period).toBe("7d");
+    expect(result7d.periodLabel).toBe("Últimos 7 dias");
+
+    const resultMonth = await adminCaller.getOperationalCockpit({ period: "month" });
+    expect(resultMonth.period).toBe("month");
+    expect(resultMonth.periodLabel).toBe("Este Mês");
+  });
 });
