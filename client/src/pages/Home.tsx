@@ -56,11 +56,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import {
   ArrowRight,
   ArrowLeft,
   ArrowRightLeft,
   ArrowDownUp,
+  ArrowUpRight,
   Bell,
   Bot,
   Building2,
@@ -75,6 +77,7 @@ import {
   EyeOff,
   Home as HomeIcon,
   Hourglass,
+  Layers,
   LayoutDashboard,
   Lock,
   Mail,
@@ -91,6 +94,7 @@ import {
   ShieldCheck,
   Sparkles,
   Ticket,
+  TrendingUp,
   Trash2,
   User,
   UserCheck,
@@ -405,17 +409,137 @@ function DashboardPage({
   session?: MegaDeskSession | null;
 }) {
   const [homeTab, setHomeTab] = useState<"overview" | "admin">("overview");
+  const [isAiAuditOpen, setIsAiAuditOpen] = useState(false);
   const isAdmin = session?.role === "admin" || session?.userRole === "admin";
 
-  const kpiCards = [
-    { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), icon: MessageCircle, note: "em andamento", gradient: "from-emerald-400 to-teal-600", bgGradient: "from-emerald-50 to-teal-50", iconBg: "from-emerald-100 to-teal-100", iconColor: "text-emerald-600" },
-    { label: "Taxa de Resolução", value: indicadores?.resolucaoBot ?? "0%", icon: CheckCircle2, note: "bot inteligente", gradient: "from-violet-400 to-purple-600", bgGradient: "from-violet-50 to-purple-50", iconBg: "from-violet-100 to-purple-100", iconColor: "text-violet-600" },
-    { label: "Chamados Ativos", value: String(indicadores?.chamadosAbertos ?? 0), icon: AlertCircle, note: "aguardando", gradient: "from-orange-400 to-red-600", bgGradient: "from-orange-50 to-red-50", iconBg: "from-orange-100 to-red-100", iconColor: "text-orange-600" },
-    { label: "Tempo Médio", value: indicadores?.tempoMedio ?? "0m", icon: Ticket, note: "resposta", gradient: "from-blue-400 to-indigo-600", bgGradient: "from-blue-50 to-indigo-50", iconBg: "from-blue-100 to-indigo-100", iconColor: "text-blue-600" },
-  ];
+  // Consulta do Cockpit Operacional em Tempo Real
+  const { data: cockpitData, isLoading: isCockpitLoading } =
+    trpc.megadeskSettings.getOperationalCockpit.useQuery(undefined, {
+      refetchInterval: 15_000,
+      staleTime: 5_000,
+    });
+
+  // Nome do usuário para a saudação personalizada
+  const userName =
+    session?.userName ||
+    (session?.userEmail ? session.userEmail.split("@")[0] : "Operador");
+
+  // Métricas extraídas do cockpit
+  const filaEspera = cockpitData?.atendimento?.filaEspera ?? 0;
+  const conversasAbertas = cockpitData?.atendimento?.totalAbertas ?? (indicadores?.conversasAbertas ?? 0);
+  const emTriagemBot = cockpitData?.atendimento?.emTriagemBot ?? 0;
+  const emAtendimentoHumano = cockpitData?.atendimento?.emAtendimentoHumano ?? 0;
+  const cargaOperadores = cockpitData?.atendimento?.cargaPorAtendente ?? [];
+
+  const chamadosAtivos = cockpitData?.chamados?.totalAtivos ?? (indicadores?.chamadosAbertos ?? 0);
+  const criticosUrgentes = cockpitData?.chamados?.criticosUrgentes ?? 0;
+  const novosAbertos = cockpitData?.chamados?.novosAbertos ?? 0;
+  const emAndamento = cockpitData?.chamados?.emAndamento ?? 0;
+  const aguardandoCliente = cockpitData?.chamados?.aguardandoCliente ?? 0;
+
+  const rastreamentosAtivos = cockpitData?.rastreamentos?.ativos ?? 0;
+
+  const leadsAtivos = cockpitData?.crm?.leadsAtivos ?? 0;
+  const oportunidadesAbertas = cockpitData?.crm?.oportunidadesAbertas ?? 0;
+  const valorPipeline = cockpitData?.crm?.valorPipelineEstimado ?? 0;
+
+  const formatCurrency = (val?: number) => {
+    return (val || 0).toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+      maximumFractionDigits: 0,
+    });
+  };
+
+  const formatTokens = (val?: number) => {
+    const num = val || 0;
+    if (num >= 1_000_000) {
+      return `${(num / 1_000_000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+    }
+    if (num >= 1_000) {
+      return `${(num / 1_000).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 1 })}k`;
+    }
+    return num.toLocaleString("pt-BR");
+  };
+
+  // Briefing inteligente gerado pelo assistente
+  const briefingSummary = React.useMemo(() => {
+    if (isCockpitLoading) {
+      return "Sincronizando indicadores operacionais em tempo real...";
+    }
+    const alerts: string[] = [];
+    if (filaEspera > 0) {
+      alerts.push(`${filaEspera} ${filaEspera === 1 ? "conversa aguardando" : "conversas aguardando"} na fila`);
+    }
+    if (criticosUrgentes > 0) {
+      alerts.push(`${criticosUrgentes} ${criticosUrgentes === 1 ? "chamado crítico" : "chamados críticos"} demandando ação`);
+    }
+    if (oportunidadesAbertas > 0) {
+      alerts.push(`${oportunidadesAbertas} orçamentos ativos no funil (${formatCurrency(valorPipeline)})`);
+    }
+
+    if (alerts.length > 0) {
+      return `Alerta de operação: ${alerts.join(", ")}. Equipe conta com ${cargaOperadores.length} operadores com atendimentos no momento.`;
+    }
+    if (conversasAbertas > 0 || chamadosAtivos > 0) {
+      return `Fluxo de atendimento regular e sem gargalos críticos. ${conversasAbertas} conversas em andamento e ${chamadosAtivos} chamados sob gestão da equipe.`;
+    }
+    return "Operação 100% em dia. Nenhuma fila de espera ou chamado urgente pendente. O Assistente IA está pronto para apoiar suas rotinas.";
+  }, [
+    isCockpitLoading,
+    filaEspera,
+    criticosUrgentes,
+    oportunidadesAbertas,
+    valorPipeline,
+    cargaOperadores.length,
+    conversasAbertas,
+    chamadosAtivos,
+  ]);
+
+  // Ação primária contextualizada pela maior pendência
+  const primaryPendencyAction = React.useMemo(() => {
+    if (filaEspera > 0) {
+      return {
+        label: `Ver Fila (${filaEspera})`,
+        route: "conversations" as RouteId,
+        className: "bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30",
+        icon: MessageCircle,
+      };
+    }
+    if (criticosUrgentes > 0) {
+      return {
+        label: `Ver Críticos (${criticosUrgentes})`,
+        route: "tickets" as RouteId,
+        className: "bg-red-500 hover:bg-red-600 text-white shadow-red-500/30",
+        icon: AlertCircle,
+      };
+    }
+    if (conversasAbertas > 0) {
+      return {
+        label: "Ver Atendimentos",
+        route: "conversations" as RouteId,
+        className: "bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/30",
+        icon: MessageCircle,
+      };
+    }
+    if (chamadosAtivos > 0) {
+      return {
+        label: "Ver Chamados",
+        route: "tickets" as RouteId,
+        className: "bg-indigo-500 hover:bg-indigo-600 text-white shadow-indigo-500/30",
+        icon: ClipboardList,
+      };
+    }
+    return {
+      label: "Central de Atendimento",
+      route: "conversations" as RouteId,
+      className: "bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/30",
+      icon: MessageCircle,
+    };
+  }, [filaEspera, criticosUrgentes, conversasAbertas, chamadosAtivos]);
 
   const quickActions = [
-    { title: "Atendimento", subtitle: "Central de atendimento", route: "conversations" as RouteId },
+    { title: "Atendimento", subtitle: "Central de conversas", route: "conversations" as RouteId },
     { title: "Chamados", subtitle: "Gerenciar tickets", route: "tickets" as RouteId },
     { title: "Rastreio", subtitle: "Monitorar atividades", route: "tracking" as RouteId },
   ];
@@ -478,95 +602,365 @@ function DashboardPage({
       {/* Aba 1: Visão Geral */}
       {homeTab === "overview" && (
         <div className="space-y-6 animate-fade-in">
-          {/* Hero Section */}
-          <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900 p-10 sm:p-14 shadow-2xl">
-            <div className="absolute inset-0 opacity-20">
+          {/* Hero Section Inteligente (Degradê Azul Preservado + Briefing com IA) */}
+          <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900 p-6 sm:p-8 lg:p-10 shadow-2xl border border-blue-900/40">
+            <div className="absolute inset-0 opacity-20 pointer-events-none">
               <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
               <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-500 rounded-full blur-3xl" />
             </div>
-            <div className="relative z-10 grid gap-8 lg:grid-cols-2 lg:items-center">
-              <div className="space-y-6 animate-fade-in">
-                <div className="space-y-3">
-                  <div className="inline-flex items-center gap-3 rounded-full bg-blue-500/20 backdrop-blur px-3.5 py-1.5 border border-blue-400/30">
-                    <Zap className="h-3.5 w-3.5 text-blue-300 animate-pulse" />
-                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-200">Operações e Atendimento</span>
+            <div className="relative z-10 grid gap-6 lg:grid-cols-2 lg:items-center">
+              <div className="space-y-4 sm:space-y-5 animate-fade-in">
+                <div className="space-y-2.5">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/20 backdrop-blur px-3 py-1 border border-blue-400/30">
+                    <Sparkles className="h-3.5 w-3.5 text-cyan-300 animate-pulse" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-200">
+                      Briefing do Assistente IA • Tempo Real
+                    </span>
                   </div>
-                  <h2 className="text-4xl sm:text-5xl font-black text-white leading-tight">
-                    Mega<span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">Desk</span>
+                  <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white leading-tight">
+                    Olá, <span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">{userName}</span>!
                   </h2>
-                  <p className="text-lg text-blue-100 font-medium">Gestão Integrada com Inteligência Artificial</p>
+                  <p className="text-sm sm:text-base text-blue-100 font-medium">
+                    Gestão Integrada & Cockpit Operacional
+                  </p>
                 </div>
-                <p className="text-sm text-slate-300 leading-relaxed max-w-lg">
-                  Monitore conversas no WhatsApp, chamados com SLA, pipeline do CRM, vendas no ERP e copiloto de IA sincronizados.
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-xl">
+                  {briefingSummary}
                 </p>
-                <div className="flex flex-wrap gap-3 pt-2">
-                  <button onClick={() => setActive('conversations')} className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-bold text-sm rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/50 hover:-translate-y-0.5 active:scale-95 cursor-pointer">
-                    Central de Atendimento
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setActive("ai-assistant")}
+                    className="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl transition-all duration-200 shadow-lg shadow-blue-500/30 hover:-translate-y-0.5 active:scale-95 cursor-pointer flex items-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4 text-cyan-200" />
+                    <span>Abrir Assistente IA</span>
                   </button>
-                  <button onClick={() => setActive('tickets')} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold text-sm rounded-xl border border-white/30 transition-all duration-200 backdrop-blur hover:shadow-lg cursor-pointer">
+
+                  <button
+                    type="button"
+                    onClick={() => setActive(primaryPendencyAction.route)}
+                    className={cn(
+                      "px-5 py-2.5 font-bold text-xs sm:text-sm rounded-xl transition-all duration-200 shadow-lg hover:-translate-y-0.5 active:scale-95 cursor-pointer flex items-center gap-2",
+                      primaryPendencyAction.className
+                    )}
+                  >
+                    <primaryPendencyAction.icon className="w-4 h-4" />
+                    <span>{primaryPendencyAction.label}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActive("tickets")}
+                    className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-medium text-xs sm:text-sm rounded-xl border border-white/20 transition-all duration-200 backdrop-blur hover:shadow-lg cursor-pointer"
+                  >
                     Chamados
                   </button>
                 </div>
               </div>
+
+              {/* Ícone Lateral Animado (Preservado fielmente com degrade e bounce) */}
               <div className="hidden lg:flex items-center justify-center animate-float">
                 <div className="relative">
                   <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl blur-2xl opacity-40 animate-pulse" />
-                  <div className="relative bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl p-10 shadow-2xl flex items-center justify-center">
-                    <Zap className="w-28 h-28 text-white opacity-90 animate-bounce" style={{ animationDuration: '2s' }} />
+                  <div className="relative bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl p-8 lg:p-10 shadow-2xl flex items-center justify-center">
+                    <Zap className="w-20 h-20 lg:w-24 lg:h-24 text-white opacity-90 animate-bounce" style={{ animationDuration: "2s" }} />
                   </div>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* KPI Cards */}
-          <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {kpiCards.map((card: any, idx) => {
-              const Icon = card.icon;
-              return (
-                <div
-                  key={card.label}
-                  className={`group relative overflow-hidden rounded-3xl bg-gradient-to-br ${card.bgGradient} p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 cursor-pointer animate-fade-in border border-white/40 backdrop-blur-sm`}
-                  style={{ animationDelay: `${idx * 0.1}s` }}
-                >
-                  <div className={`absolute -top-12 -right-12 w-40 h-40 bg-gradient-to-br ${card.gradient} rounded-full blur-3xl opacity-20 group-hover:opacity-30 transition-all duration-500 animate-pulse`} />
-                  <div className={`absolute -bottom-12 -left-12 w-40 h-40 bg-gradient-to-tr ${card.gradient} rounded-full blur-3xl opacity-15 group-hover:opacity-25 transition-all duration-500`} style={{ animationDelay: '0.5s' }} />
-                  
-                  <div className="relative z-10">
-                    <div className="flex items-center justify-between mb-6">
-                      <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${card.iconBg} flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
-                        <Icon className={`w-8 h-8 ${card.iconColor} group-hover:animate-bounce`} style={{ animationDuration: '0.6s' }} />
-                      </div>
-                      <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${card.gradient} animate-pulse`} />
-                    </div>
-                    <p className="text-xs font-bold uppercase tracking-widest text-slate-600 mb-3 opacity-75">{card.label}</p>
-                    <p className={`text-5xl font-black bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent mb-2 group-hover:scale-105 transition-transform duration-300 origin-left`}>{card.value}</p>
-                    <p className="text-sm font-semibold text-slate-600 group-hover:text-slate-700 transition-colors">{card.note}</p>
+          {/* Cockpit Operacional Compacto */}
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* Card 1: Atendimento & Carga da Equipe */}
+            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+                    <MessageCircle className="w-5 h-5" />
                   </div>
-                  
-                  <div className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r ${card.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`} />
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    WhatsApp
+                  </span>
                 </div>
-              );
-            })}
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Atendimento & Equipe
+                </h4>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-slate-900 dark:text-white">
+                    {conversasAbertas}
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">conversas ativas</span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  <span
+                    className={cn(
+                      "px-2 py-0.5 rounded-md text-[11px] font-semibold",
+                      filaEspera > 0
+                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 animate-pulse font-bold"
+                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                    )}
+                  >
+                    Fila: {filaEspera}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300">
+                    Bot: {emTriagemBot}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                    Humano: {emAtendimentoHumano}
+                  </span>
+                </div>
+
+                {/* Carga por Atendente */}
+                <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Carga por Atendente
+                  </p>
+                  {cargaOperadores.length > 0 ? (
+                    cargaOperadores.slice(0, 3).map((op) => (
+                      <div key={op.operador} className="flex items-center justify-between text-xs">
+                        <span className="truncate max-w-[140px] text-slate-700 dark:text-slate-300 font-medium">
+                          {op.operador}
+                        </span>
+                        <span className="font-bold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[11px]">
+                          {op.conversas} {op.conversas === 1 ? "chat" : "chats"}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-slate-400 italic">Nenhum operador com conversa</p>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActive("conversations")}
+                className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
+              >
+                <span>Acessar Atendimento</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+
+            {/* Card 2: Chamados & Rastreamento */}
+            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400">
+                    <ClipboardList className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Tickets
+                  </span>
+                </div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Chamados & Rastreio
+                </h4>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-slate-900 dark:text-white">
+                    {chamadosAtivos}
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">chamados abertos</span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  <span
+                    className={cn(
+                      "px-2 py-0.5 rounded-md text-[11px] font-semibold",
+                      criticosUrgentes > 0
+                        ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 font-bold"
+                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                    )}
+                  >
+                    Urgentes: {criticosUrgentes}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                    Andamento: {emAndamento}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                    Aguardando: {aguardandoCliente}
+                  </span>
+                </div>
+
+                {/* Rastreamentos Ativos */}
+                <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                  <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5 font-medium">
+                    <PackageSearch className="w-3.5 h-3.5 text-slate-400" />
+                    Rastreamentos ativos:
+                  </span>
+                  <span className="font-bold text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[11px]">
+                    {rastreamentosAtivos}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActive("tickets")}
+                className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
+              >
+                <span>Acessar Chamados</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+
+            {/* Card 3: Comercial (CRM & Orçamentos) */}
+            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
+                    <TrendingUp className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Funil
+                  </span>
+                </div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Comercial & CRM
+                </h4>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-slate-900 dark:text-white truncate">
+                    {formatCurrency(valorPipeline)}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-medium">pipeline em aberto</p>
+
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
+                    Leads: {leadsAtivos}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                    Orçamentos: {oportunidadesAbertas}
+                  </span>
+                </div>
+
+                <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                  <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                    <span>Propostas ativas:</span>
+                    <span className="font-bold text-slate-900 dark:text-white">{oportunidadesAbertas}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                    <span>Base de leads:</span>
+                    <span className="font-bold text-slate-900 dark:text-white">{leadsAtivos}</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActive("crm-pipeline")}
+                className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
+              >
+                <span>Acessar CRM</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+
+            {/* Card 4: Saúde & Consumo de IA (Visível para Admin) ou Atalhos Operacionais */}
+            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="p-2 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400">
+                    <Cpu className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    {isAdmin ? "Cota IA" : "Copiloto"}
+                  </span>
+                </div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  {isAdmin ? "Consumo de IA" : "Assistente IA"}
+                </h4>
+
+                {isAdmin ? (
+                  <>
+                    <div className="mt-2 space-y-1.5">
+                      <div className="flex justify-between items-baseline text-xs">
+                        <span className="font-bold text-slate-900 dark:text-white">
+                          {formatTokens(cockpitData?.iaTokens?.total_used)} / {formatTokens(cockpitData?.iaTokens?.total_limit)}
+                        </span>
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400 text-xs">
+                          {cockpitData?.iaTokens?.percent_used ?? 0}%
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all duration-500",
+                            (cockpitData?.iaTokens?.percent_used ?? 0) > 85
+                              ? "bg-red-500"
+                              : (cockpitData?.iaTokens?.percent_used ?? 0) > 60
+                              ? "bg-amber-500"
+                              : "bg-indigo-600"
+                          )}
+                          style={{ width: `${Math.min(100, Math.max(3, cockpitData?.iaTokens?.percent_used ?? 0))}%` }}
+                        />
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between pt-1">
+                        <span>Renovação:</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {cockpitData?.iaTokens?.days_remaining !== undefined
+                            ? `em ${cockpitData.iaTokens.days_remaining} dias`
+                            : "Ciclo mensal"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsAiAuditOpen(true)}
+                      className="mt-4 w-full py-2 px-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm hover:shadow-md cursor-pointer"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Abrir Detalhes de Consumo</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-2 space-y-2">
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
+                        Copiloto inteligente pronto para consultas operacionais, triagem e envio de WhatsApp.
+                      </p>
+                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-indigo-500" />
+                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Assistente IA ativo</span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActive("ai-assistant")}
+                      className="mt-4 w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>Abrir Assistente</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
           </section>
 
-          {/* Quick Actions and Activity */}
+          {/* Atalhos Rápidos & Atividades Recentes */}
           <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-            <div className="rounded-2xl bg-white p-8 sm:p-10 shadow-lg border border-slate-100">
-              <h3 className="text-xl font-bold text-slate-900 mb-6">Atalhos Operacionais</h3>
-              <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 sm:p-8 shadow-xs border border-slate-200/80 dark:border-slate-800">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white mb-4">Atalhos Operacionais Rápidos</h3>
+              <div className="grid gap-3 sm:grid-cols-3">
                 {quickActions.map((action) => {
                   const Icon = action.title === "Atendimento" ? MessageCircle : action.title === "Chamados" ? ClipboardList : Zap;
                   return (
                     <button
                       key={action.route}
+                      type="button"
                       onClick={() => setActive(action.route)}
-                      className="group relative overflow-hidden rounded-2xl p-6 text-left text-white shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1 active:scale-95 bg-gradient-to-br from-blue-600 to-blue-700 cursor-pointer"
+                      className="group relative overflow-hidden rounded-xl p-4 text-left text-white shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-0.5 active:scale-95 bg-gradient-to-br from-blue-600 to-indigo-700 cursor-pointer"
                     >
                       <div className="relative z-10">
-                        <Icon className="h-7 w-7 mb-3 group-hover:scale-110 transition-transform duration-300" />
-                        <p className="text-base font-bold">{action.title}</p>
-                        <p className="text-xs text-white/80 mt-1">{action.subtitle}</p>
+                        <Icon className="h-5 w-5 mb-2 group-hover:scale-110 transition-transform duration-300 text-blue-200" />
+                        <p className="text-sm font-bold">{action.title}</p>
+                        <p className="text-[11px] text-white/80 mt-0.5">{action.subtitle}</p>
                       </div>
                     </button>
                   );
@@ -574,26 +968,46 @@ function DashboardPage({
               </div>
             </div>
 
-            <div className="rounded-2xl bg-white p-8 sm:p-10 shadow-lg border border-slate-100">
-              <h3 className="text-xl font-bold text-slate-900 mb-6">Atividades Recentes</h3>
-              <div className="space-y-3">
+            <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 sm:p-8 shadow-xs border border-slate-200/80 dark:border-slate-800">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white mb-4">Status dos Serviços</h3>
+              <div className="space-y-2.5">
                 {[
-                  { title: "Novo chamado", desc: "Solicitação registrada", time: "Agora", color: "bg-blue-500" },
-                  { title: "BOT ativo", desc: "Cliente em triagem", time: "5 min", color: "bg-emerald-500" },
-                  { title: "Sessão IA", desc: "Rotinas operacionais", time: "12 min", color: "bg-indigo-500" },
+                  { title: "WhatsApp Gateway", desc: "Instância conectada e pronta", time: "Ativo", color: "bg-emerald-500" },
+                  { title: "Motor de Rotinas IA", desc: "Agendador autônomo operando", time: "Ativo", color: "bg-indigo-500" },
+                  { title: "Central de Chamados", desc: "Fluxo de tickets integrado", time: "Online", color: "bg-blue-500" },
                 ].map(({ title, desc, time, color }) => (
-                  <div key={title} className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <div className={cn("mt-1.5 h-2.5 w-2.5 rounded-full flex-shrink-0", color)} />
+                  <div key={title} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <div className={cn("h-2.5 w-2.5 rounded-full flex-shrink-0", color)} />
                     <div className="min-w-0 flex-1">
-                      <p className="font-bold text-slate-900 text-xs">{title}</p>
-                      <p className="text-[11px] text-slate-600">{desc}</p>
+                      <p className="font-bold text-slate-900 dark:text-white text-xs">{title}</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{desc}</p>
                     </div>
-                    <span className="text-[11px] font-semibold text-slate-500">{time}</span>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
+                      {time}
+                    </span>
                   </div>
                 ))}
               </div>
             </div>
           </section>
+
+          {/* Drawer / Sheet Lateral de Auditoria de Consumo de IA */}
+          <Sheet open={isAiAuditOpen} onOpenChange={setIsAiAuditOpen}>
+            <SheetContent side="right" className="w-full sm:max-w-2xl md:max-w-3xl lg:max-w-4xl p-0 overflow-y-auto">
+              <SheetHeader className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                <SheetTitle className="text-lg font-bold flex items-center gap-2 text-slate-900 dark:text-white">
+                  <Cpu className="w-5 h-5 text-indigo-500" />
+                  Auditoria de Consumo de IA
+                </SheetTitle>
+                <SheetDescription className="text-xs text-slate-500 dark:text-slate-400">
+                  Detalhamento em tempo real do uso de inteligência artificial por ferramenta, módulo e operador.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="p-4 sm:p-6">
+                <AITokenUsagePage embedded={true} isDrawer={true} />
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
       )}
 

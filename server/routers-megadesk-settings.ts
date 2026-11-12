@@ -9,6 +9,7 @@ import { getPool } from "./db";
 import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import { syncClientDataToDb, syncTeamUsersToDb, validateSyncIntegrity, getSyncedClientData } from "./sync-megadesk";
+import { getAiTokenUsageSummary } from "./modules/ai-usage/ai-usage.service";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,172 @@ export const AVAILABLE_PERMISSIONS = [
 ] as const;
 
 export const megadeskSettingsRouter = router({
+  /**
+   * Resumo consolidado do cockpit operacional para a tela inicial (Centro de Comando)
+   */
+  getOperationalCockpit: megadeskProcedure.query(async ({ ctx }) => {
+    const tenantId = ctx.tenantId || "main";
+    let pool: any = null;
+    try {
+      pool = getPool();
+    } catch {
+      // Sem banco de dados disponível (ex: testes)
+    }
+
+    const result = {
+      atendimento: {
+        totalAbertas: 0,
+        emTriagemBot: 0,
+        emAtendimentoHumano: 0,
+        filaEspera: 0,
+        cargaPorAtendente: [] as Array<{ operador: string; conversas: number }>,
+      },
+      chamados: {
+        totalAtivos: 0,
+        criticosUrgentes: 0,
+        novosAbertos: 0,
+        emAndamento: 0,
+        aguardandoCliente: 0,
+      },
+      rastreamentos: {
+        ativos: 0,
+      },
+      crm: {
+        leadsAtivos: 0,
+        oportunidadesAbertas: 0,
+        valorPipelineEstimado: 0,
+      },
+      iaTokens: null as {
+        total_limit: number;
+        total_used: number;
+        remaining_tokens: number;
+        percent_used: number;
+        cycle_renewal_date: string;
+        days_remaining: number;
+      } | null,
+    };
+
+    if (!pool) {
+      return result;
+    }
+
+    // 1. Atendimento (Conversas WhatsApp)
+    try {
+      const [convSummary] = (await pool.execute(
+        `SELECT
+           COUNT(*) AS totalAbertas,
+           SUM(CASE WHEN status = 'bot' THEN 1 ELSE 0 END) AS emTriagemBot,
+           SUM(CASE WHEN status <> 'bot' AND (assigned_user_id IS NOT NULL OR assigned_user_name IS NOT NULL) THEN 1 ELSE 0 END) AS emAtendimentoHumano,
+           SUM(CASE WHEN status <> 'bot' AND assigned_user_id IS NULL AND assigned_user_name IS NULL THEN 1 ELSE 0 END) AS filaEspera
+         FROM megadesk_domain_conversations
+        WHERE client_id = ? AND status <> 'closed'`,
+        [tenantId]
+      )) as any[];
+
+      const [operatorLoad] = (await pool.execute(
+        `SELECT
+           COALESCE(assigned_user_name, assigned_user_id, 'Sem atendente') AS operador,
+           COUNT(*) AS conversasAtivas
+         FROM megadesk_domain_conversations
+        WHERE client_id = ? AND status <> 'closed' AND (assigned_user_id IS NOT NULL OR assigned_user_name IS NOT NULL)
+        GROUP BY operador
+        ORDER BY conversasAtivas DESC
+        LIMIT 5`,
+        [tenantId]
+      )) as any[];
+
+      result.atendimento = {
+        totalAbertas: Number(convSummary?.[0]?.totalAbertas || 0),
+        emTriagemBot: Number(convSummary?.[0]?.emTriagemBot || 0),
+        emAtendimentoHumano: Number(convSummary?.[0]?.emAtendimentoHumano || 0),
+        filaEspera: Number(convSummary?.[0]?.filaEspera || 0),
+        cargaPorAtendente: (operatorLoad || []).map((op: any) => ({
+          operador: String(op.operador),
+          conversas: Number(op.conversasAtivas || 0),
+        })),
+      };
+    } catch {
+      // Ignora falha individual de consulta
+    }
+
+    // 2. Chamados (Tickets)
+    try {
+      const [ticketsSummary] = (await pool.execute(
+        `SELECT
+           COUNT(*) AS totalAtivos,
+           SUM(CASE WHEN prioridade IN ('urgent', 'urgente', 'high', 'alta', 'critica') THEN 1 ELSE 0 END) AS criticos,
+           SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS novosAbertos,
+           SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS emAndamento,
+           SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) AS aguardando
+         FROM chamados
+        WHERE client_id = ? AND status <> 'closed'`,
+        [tenantId]
+      )) as any[];
+
+      result.chamados = {
+        totalAtivos: Number(ticketsSummary?.[0]?.totalAtivos || 0),
+        criticosUrgentes: Number(ticketsSummary?.[0]?.criticos || 0),
+        novosAbertos: Number(ticketsSummary?.[0]?.novosAbertos || 0),
+        emAndamento: Number(ticketsSummary?.[0]?.emAndamento || 0),
+        aguardandoCliente: Number(ticketsSummary?.[0]?.aguardando || 0),
+      };
+    } catch {
+      // Ignora falha individual de consulta
+    }
+
+    // 3. Rastreamentos Operacionais
+    try {
+      const [trackingRows] = (await pool.execute(
+        `SELECT COUNT(*) AS total
+         FROM megadesk_domain_operational_records
+        WHERE client_id = ? AND record_type = 'tracking'`,
+        [tenantId]
+      )) as any[];
+      result.rastreamentos = {
+        ativos: Number(trackingRows?.[0]?.total || 0),
+      };
+    } catch {
+      // Ignora falha individual de consulta
+    }
+
+    // 4. CRM & Vendas (Leads & Oportunidades/Orçamentos)
+    try {
+      const [leadsRows] = (await pool.execute(
+        `SELECT COUNT(*) AS totalLeads
+         FROM megadesk_crm_clients
+        WHERE client_id = ? AND status = 'lead' AND (lifecycle_state IS NULL OR lifecycle_state <> 'archived')`,
+        [tenantId]
+      )) as any[];
+
+      const [oppsRows] = (await pool.execute(
+        `SELECT COUNT(*) AS totalOportunidades, COALESCE(SUM(estimated_value), 0) AS valorTotal
+         FROM megadesk_crm_opportunities
+        WHERE client_id = ? AND status = 'open'`,
+        [tenantId]
+      )) as any[];
+
+      result.crm = {
+        leadsAtivos: Number(leadsRows?.[0]?.totalLeads || 0),
+        oportunidadesAbertas: Number(oppsRows?.[0]?.totalOportunidades || 0),
+        valorPipelineEstimado: Number(oppsRows?.[0]?.valorTotal || 0),
+      };
+    } catch {
+      // Ignora falha individual de consulta
+    }
+
+    // 5. Cota e Consumo de Tokens de IA (para perfil admin)
+    try {
+      const isAdmin = ctx.user?.role === "admin" || (ctx as any).operationalUserRole === "admin";
+      if (isAdmin) {
+        const usage = await getAiTokenUsageSummary(tenantId, pool);
+        result.iaTokens = usage.summary;
+      }
+    } catch {
+      // Ignora falha individual de consulta
+    }
+
+    return result;
+  }),
   // ════════════════════════════════════════════════════════════════════════════
   // ABA GERAL — Dados da empresa
   // ════════════════════════════════════════════════════════════════════════════

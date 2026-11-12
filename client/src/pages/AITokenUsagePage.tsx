@@ -86,10 +86,33 @@ export function AITokenUsagePage({ embedded = false, isDrawer = false }: AIToken
   return (
     <div className={cn(
       "flex flex-col h-full w-full text-slate-100 overflow-hidden",
-      embedded ? "bg-slate-950/70 rounded-2xl border border-slate-800/80 shadow-md backdrop-blur-sm" : "bg-slate-950"
+      isDrawer
+        ? "bg-transparent border-0 shadow-none"
+        : embedded
+          ? "bg-slate-950/70 rounded-2xl border border-slate-800/80 shadow-md backdrop-blur-sm"
+          : "bg-slate-950"
     )}>
       {/* Header */}
-      {embedded ? (
+      {isDrawer ? (
+        <div className="flex-none px-4 py-3 border-b border-slate-800/70 bg-slate-900/40 backdrop-blur flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-slate-800 text-slate-300 border-slate-700">
+              Ciclo Atual
+            </Badge>
+            <span className="text-xs text-slate-400">Tokens auditados em tempo real</span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs h-7 px-2.5"
+          >
+            <RefreshCw className={`w-3 h-3 mr-1.5 ${isFetching ? "animate-spin text-indigo-400" : ""}`} />
+            Atualizar
+          </Button>
+        </div>
+      ) : embedded ? (
         <div className="flex-none px-5 py-3.5 border-b border-slate-800/70 bg-slate-900/40 backdrop-blur flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
