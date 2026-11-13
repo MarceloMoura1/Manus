@@ -318,16 +318,25 @@ export function publicConversationMediaMetadata(value: unknown, messageId: unkno
   }
   const mimeType = isSafeConversationMediaMime(value.mimeType) ? value.mimeType.toLowerCase() : undefined;
   const fileName = safeConversationMediaFileName(value.fileName);
-  const directUrl = typeof value.url === "string" ? value.url : typeof value.mediaUrl === "string" ? value.mediaUrl : typeof value.media_url === "string" ? value.media_url : null;
+  const quotePdfUrl = typeof value.quotePdfUrl === "string" && value.quotePdfUrl.trim() ? value.quotePdfUrl.trim() : undefined;
+  const orderNumber = typeof value.orderNumber === "string" && value.orderNumber.trim() ? value.orderNumber.trim() : undefined;
+  const publicId = typeof value.publicId === "string" && value.publicId.trim() ? value.publicId.trim() : undefined;
+  const directUrl = quotePdfUrl || (typeof value.url === "string" ? value.url : typeof value.mediaUrl === "string" ? value.mediaUrl : typeof value.media_url === "string" ? value.media_url : null);
   if (directUrl || typeof value.mediaData === "string" || typeof value.base64 === "string" || typeof value.dataUrl === "string") {
     return {
       ...(mimeType ? { mimeType } : {}),
       ...(fileName ? { fileName } : {}),
       ...(directUrl ? { mediaUrl: directUrl, url: directUrl, mediaData: directUrl } : {}),
+      ...(quotePdfUrl ? { quotePdfUrl } : {}),
+      ...(orderNumber ? { orderNumber } : {}),
+      ...(publicId ? { publicId } : {}),
       mediaReference: {
         storage: directUrl ? "quote_document" : "private",
         messageId: id,
         ...(directUrl ? { url: directUrl, mediaUrl: directUrl } : {}),
+        ...(quotePdfUrl ? { quotePdfUrl } : {}),
+        ...(orderNumber ? { orderNumber } : {}),
+        ...(publicId ? { publicId } : {}),
       },
     };
   }

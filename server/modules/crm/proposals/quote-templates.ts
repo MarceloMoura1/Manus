@@ -920,6 +920,7 @@ export class QuoteTemplatesService {
       `Olá, ${quote.customerName}! Segue em anexo a proposta comercial *${quote.orderNumber}* no valor de ${money(quote.totalCents)}. Permanecemos à disposição!`;
 
     let messageId: string | undefined;
+    let evoResponse: any = null;
     try {
       const response = await evoSendAttachment({
         instanceName,
@@ -930,6 +931,7 @@ export class QuoteTemplatesService {
         fileName,
         caption: messageCaption,
       });
+      evoResponse = response;
       messageId = response?.key?.id;
     } catch (evoError: any) {
       console.warn("[QuoteTemplatesService] Falha na Evolution API:", evoError?.message);
@@ -971,6 +973,8 @@ export class QuoteTemplatesService {
       );
       const convRows = Array.isArray(searchRes) && Array.isArray(searchRes[0]) ? searchRes[0] : [];
 
+      const resolvedIntegrationId = instanceName;
+
       let conversationId: string;
       let isNewConversation = false;
 
@@ -1006,7 +1010,7 @@ export class QuoteTemplatesService {
           const contactRows = Array.isArray(contactRes) && Array.isArray(contactRes[0]) ? contactRes[0] : [];
           if (contactRows[0]?.contact_id) {
             contactId = String(contactRows[0].contact_id);
-            activeKey = createHash("sha256").update(`${identity.clientId}\0evolution\0${instanceName}\0${contactId}`).digest("hex");
+            activeKey = createHash("sha256").update(`${identity.clientId}\0evolution\0${resolvedIntegrationId}\0${contactId}`).digest("hex");
           }
         } catch {
           // Vínculo opcional de contato
@@ -1022,7 +1026,7 @@ export class QuoteTemplatesService {
             quote.crmClientId,
             generatedCode,
             contactId,
-            instanceName,
+            resolvedIntegrationId,
             activeKey,
             quote.customerName || "Cliente",
             phoneNorm.value,
@@ -1055,13 +1059,49 @@ export class QuoteTemplatesService {
         orderNumber: quote.orderNumber,
       };
 
-      // Inserir o registro em megadesk_domain_conversations_messages
+      const providerMessageReference =
+        evoResponse && typeof evoResponse === "object" && evoResponse.key?.id
+          ? {
+              key: {
+                id: String(evoResponse.key.id),
+                remoteJid: String(evoResponse.key.remoteJid || `${phoneNorm.value}@s.whatsapp.net`),
+                fromMe: true,
+              },
+              message:
+                evoResponse.message && typeof evoResponse.message === "object"
+                  ? evoResponse.message
+                  : {
+                      documentMessage: {
+                        fileName,
+                        mimetype: "application/pdf",
+                        caption: messageCaption,
+                      },
+                    },
+            }
+          : messageId
+            ? {
+                key: {
+                  id: messageId,
+                  remoteJid: `${phoneNorm.value}@s.whatsapp.net`,
+                  fromMe: true,
+                },
+                message: {
+                  documentMessage: {
+                    fileName,
+                    mimetype: "application/pdf",
+                    caption: messageCaption,
+                  },
+                },
+              }
+            : null;
+
+      // Inserir o registro em megadesk_domain_conversations_messages com integration_id e provider_message_reference
       await pool.execute(
         `INSERT INTO megadesk_domain_conversations_messages
-         (message_id, conversation_id, client_id, external_message_id, provider, integration_id,
+         (message_id, conversation_id, client_id, external_message_id, provider,
           direction, message_type, sender_user_id, sender_name_snapshot, media_reference,
-          sender, message, timestamp, status)
-         VALUES (?, ?, ?, ?, 'evolution', '', 'outbound', 'document', ?, ?, ?, 'operator', ?, ?, 'sent')`,
+          sender, message, timestamp, status, integration_id, provider_message_reference)
+         VALUES (?, ?, ?, ?, 'evolution', 'outbound', 'document', ?, ?, ?, 'operator', ?, ?, 'sent', ?, ?)`,
         [
           messageRecordId,
           conversationId,
@@ -1072,10 +1112,12 @@ export class QuoteTemplatesService {
           JSON.stringify(mediaReference),
           messageCaption,
           now,
+          resolvedIntegrationId,
+          providerMessageReference ? JSON.stringify(providerMessageReference) : null,
         ]
       );
 
-      // Atualizar megadesk_domain_conversations com a mensagem em messages_json e last_message
+      // Atualizar megadesk_domain_conversations com a mensagem em messages_json, last_message e canal
       const currRes = await pool.execute<RowDataPacket[]>(
         `SELECT messages_json FROM megadesk_domain_conversations WHERE conversation_id = ? AND client_id = ? LIMIT 1`,
         [conversationId, identity.clientId]
@@ -1110,6 +1152,9 @@ export class QuoteTemplatesService {
       await pool.execute(
         `UPDATE megadesk_domain_conversations
          SET messages_json = ?, last_message = ?, last_message_from = 'agent', status = 'open',
+             channel = COALESCE(NULLIF(channel, ''), 'whatsapp'),
+             provider = COALESCE(NULLIF(provider, ''), 'evolution'),
+             integration_id = COALESCE(NULLIF(integration_id, ''), ?),
              assigned_user_id = COALESCE(NULLIF(assigned_user_id, 'bot_system'), ?),
              assigned_user_name = COALESCE(NULLIF(assigned_user_name, 'Bot'), ?),
              updated_at = NOW()
@@ -1117,6 +1162,7 @@ export class QuoteTemplatesService {
         [
           JSON.stringify(messagesList),
           messageCaption.substring(0, 255),
+          resolvedIntegrationId,
           resolvedAssignedUserId,
           resolvedAssignedUserName,
           conversationId,

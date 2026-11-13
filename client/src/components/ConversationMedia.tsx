@@ -21,6 +21,8 @@ export function extractQuotePdfCode(message: any, explicitCaption?: string): str
   if (!message || typeof message !== "object") return null;
 
   const candidateUrls = [
+    message.quotePdfUrl,
+    message.mediaReference?.quotePdfUrl,
     message.mediaUrl,
     message.media_url,
     message.url,
@@ -60,21 +62,27 @@ export function extractQuotePdfCode(message: any, explicitCaption?: string): str
     return null;
   }
 
-  // 1. Da mediaUrl / url (ex: /api/crm/quotes/O-22/pdf ou /api/erp/sales/<id>/pdf -> O-22)
+  // 1. De orderNumber explícito (ex: "O-22")
+  const orderNumber = message.orderNumber || message.mediaReference?.orderNumber;
+  if (typeof orderNumber === "string" && orderNumber.trim().length > 0) {
+    return orderNumber.trim();
+  }
+
+  // 2. Da URL direta /api/crm/quotes/<codigo>/pdf
   for (const rawUrl of candidateUrls) {
-    const urlMatch = /\/api\/(?:crm\/quotes|erp\/sales)\/([^/?#]+)\/pdf/i.exec(rawUrl);
-    if (urlMatch?.[1]) {
-      return decodeURIComponent(urlMatch[1]);
+    const quoteUrlMatch = /\/api\/crm\/quotes\/([^/?#]+)\/pdf/i.exec(rawUrl);
+    if (quoteUrlMatch?.[1]) {
+      return decodeURIComponent(quoteUrlMatch[1]);
     }
   }
 
-  // 2. Do fileName (ex: orcamento-O-22.pdf -> O-22)
+  // 3. Do fileName (ex: orcamento-O-22.pdf -> O-22)
   const fileMatch = /or[çc]amento-([A-Za-z0-9_-]+)\.pdf/i.exec(fileName);
   if (fileMatch?.[1]) {
     return fileMatch[1];
   }
 
-  // 3. Do texto da mensagem via regex (ex: "orçamento comercial O-22" ou "proposta comercial *O-22*")
+  // 4. Do texto da mensagem via regex (ex: "orçamento comercial O-22" ou "proposta comercial *O-22*")
   const textMatch =
     /or[çc]amento\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(messageText) ||
     /proposta\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(messageText);
@@ -82,10 +90,12 @@ export function extractQuotePdfCode(message: any, explicitCaption?: string): str
     return textMatch[1];
   }
 
-  // 4. De orderNumber ou publicId
-  const orderNumber = message.orderNumber || message.mediaReference?.orderNumber;
-  if (typeof orderNumber === "string" && orderNumber.trim().length > 0) {
-    return orderNumber.trim();
+  // 5. Fallback para /api/erp/sales/<id>/pdf ou publicId
+  for (const rawUrl of candidateUrls) {
+    const salesUrlMatch = /\/api\/erp\/sales\/([^/?#]+)\/pdf/i.exec(rawUrl);
+    if (salesUrlMatch?.[1]) {
+      return decodeURIComponent(salesUrlMatch[1]);
+    }
   }
   if (hasValidUuidPublicId) {
     return publicId.trim();
@@ -103,6 +113,7 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
       message?.message,
       message?.content,
       message?.caption,
+      message?.quotePdfUrl,
       message?.mediaUrl,
       message?.media_url,
       message?.url,
@@ -159,27 +170,28 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
     return () => resource.dispose();
   }, [conversationId, directUrl, message.mediaReference?.messageId]);
 
-  if (!url) return <>{fallback}</>;
+  const effectiveUrl = directUrl || url;
+  if (!effectiveUrl) return <>{fallback}</>;
   if (message.type === "image" || message.type === "sticker") {
     const alt = message.fileName || "Imagem da conversa";
     return <>
       <button type="button" onClick={() => setPreviewOpen(true)} aria-label={`Abrir ${alt} em tamanho ampliado`} className="block cursor-zoom-in rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
-        <img src={url} alt={alt} className={message.type === "sticker" ? "h-40 w-40 object-contain" : "max-h-80 rounded-xl object-contain"} />
+        <img src={effectiveUrl} alt={alt} className={message.type === "sticker" ? "h-40 w-40 object-contain" : "max-h-80 rounded-xl object-contain"} />
       </button>
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent aria-describedby={undefined} className="w-[min(96vw,72rem)] max-w-none border-slate-700 bg-slate-950 p-3 text-white sm:p-5 [&_[data-slot=dialog-close]]:text-white">
           <DialogHeader className="sr-only"><DialogTitle>Visualização ampliada de {alt}</DialogTitle></DialogHeader>
-          <img src={url} alt={alt} className="max-h-[85vh] w-full object-contain" />
+          <img src={effectiveUrl} alt={alt} className="max-h-[85vh] w-full object-contain" />
         </DialogContent>
       </Dialog>
     </>;
   }
-  if (message.type === "audio") return <audio controls preload="metadata" src={url} className="max-w-full" />;
-  if (message.type === "video") return <video controls preload="metadata" src={url} className="max-h-80 rounded-xl" />;
+  if (message.type === "audio") return <audio controls preload="metadata" src={effectiveUrl} className="max-w-full" />;
+  if (message.type === "video") return <video controls preload="metadata" src={effectiveUrl} className="max-h-80 rounded-xl" />;
   const openDocument = async (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const targetUrl = resolvedQuoteUrl || url;
+    const targetUrl = resolvedQuoteUrl || effectiveUrl;
     if (!targetUrl || isOpeningDocument) return;
 
     if (targetUrl.startsWith("data:")) {
@@ -263,10 +275,12 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
 
   return (
     <a
-      href={url}
+      href={effectiveUrl}
       target="_blank"
       rel="noopener noreferrer"
       onClick={openDocument}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
       aria-busy={isOpeningDocument}
       className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 dark:bg-white/10 px-3 py-2 text-sm font-semibold underline decoration-current/40 hover:bg-black/20 dark:hover:bg-white/20 hover:decoration-current transition"
     >

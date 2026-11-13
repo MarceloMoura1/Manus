@@ -127,31 +127,100 @@ export async function getSalePdfFile(
 ): Promise<{ bytes: Buffer; mimeType: string; fileName: string } | null> {
   const salePublicId = await resolveSalePublicId(identity.clientId, rawIdentifier);
   if (!salePublicId) return null;
-  const docs = await documentService.list(
-    { clientId: identity.clientId, userId: identity.userId, userName: identity.userName ?? null, role: identity.role },
-    salePublicId
-  );
-  const activeQuotePdf = docs.find(d => d.documentType === "quote_pdf" && d.state === "active");
-  if (activeQuotePdf) {
-    return await documentService.getForDownload(
-      { clientId: identity.clientId, userId: identity.userId, userName: identity.userName ?? null, role: identity.role },
-      salePublicId,
-      activeQuotePdf.publicId
-    );
-  }
-  const { QuotePdfService } = await import("./quote-pdf-service");
-  const quotePdfService = new QuotePdfService();
-  const generated = await quotePdfService.generateWithBuffer(
-    { clientId: identity.clientId, userId: identity.userId, userName: identity.userName ?? null, role: identity.role },
-    {
-      salePublicId,
-      idempotencyKey: randomUUID(),
+  const fullIdentity = {
+    clientId: identity.clientId,
+    userId: identity.userId,
+    userName: identity.userName ?? null,
+    role: identity.role,
+  };
+  try {
+    const docs = await documentService.list(fullIdentity, salePublicId);
+    const activeQuotePdf = docs.find(d => d.documentType === "quote_pdf" && d.state === "active");
+    if (activeQuotePdf) {
+      const downloaded = await documentService.getForDownload(
+        fullIdentity,
+        salePublicId,
+        activeQuotePdf.publicId
+      );
+      if (downloaded?.bytes && downloaded.bytes.length > 0) {
+        return downloaded;
+      }
     }
-  );
+  } catch (err) {
+    console.warn("[getSalePdfFile] Arquivo físico ausente no storage, regerando PDF JIT:", err);
+  }
+
+  try {
+    const { QuotePdfService } = await import("./quote-pdf-service");
+    const quotePdfService = new QuotePdfService();
+    const generated = await quotePdfService.generateWithBuffer(
+      { ...fullIdentity, role: "admin" },
+      {
+        salePublicId,
+        idempotencyKey: randomUUID(),
+      }
+    );
+    if (generated?.bytes && generated.bytes.length > 0) {
+      return {
+        bytes: generated.bytes,
+        mimeType: "application/pdf",
+        fileName: generated.document.fileName,
+      };
+    }
+  } catch (genErr) {
+    console.warn("[getSalePdfFile] Fallback para renderQuotePdf em memória:", genErr);
+  }
+
+  const [{ SaleRepository }, { getCompanySettings }, { renderQuotePdf }] = await Promise.all([
+    import("./repository"),
+    import("../../../db-company"),
+    import("./quote-pdf"),
+  ]);
+  const repo = new SaleRepository();
+  const quote = await repo.detail(identity.clientId, salePublicId);
+  if (!quote) return null;
+  const company = await getCompanySettings(identity.clientId).catch(() => null);
+  const bytes = renderQuotePdf({
+    company: {
+      name: company?.companyName ?? null,
+      email: company?.primaryEmail ?? null,
+      phone: company?.primaryPhone ?? null,
+      whatsapp: company?.primaryWhatsapp ?? null,
+      address: company?.address ?? null,
+    },
+    template: null,
+    quote: {
+      number: quote.orderNumber,
+      issuedOn: quote.commercialDate,
+      customerName: quote.customerName,
+      customerPhone: (quote as any).customerPhone ?? null,
+      customerAddress: (quote as any).customerAddress ?? null,
+      customerAddressNumber: (quote as any).customerAddressNumber ?? null,
+      commercialStatus: quote.commercialStatus,
+      paymentTerms: quote.paymentTerms,
+      notes: quote.notes,
+      documentCustomName: (quote as any).documentCustomName ?? null,
+      serviceMetadata: (quote as any).serviceMetadata ?? null,
+      items: quote.items.map(item => ({
+        description: item.productName,
+        sku: item.sku,
+        quantity: item.quantity,
+        unit: item.unit,
+        unitPriceCents: item.unitPriceCents,
+        discountCents: item.discountCents,
+        lineTotalCents: item.lineTotalCents,
+      })),
+      subtotalCents: quote.subtotalCents,
+      discountCents: quote.discountCents,
+      freightCents: quote.freightCents,
+      chargesCents: quote.chargesCents,
+      totalCents: quote.totalCents,
+    },
+  });
   return {
-    bytes: generated.bytes,
+    bytes,
     mimeType: "application/pdf",
-    fileName: generated.document.fileName,
+    fileName: `orcamento-${quote.orderNumber}.pdf`,
   };
 }
 
@@ -165,7 +234,12 @@ export function createDirectSalePdfDownloadHandler(
       res.status(401).end();
       return;
     }
-    if (!session.permissions.includes("erp") && !session.permissions.includes("crm")) {
+    if (
+      !session.permissions.includes("erp") &&
+      !session.permissions.includes("crm") &&
+      !session.permissions.includes("conversations") &&
+      !session.permissions.includes("active-attendance")
+    ) {
       res.status(403).end();
       return;
     }
