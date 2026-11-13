@@ -3159,7 +3159,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                       const type = item.type || 'text';
                       return <div key={item.id ?? `indeterminate-${idx}`} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
                         <div className={cn("min-w-0 max-w-[85%] rounded-2xl px-4 py-3", isAgent ? "rounded-tr-sm bg-slate-600 text-white" : "rounded-tl-sm border border-slate-200 bg-white text-slate-800")}>
-                          {type === 'text' ? <p className="text-sm">{text}</p> : <ConversationMedia conversationId={selectedConv.id} message={item} fallback={<span className="text-sm">{text || 'Mídia indisponível'}</span>} />}
+                          {type === 'text' ? <p className="text-sm">{text}</p> : <ConversationMedia conversationId={selectedConv.id} message={item} caption={text} fallback={<span className="text-sm">{text || 'Mídia indisponível'}</span>} />}
                         </div>
                       </div>;
                     })}

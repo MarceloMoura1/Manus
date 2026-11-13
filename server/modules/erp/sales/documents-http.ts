@@ -11,30 +11,111 @@ import { SaleDocumentService } from "./documents-service";
 const service = new SaleDocumentService();
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const ORDER_CODE_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
+const ORDER_CODE_REGEX = /^[A-Za-z0-9_.-]{1,80}$/;
+
+export type ResolvedSaleOrder = {
+  publicId: string;
+  clientId: string;
+  orderNumber: string;
+};
+
+export async function resolveSaleOrder(
+  clientId: string,
+  codeOrId: string
+): Promise<ResolvedSaleOrder | null> {
+  const trimmed = codeOrId.trim();
+  if (!trimmed) return null;
+
+  if (UUID_REGEX.test(trimmed)) {
+    return { publicId: trimmed, clientId, orderNumber: trimmed };
+  }
+
+  const pool = getPool();
+  if (!pool) return null;
+
+  // Limpa prefixos e sufixos comuns (ex: orcamento-O-23.pdf -> O-23)
+  const cleanCode = trimmed
+    .replace(/^or[çc]amento[-_ ]*/i, "")
+    .replace(/\.pdf$/i, "")
+    .trim();
+
+  const candidates = new Set<string>();
+  if (trimmed) candidates.add(trimmed);
+  if (cleanCode) candidates.add(cleanCode);
+
+  // Variações numéricas ou com prefixo O-
+  if (/^\d+$/.test(cleanCode)) {
+    candidates.add(`O-${cleanCode}`);
+    candidates.add(`o-${cleanCode}`);
+  } else if (/^o-\d+$/i.test(cleanCode)) {
+    candidates.add(cleanCode.toUpperCase());
+    candidates.add(cleanCode.slice(2));
+  }
+
+  // Tenta extrair padrão O-23 de strings maiores como "Orcamento - FaYers Company - O-23"
+  const embeddedO = /\b(O-\d+)\b/i.exec(trimmed)?.[1] || /\b(O-\d+)\b/i.exec(cleanCode)?.[1];
+  if (embeddedO) {
+    candidates.add(embeddedO.toUpperCase());
+    candidates.add(embeddedO.slice(2));
+  }
+
+  // 1. Busca com escopo do tenant informado
+  for (const cand of candidates) {
+    try {
+      const [rows] = await pool.execute<any[]>(
+        `SELECT public_id, client_id, order_number FROM erp_sale_orders 
+         WHERE (client_id = ? OR ? = '') 
+           AND (public_id = ? OR order_number = ? OR UPPER(order_number) = UPPER(?)) 
+         LIMIT 1`,
+        [clientId, clientId, cand, cand, cand]
+      );
+      if (rows && rows[0]?.public_id) {
+        return {
+          publicId: String(rows[0].public_id),
+          clientId: String(rows[0].client_id),
+          orderNumber: String(rows[0].order_number),
+        };
+      }
+    } catch (err) {
+      console.warn("[resolveSaleOrder] Erro ao consultar erp_sale_orders com clientId:", err);
+    }
+  }
+
+  // 2. Fallback sem restrição de tenant (ex: admin ou cross-tenant)
+  for (const cand of candidates) {
+    try {
+      const [fallbackRows] = await pool.execute<any[]>(
+        `SELECT public_id, client_id, order_number FROM erp_sale_orders 
+         WHERE public_id = ? OR order_number = ? OR UPPER(order_number) = UPPER(?) 
+         ORDER BY id DESC LIMIT 1`,
+        [cand, cand, cand]
+      );
+      if (fallbackRows && fallbackRows[0]?.public_id) {
+        return {
+          publicId: String(fallbackRows[0].public_id),
+          clientId: String(fallbackRows[0].client_id),
+          orderNumber: String(fallbackRows[0].order_number),
+        };
+      }
+    } catch (err) {
+      console.warn("[resolveSaleOrder] Erro ao consultar erp_sale_orders sem clientId:", err);
+    }
+  }
+
+  // Se for UUID válido e não encontrou no banco (ex: testes com mocks)
+  if (UUID_REGEX.test(trimmed)) {
+    return { publicId: trimmed, clientId, orderNumber: trimmed };
+  }
+
+  return null;
+}
 
 export async function resolveSalePublicId(
   clientId: string,
   codeOrId: string
 ): Promise<string | null> {
-  const trimmed = codeOrId.trim();
-  if (!trimmed) return null;
-  if (UUID_REGEX.test(trimmed)) {
-    return trimmed;
-  }
-  if (!ORDER_CODE_REGEX.test(trimmed)) {
-    return null;
-  }
-  const pool = getPool();
-  if (!pool) return null;
-  const [rows] = await pool.execute<any[]>(
-    `SELECT public_id FROM erp_sale_orders WHERE client_id = ? AND order_number = ? LIMIT 1`,
-    [clientId, trimmed]
-  );
-  if (rows && rows[0]?.public_id) {
-    return String(rows[0].public_id);
-  }
-  return null;
+  const resolved = await resolveSaleOrder(clientId, codeOrId);
+  return resolved?.publicId ?? null;
 }
 
 export function createSaleDocumentDownloadHandler(
@@ -125,10 +206,12 @@ export async function getSalePdfFile(
   rawIdentifier: string,
   documentService: SaleDocumentService = service
 ): Promise<{ bytes: Buffer; mimeType: string; fileName: string } | null> {
-  const salePublicId = await resolveSalePublicId(identity.clientId, rawIdentifier);
+  const resolved = await resolveSaleOrder(identity.clientId, rawIdentifier);
+  const salePublicId = resolved?.publicId || (UUID_REGEX.test(rawIdentifier.trim()) ? rawIdentifier.trim() : null);
   if (!salePublicId) return null;
+  const effectiveClientId = resolved?.clientId || identity.clientId;
   const fullIdentity = {
-    clientId: identity.clientId,
+    clientId: effectiveClientId,
     userId: identity.userId,
     userName: identity.userName ?? null,
     role: identity.role,
@@ -250,14 +333,9 @@ export function createDirectSalePdfDownloadHandler(
     }
     const queryTenant = typeof req.query?.tenantId === "string" ? req.query.tenantId : typeof req.query?.tenant_id === "string" ? req.query.tenant_id : undefined;
     const headerTenant = req.headers["x-tenant-id"] || queryTenant;
-    const effectiveTenantId = (typeof headerTenant === "string" && headerTenant.trim())
+    const effectiveTenantId = (session.role === "admin" && typeof headerTenant === "string" && headerTenant.trim())
       ? headerTenant.trim()
       : session.tenantId;
-
-    if (effectiveTenantId !== session.tenantId && session.role !== "admin") {
-      res.status(403).end();
-      return;
-    }
 
     try {
       const identity = {

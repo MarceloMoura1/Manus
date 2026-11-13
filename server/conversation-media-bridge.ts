@@ -136,11 +136,14 @@ export function createConversationMediaHandler(
   try {
     const [rows] = await pool.execute(
       `SELECT m.media_reference AS mediaReference, m.provider_message_reference AS providerMessageReference,
-        m.provider, m.integration_id AS integrationId, m.message_type AS messageType, m.message AS messageText
+        COALESCE(NULLIF(m.provider, ''), NULLIF(c.provider, ''), 'evolution') AS provider,
+        COALESCE(NULLIF(m.integration_id, ''), NULLIF(c.integration_id, '')) AS integrationId,
+        m.message_type AS messageType, m.message AS messageText,
+        m.client_id AS clientId, c.client_id AS conversationClientId
        FROM megadesk_domain_conversations_messages m
-       INNER JOIN megadesk_domain_conversations c ON c.conversation_id = m.conversation_id AND c.client_id = m.client_id
-       WHERE m.message_id = ? AND m.conversation_id = ? AND m.client_id = ? LIMIT 1`,
-      [messageId, conversationId, identity.tenantId],
+       INNER JOIN megadesk_domain_conversations c ON c.conversation_id = m.conversation_id
+       WHERE m.message_id = ? AND m.conversation_id = ? AND (m.client_id = ? OR c.client_id = ?) LIMIT 1`,
+      [messageId, conversationId, identity.tenantId, identity.tenantId],
     ) as any[];
     let bytes: Buffer;
     let mimeType: string;
@@ -175,6 +178,9 @@ export function createConversationMediaHandler(
             /\/api\/(?:crm\/quotes|erp\/sales)\/([^/?#]+)\/pdf/i.exec(reference.url)?.[1]) ||
           (typeof reference.fileName === "string" &&
             /or[çc]amento-([A-Za-z0-9_-]+)\.pdf/i.exec(reference.fileName)?.[1]) ||
+          (typeof reference.fileName === "string" &&
+            /\b(O-\d+)\b/i.exec(reference.fileName)?.[1]) ||
+          /\b(O-\d+)\b/i.exec(captionOrText)?.[1] ||
           /or[çc]amento\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(captionOrText)?.[1] ||
           /proposta\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(captionOrText)?.[1] ||
           null;
@@ -204,12 +210,11 @@ export function createConversationMediaHandler(
       }
       if (!content) {
         const providerReference = normalizeProviderMessageReference(rows[0].providerMessageReference);
-        const providerEligible = rows[0].provider === "evolution"
-          && typeof rows[0].integrationId === "string" && Boolean(rows[0].integrationId)
-          && Boolean(providerReference);
+        const effectiveIntegrationId = rows[0].integrationId || `megadesk-${identity.tenantId}`;
+        const providerEligible = Boolean(providerReference);
         if (providerEligible) {
           try {
-            content = await downloadProviderMedia(rows[0], reference, downloadProvider);
+            content = await downloadProviderMedia({ ...rows[0], provider: "evolution", integrationId: effectiveIntegrationId }, reference, downloadProvider);
             if (!content) reportDiagnostic(logger, "PROVIDER_FALLBACK_FAILURE", correlationId);
           } catch {
             reportDiagnostic(logger, "PROVIDER_FALLBACK_FAILURE", correlationId);

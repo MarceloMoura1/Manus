@@ -76,18 +76,23 @@ export function extractQuotePdfCode(message: any, explicitCaption?: string): str
     }
   }
 
-  // 3. Do fileName (ex: orcamento-O-22.pdf -> O-22)
+  // 3. Do fileName (ex: orcamento-O-22.pdf -> O-22 ou Orcamento - FaYers Company - O-22.pdf -> O-22)
   const fileMatch = /or[çc]amento-([A-Za-z0-9_-]+)\.pdf/i.exec(fileName);
   if (fileMatch?.[1]) {
     return fileMatch[1];
+  }
+  const embeddedOFile = /\b(O-\d+)\b/i.exec(fileName);
+  if (embeddedOFile?.[1]) {
+    return embeddedOFile[1].toUpperCase();
   }
 
   // 4. Do texto da mensagem via regex (ex: "orçamento comercial O-22" ou "proposta comercial *O-22*")
   const textMatch =
     /or[çc]amento\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(messageText) ||
-    /proposta\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(messageText);
+    /proposta\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(messageText) ||
+    /\b(O-\d+)\b/i.exec(messageText);
   if (textMatch?.[1]) {
-    return textMatch[1];
+    return textMatch[1].toUpperCase();
   }
 
   // 5. Fallback para /api/erp/sales/<id>/pdf ou publicId
@@ -191,13 +196,15 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
   const openDocument = async (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const targetUrl = resolvedQuoteUrl || effectiveUrl;
-    if (!targetUrl || isOpeningDocument) return;
+    if (isOpeningDocument) return;
 
-    if (targetUrl.startsWith("data:")) {
+    const directCandidate = resolvedQuoteUrl || effectiveUrl;
+    if (!directCandidate && !conversationId) return;
+
+    if (directCandidate?.startsWith("data:")) {
       // Browsers block top-level navigation to data: URLs; convert to a blob URL first.
       const popup = window.open("", "_blank");
-      void fetch(targetUrl)
+      void fetch(directCandidate)
         .then(response => response.blob())
         .then(blob => {
           const blobUrl = URL.createObjectURL(blob);
@@ -212,11 +219,11 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
     // Abertura imediata da nova aba de forma síncrona antes de qualquer await para evitar bloqueio de popup
     const pdfTab = window.open("", "_blank");
 
-    if (targetUrl.startsWith("blob:")) {
+    if (directCandidate?.startsWith("blob:")) {
       if (pdfTab && !pdfTab.closed) {
-        pdfTab.location.href = targetUrl;
+        pdfTab.location.href = directCandidate;
       } else {
-        window.location.assign(targetUrl);
+        window.location.assign(directCandidate);
       }
       return;
     }
@@ -225,16 +232,12 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
     try {
       const headers: Record<string, string> = {};
       let sessionToken = localStorage.getItem("megadesk-session-token");
-      if (sessionToken) {
-        headers["Authorization"] = `Bearer ${sessionToken}`;
-      }
       try {
         const storedSession = localStorage.getItem("megadesk_session_v1");
         if (storedSession) {
           const parsed = JSON.parse(storedSession);
-          if (parsed?.token && !headers["Authorization"]) {
+          if (parsed?.token && !sessionToken) {
             sessionToken = String(parsed.token);
-            headers["Authorization"] = `Bearer ${parsed.token}`;
           }
           if (parsed?.clientId) headers["x-tenant-id"] = String(parsed.clientId);
           if (parsed?.userRole) headers["x-user-role"] = String(parsed.userRole);
@@ -243,38 +246,103 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
       } catch {
         // Ignora parse se inválido
       }
-
-      let fetchUrl = targetUrl;
-      const effectiveToken = sessionToken || (headers["Authorization"] ? headers["Authorization"].replace(/^Bearer\s+/i, "") : null);
-      if (effectiveToken && !fetchUrl.includes("token=")) {
-        const separator = fetchUrl.includes("?") ? "&" : "?";
-        fetchUrl = `${fetchUrl}${separator}token=${encodeURIComponent(effectiveToken)}`;
+      if (sessionToken) {
+        headers["Authorization"] = `Bearer ${sessionToken}`;
       }
 
-      const res = await fetch(fetchUrl, {
-        method: "GET",
-        credentials: "include",
-        headers,
-      });
+      const messageId = String(message?.id || message?.mediaReference?.messageId || "").trim();
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+      // Monta lista ordenada de URLs para tentar
+      const candidateUrls: string[] = [];
+      if (resolvedQuoteUrl) candidateUrls.push(resolvedQuoteUrl);
+      if (quoteCode && !candidateUrls.includes(`/api/erp/sales/${encodeURIComponent(quoteCode)}/pdf`)) {
+        candidateUrls.push(`/api/erp/sales/${encodeURIComponent(quoteCode)}/pdf`);
+      }
+      if (effectiveUrl && !candidateUrls.includes(effectiveUrl)) {
+        candidateUrls.push(effectiveUrl);
+      }
+      if (conversationId && messageId) {
+        const mediaEndpoint = `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/media`;
+        if (!candidateUrls.includes(mediaEndpoint)) {
+          candidateUrls.push(mediaEndpoint);
+        }
       }
 
-      const blob = await res.blob();
-      const mime = res.headers.get("content-type") || "application/pdf";
-      const isPdfTarget = Boolean(resolvedQuoteUrl) || mime.toLowerCase().includes("pdf") || /\.pdf$/i.test(String(message.fileName || ""));
-      const finalBlob = isPdfTarget && blob.type !== "application/pdf"
-        ? new Blob([blob], { type: "application/pdf" })
-        : blob;
+      let successfulBlobUrl: string | null = null;
+      let lastErrorMessage = "";
 
-      const blobUrl = URL.createObjectURL(finalBlob);
-      if (pdfTab && !pdfTab.closed) {
-        pdfTab.location.href = blobUrl;
+      for (const rawUrl of candidateUrls) {
+        try {
+          let fetchUrl = rawUrl;
+          const effectiveToken = sessionToken || (headers["Authorization"] ? headers["Authorization"].replace(/^Bearer\s+/i, "") : null);
+          if (effectiveToken && !fetchUrl.includes("token=")) {
+            const separator = fetchUrl.includes("?") ? "&" : "?";
+            fetchUrl = `${fetchUrl}${separator}token=${encodeURIComponent(effectiveToken)}`;
+          }
+
+          const res = await fetch(fetchUrl, {
+            method: "GET",
+            credentials: "include",
+            headers,
+          });
+
+          if (!res.ok) {
+            lastErrorMessage = `HTTP ${res.status}`;
+            continue;
+          }
+
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.toLowerCase().includes("text/html")) {
+            lastErrorMessage = "Resposta inválida (HTML recebido em vez de PDF)";
+            continue;
+          }
+
+          const arrayBuf = await res.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuf);
+          if (bytes.length === 0) {
+            lastErrorMessage = "Arquivo vazio (0 bytes)";
+            continue;
+          }
+
+          const isPdfSignature = bytes.length >= 4 &&
+            bytes[0] === 0x25 && // %
+            bytes[1] === 0x50 && // P
+            bytes[2] === 0x44 && // D
+            bytes[3] === 0x46;   // F
+
+          const isPdfExpected = Boolean(resolvedQuoteUrl) ||
+            Boolean(quoteCode) ||
+            contentType.toLowerCase().includes("pdf") ||
+            /\.pdf$/i.test(String(message?.fileName || ""));
+
+          if (isPdfExpected && !isPdfSignature) {
+            const isBinaryImage = (bytes[0] === 0x89 && bytes[1] === 0x50) || (bytes[0] === 0xFF && bytes[1] === 0xD8);
+            if (!isBinaryImage) {
+              lastErrorMessage = "Assinatura %PDF não encontrada no arquivo";
+              continue;
+            }
+          }
+
+          const finalMime = isPdfSignature ? "application/pdf" : (contentType || "application/octet-stream");
+          const blob = new Blob([arrayBuf], { type: finalMime });
+          successfulBlobUrl = URL.createObjectURL(blob);
+          break;
+        } catch (fetchErr: any) {
+          lastErrorMessage = fetchErr?.message || "Falha de rede";
+        }
+      }
+
+      if (successfulBlobUrl) {
+        if (pdfTab && !pdfTab.closed) {
+          pdfTab.location.href = successfulBlobUrl;
+        } else {
+          window.location.assign(successfulBlobUrl);
+        }
+        window.setTimeout(() => URL.revokeObjectURL(successfulBlobUrl!), 120_000);
       } else {
-        window.location.assign(blobUrl);
+        pdfTab?.close();
+        toast.error(`Não foi possível carregar o documento (${lastErrorMessage || "arquivo não encontrado"}).`);
       }
-      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
     } catch (err: any) {
       pdfTab?.close();
       console.error("[ConversationMedia] Erro ao abrir documento autenticado:", err);
