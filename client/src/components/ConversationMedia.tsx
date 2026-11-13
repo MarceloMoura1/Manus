@@ -5,7 +5,8 @@ import {
   createBrowserConversationMediaDeps,
 } from "@/lib/conversation-media-resource";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FileText } from "lucide-react";
+import { FileText, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 type Props = { conversationId: string; message: any; fallback: React.ReactNode };
 
@@ -37,6 +38,7 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
 
   const [url, setUrl] = React.useState<string | null>(directUrl);
   const [previewOpen, setPreviewOpen] = React.useState(false);
+  const [isOpeningDocument, setIsOpeningDocument] = React.useState(false);
 
   React.useEffect(() => {
     if (directUrl) {
@@ -78,9 +80,10 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
   }
   if (message.type === "audio") return <audio controls preload="metadata" src={url} className="max-w-full" />;
   if (message.type === "video") return <video controls preload="metadata" src={url} className="max-h-80 rounded-xl" />;
-  const openDocument = (event: React.MouseEvent<HTMLAnchorElement>) => {
+  const openDocument = async (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
-    if (!url) return;
+    if (!url || isOpeningDocument) return;
+
     if (url.startsWith("data:")) {
       // Browsers block top-level navigation to data: URLs; convert to a blob URL first.
       const popup = window.open("", "_blank");
@@ -95,8 +98,67 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
         .catch(() => popup?.close());
       return;
     }
-    // Same-origin URLs (e.g. /api/erp/sales/:id/pdf) carry the session cookie automatically.
-    window.open(url, "_blank", "noopener,noreferrer");
+
+    if (url.startsWith("blob:")) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    // Abertura autenticada via fetch + blob para evitar HTTP 401 por falta de headers/cookies no top-level window.open
+    setIsOpeningDocument(true);
+    try {
+      const headers: Record<string, string> = {};
+      const token = localStorage.getItem("megadesk-session-token");
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      try {
+        const storedSession = localStorage.getItem("megadesk_session_v1");
+        if (storedSession) {
+          const parsed = JSON.parse(storedSession);
+          if (parsed?.clientId) headers["x-tenant-id"] = String(parsed.clientId);
+          if (parsed?.userRole) headers["x-user-role"] = String(parsed.userRole);
+          if (parsed?.userEmail) headers["x-user-email"] = String(parsed.userEmail);
+        }
+      } catch {
+        // Ignora parse se inválido
+      }
+
+      const res = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+        headers,
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const mime = res.headers.get("content-type") || "application/pdf";
+      const finalBlob = mime.toLowerCase().includes("pdf") && blob.type !== "application/pdf"
+        ? new Blob([blob], { type: "application/pdf" })
+        : blob;
+
+      const blobUrl = URL.createObjectURL(finalBlob);
+      const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        // Fallback caso popup blocker bloqueie
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.target = "_blank";
+        link.download = message.fileName || "documento.pdf";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
+    } catch (err: any) {
+      console.error("[ConversationMedia] Erro ao abrir documento autenticado:", err);
+      toast.error("Não foi possível carregar o documento. Verifique sua sessão.");
+    } finally {
+      setIsOpeningDocument(false);
+    }
   };
 
   return (
@@ -105,10 +167,17 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
       target="_blank"
       rel="noopener noreferrer"
       onClick={openDocument}
+      aria-busy={isOpeningDocument}
       className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 dark:bg-white/10 px-3 py-2 text-sm font-semibold underline decoration-current/40 hover:bg-black/20 dark:hover:bg-white/20 hover:decoration-current transition"
     >
-      <FileText className="w-4 h-4 flex-shrink-0" />
-      <span className="truncate max-w-[220px]">{message.fileName || "Baixar documento"}</span>
+      {isOpeningDocument ? (
+        <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin text-blue-500" />
+      ) : (
+        <FileText className="w-4 h-4 flex-shrink-0" />
+      )}
+      <span className="truncate max-w-[220px]">
+        {isOpeningDocument ? "Abrindo documento…" : (message.fileName || "Baixar documento")}
+      </span>
     </a>
   );
 }

@@ -11,6 +11,7 @@ import { QuotePdfService } from "../../erp/sales/quote-pdf-service";
 import { SaleDocumentService } from "../../erp/sales/documents-service";
 import type { OperationalRole } from "../../erp/contracts";
 import { renderAutomotiveQuotePages } from "./quote-automotive-html";
+import { generateConversationPublicCode, withPublicCodeRetry } from "../../../conversation-public-code";
 
 export type Identity = {
   clientId: string;
@@ -941,11 +942,12 @@ export class QuoteTemplatesService {
 
     // ─── PERSISTÊNCIA DA MENSAGEM NO CHAT (ATENDIMENTO) ────────────────────────
     try {
-      // Localizar ou criar a conversa ativa correspondente ao telefone em megadesk_domain_conversations
+      // Regra 1: Verificar se existe conversa ABERTA/ATIVA (status 'open' ou 'bot') para o cliente/telefone
+      // Regra 2: Se não houver conversa aberta (todas fechadas ou inexistente), criar nova conversa automaticamente
       const searchRes = await pool.execute<RowDataPacket[]>(
         `SELECT conversation_id, messages_json FROM megadesk_domain_conversations
-         WHERE client_id = ? AND (phone = ? OR phone = ? OR phone LIKE ?)
-         ORDER BY CASE WHEN status = 'open' THEN 1 WHEN status = 'bot' THEN 2 ELSE 3 END, updated_at DESC LIMIT 1`,
+         WHERE client_id = ? AND status IN ('open', 'bot') AND (phone = ? OR phone = ? OR phone LIKE ?)
+         ORDER BY CASE WHEN status = 'open' THEN 1 ELSE 2 END, updated_at DESC LIMIT 1`,
         [identity.clientId, phoneNorm.value, formattedRecipient, `%${phoneNorm.value.slice(-8)}`]
       );
       const convRows = Array.isArray(searchRes) && Array.isArray(searchRes[0]) ? searchRes[0] : [];
@@ -959,16 +961,20 @@ export class QuoteTemplatesService {
         conversationId = `conv-${randomUUID()}`;
         isNewConversation = true;
         const timeLabel = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const generatedCode = generateConversationPublicCode();
         await pool.execute(
           `INSERT INTO megadesk_domain_conversations
-           (conversation_id, client_id, crm_client_id, customer_name, phone, company, status, last_message, time_label, messages_json, opened_at)
-           VALUES (?, ?, ?, ?, ?, '', 'open', ?, ?, '[]', NOW())`,
+           (conversation_id, client_id, crm_client_id, public_code, customer_name, phone, company, status, assigned_user_id, assigned_user_name, last_message, last_message_from, time_label, messages_json, opened_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, '', 'open', ?, ?, ?, 'operator', ?, '[]', NOW(), NOW(), NOW())`,
           [
             conversationId,
             identity.clientId,
             quote.crmClientId,
+            generatedCode,
             quote.customerName || "Cliente",
             phoneNorm.value,
+            identity.userId || null,
+            identity.userName || "Operador",
             messageCaption.substring(0, 255),
             timeLabel,
           ]
@@ -1085,7 +1091,11 @@ export class QuoteTemplatesService {
               name: quote.customerName,
               phone: phoneNorm.value,
               status: "open",
+              assignedUserId: identity.userId || null,
+              assignedUserName: identity.userName || "Operador",
               lastMessage: messageCaption.substring(0, 255),
+              lastMessageFrom: "agent",
+              createdAt: now.toISOString(),
             },
           });
         }

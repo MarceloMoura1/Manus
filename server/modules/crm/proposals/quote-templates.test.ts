@@ -437,6 +437,66 @@ describe("QuoteTemplatesService", () => {
       );
       expect(updateConvCall).toBeDefined();
     });
+
+    it("cria automaticamente nova conversa com assigned_user quando não há conversa aberta ou todas estão fechadas", async () => {
+      mockSaleService.detail.mockResolvedValueOnce({
+        publicId: "sale-chat-new",
+        crmClientId: "crm-client-88",
+        documentType: "quote",
+        orderNumber: "ORC-888",
+        customerName: "Mariana Souza",
+        totalCents: 120000,
+      });
+
+      mockQuotePdfService.generate.mockResolvedValueOnce({
+        filePublicId: "doc-chat-uuid-88",
+        fileName: "Orcamento_Mariana.pdf",
+      });
+
+      dbMocks.readCrmClientFile.mockResolvedValueOnce(Buffer.from("PDF-MARIANA-BYTES"));
+      dbMocks.evoSendAttachment.mockResolvedValueOnce({
+        key: { id: "EVO-CHAT-MSG-88" },
+        message: {},
+      });
+
+      const dbExecCalls: any[] = [];
+      dbMocks.execute.mockImplementation(async (sql: string, params: any[]) => {
+        dbExecCalls.push({ sql, params });
+        // Simular que NÃO encontrou nenhuma conversa aberta (retorna array vazio)
+        if (sql.includes("SELECT conversation_id")) {
+          return [[]];
+        }
+        if (sql.includes("SELECT messages_json")) {
+          return [[{ messages_json: "[]" }]];
+        }
+        return [{ affectedRows: 1 }];
+      });
+
+      const result = await service.sendQuoteWhatsApp(identity, {
+        publicId: "sale-chat-new",
+        phone: "11988887777",
+        customMessage: "Segue proposta Mariana",
+      });
+
+      expect(result.success).toBe(true);
+
+      // Verificar que foi executado INSERT na tabela megadesk_domain_conversations
+      const insertConvCall = dbExecCalls.find((c) =>
+        c.sql.includes("INSERT INTO megadesk_domain_conversations")
+      );
+      expect(insertConvCall).toBeDefined();
+      expect(insertConvCall.sql).toContain("assigned_user_id");
+      expect(insertConvCall.sql).toContain("public_code");
+      expect(insertConvCall.params).toContain(identity.userId);
+      expect(insertConvCall.params).toContain(identity.userName);
+      expect(insertConvCall.params).toContain("Mariana Souza");
+
+      // Verificar que a query de busca filtrou apenas por conversas ativas/abertas
+      const searchCall = dbExecCalls.find((c) =>
+        c.sql.includes("SELECT conversation_id, messages_json FROM megadesk_domain_conversations")
+      );
+      expect(searchCall.sql).toContain("status IN ('open', 'bot')");
+    });
   });
 
   describe("Folha Timbrada Milimétrica (Low Garage)", () => {

@@ -93,6 +93,12 @@ describe("MegaDesk operational session security", () => {
     expect(readOperationalSessionToken(request(`${MEGADESK_SESSION_COOKIE}=not-a-token`))).toBeNull();
   });
 
+  it("reads valid session token from Authorization Bearer header as well as cookie", () => {
+    const validToken = "A".repeat(43);
+    expect(readOperationalSessionToken({ headers: { authorization: `Bearer ${validToken}` } } as any)).toBe(validToken);
+    expect(readOperationalSessionToken({ headers: { cookie: `${MEGADESK_SESSION_COOKIE}=${validToken}` } } as any)).toBe(validToken);
+  });
+
   it("clears the cookie with matching security attributes", () => {
     const res = response();
     clearOperationalSessionCookie(res, request());

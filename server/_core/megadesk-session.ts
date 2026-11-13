@@ -173,9 +173,16 @@ export function hashOperationalSessionToken(token: string): string {
 
 export function readOperationalSessionToken(req: Pick<Request, "headers">): string | null {
   const header = req.headers.cookie;
-  if (!header) return null;
-  const value = parseCookieHeader(header)[MEGADESK_SESSION_COOKIE];
-  return typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
+  if (header) {
+    const value = parseCookieHeader(header)[MEGADESK_SESSION_COOKIE];
+    if (typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value)) return value;
+  }
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    if (/^[A-Za-z0-9_-]{43}$/.test(token)) return token;
+  }
+  return null;
 }
 
 function sessionDurationMs(): number {
