@@ -104,7 +104,9 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
       return;
     }
 
-    // Abertura autenticada via fetch + blob para evitar HTTP 401 por falta de headers/cookies no top-level window.open
+    // Abertura imediata de aba vazia no gesto síncrono do clique para evitar bloqueio de popup pelo navegador
+    const newTab = window.open("about:blank", "_blank");
+
     setIsOpeningDocument(true);
     try {
       const headers: Record<string, string> = {};
@@ -141,21 +143,16 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
         : blob;
 
       const blobUrl = URL.createObjectURL(finalBlob);
-      const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
-      if (!opened) {
-        // Fallback caso popup blocker bloqueie
-        const link = document.createElement("a");
-        link.href = blobUrl;
-        link.target = "_blank";
-        link.download = message.fileName || "documento.pdf";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
+      if (newTab && !newTab.closed) {
+        newTab.location.href = blobUrl;
+      } else {
+        window.location.assign(blobUrl);
       }
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
     } catch (err: any) {
+      newTab?.close();
       console.error("[ConversationMedia] Erro ao abrir documento autenticado:", err);
-      toast.error("Não foi possível carregar o documento. Verifique sua sessão.");
+      toast.error(`Não foi possível carregar o documento (${err?.message || "falha de rede"}).`);
     } finally {
       setIsOpeningDocument(false);
     }

@@ -174,9 +174,19 @@ export function createDirectSalePdfDownloadHandler(
       res.status(400).end();
       return;
     }
+    const headerTenant = req.headers["x-tenant-id"];
+    const effectiveTenantId = (typeof headerTenant === "string" && headerTenant.trim())
+      ? headerTenant.trim()
+      : session.tenantId;
+
+    if (effectiveTenantId !== session.tenantId && session.role !== "admin") {
+      res.status(403).end();
+      return;
+    }
+
     try {
       const identity = {
-        clientId: session.tenantId,
+        clientId: effectiveTenantId,
         userId: session.userId,
         userName: null,
         role: session.role,
