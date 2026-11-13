@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Express, Request, Response } from "express";
+import { getPool } from "../../../db";
 import { resolveOperationalSessionReadOnly } from "../../../_core/megadesk-session";
 import { buildContentDisposition } from "../suppliers/files-storage";
 import { parseHttpByteRange } from "../suppliers/files-router";
@@ -8,6 +9,33 @@ import { saleDocumentDownloadInput } from "./documents-contracts";
 import { SaleDocumentService } from "./documents-service";
 
 const service = new SaleDocumentService();
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ORDER_CODE_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
+
+export async function resolveSalePublicId(
+  clientId: string,
+  codeOrId: string
+): Promise<string | null> {
+  const trimmed = codeOrId.trim();
+  if (!trimmed) return null;
+  if (UUID_REGEX.test(trimmed)) {
+    return trimmed;
+  }
+  if (!ORDER_CODE_REGEX.test(trimmed)) {
+    return null;
+  }
+  const pool = getPool();
+  if (!pool) return null;
+  const [rows] = await pool.execute<any[]>(
+    `SELECT public_id FROM erp_sale_orders WHERE client_id = ? AND order_number = ? LIMIT 1`,
+    [clientId, trimmed]
+  );
+  if (rows && rows[0]?.public_id) {
+    return String(rows[0].public_id);
+  }
+  return null;
+}
 
 export function createSaleDocumentDownloadHandler(
   documentService: SaleDocumentService = service,
@@ -92,6 +120,41 @@ export function createSaleDocumentDownloadHandler(
   };
 }
 
+export async function getSalePdfFile(
+  identity: { clientId: string; userId: string; role: any; userName?: string | null },
+  rawIdentifier: string,
+  documentService: SaleDocumentService = service
+): Promise<{ bytes: Buffer; mimeType: string; fileName: string } | null> {
+  const salePublicId = await resolveSalePublicId(identity.clientId, rawIdentifier);
+  if (!salePublicId) return null;
+  const docs = await documentService.list(
+    { clientId: identity.clientId, userId: identity.userId, userName: identity.userName ?? null, role: identity.role },
+    salePublicId
+  );
+  const activeQuotePdf = docs.find(d => d.documentType === "quote_pdf" && d.state === "active");
+  if (activeQuotePdf) {
+    return await documentService.getForDownload(
+      { clientId: identity.clientId, userId: identity.userId, userName: identity.userName ?? null, role: identity.role },
+      salePublicId,
+      activeQuotePdf.publicId
+    );
+  }
+  const { QuotePdfService } = await import("./quote-pdf-service");
+  const quotePdfService = new QuotePdfService();
+  const generated = await quotePdfService.generateWithBuffer(
+    { clientId: identity.clientId, userId: identity.userId, userName: identity.userName ?? null, role: identity.role },
+    {
+      salePublicId,
+      idempotencyKey: randomUUID(),
+    }
+  );
+  return {
+    bytes: generated.bytes,
+    mimeType: "application/pdf",
+    fileName: generated.document.fileName,
+  };
+}
+
 export function createDirectSalePdfDownloadHandler(
   documentService: SaleDocumentService = service,
   sessionResolver: typeof resolveOperationalSessionReadOnly = resolveOperationalSessionReadOnly
@@ -106,8 +169,8 @@ export function createDirectSalePdfDownloadHandler(
       res.status(403).end();
       return;
     }
-    const salePublicId = req.params.salePublicId || req.params.publicId;
-    if (!salePublicId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(salePublicId)) {
+    const rawIdentifier = req.params.salePublicId || req.params.publicId || req.params.codeOrId;
+    if (!rawIdentifier || typeof rawIdentifier !== "string") {
       res.status(400).end();
       return;
     }
@@ -118,23 +181,10 @@ export function createDirectSalePdfDownloadHandler(
         userName: null,
         role: session.role,
       };
-      const docs = await documentService.list(identity, salePublicId);
-      const activeQuotePdf = docs.find(d => d.documentType === "quote_pdf" && d.state === "active");
-      let file: { bytes: Buffer; mimeType: string; fileName: string };
-      if (activeQuotePdf) {
-        file = await documentService.getForDownload(identity, salePublicId, activeQuotePdf.publicId);
-      } else {
-        const { QuotePdfService } = await import("./quote-pdf-service");
-        const quotePdfService = new QuotePdfService();
-        const generated = await quotePdfService.generateWithBuffer(identity, {
-          salePublicId,
-          idempotencyKey: randomUUID(),
-        });
-        file = {
-          bytes: generated.bytes,
-          mimeType: "application/pdf",
-          fileName: generated.document.fileName,
-        };
+      const file = await getSalePdfFile(identity, rawIdentifier, documentService);
+      if (!file) {
+        res.status(404).end();
+        return;
       }
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("X-Content-Type-Options", "nosniff");
@@ -157,12 +207,18 @@ export function createDirectSalePdfDownloadHandler(
 }
 
 export function registerSaleDocumentRoutes(app: Express): void {
+  const directPdfHandler = createDirectSalePdfDownloadHandler();
+
   app.get(
     "/api/erp/sales/:salePublicId/documents/:documentPublicId",
     createSaleDocumentDownloadHandler()
   );
   app.get(
     "/api/erp/sales/:salePublicId/pdf",
-    createDirectSalePdfDownloadHandler()
+    directPdfHandler
+  );
+  app.get(
+    "/api/crm/quotes/:codeOrId/pdf",
+    directPdfHandler
   );
 }

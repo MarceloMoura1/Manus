@@ -73,4 +73,29 @@ describe("sale document authenticated download", () => {
     expect(response.status).toHaveBeenCalledWith(400);
     expect(getForDownload).not.toHaveBeenCalled();
   });
+
+  it("serves quote PDF via direct download handler with order number resolution", async () => {
+    const { createDirectSalePdfDownloadHandler } = await import("./documents-http");
+    const getForDownload = vi.fn().mockResolvedValue({
+      bytes: Buffer.from("PDF-BYTES"),
+      mimeType: "application/pdf",
+      fileName: "orcamento-O-21.pdf",
+    });
+    const list = vi.fn().mockResolvedValue([
+      { documentType: "quote_pdf", state: "active", publicId: documentPublicId },
+    ]);
+    const handler = createDirectSalePdfDownloadHandler(
+      { getForDownload, list } as any,
+      vi.fn(async () => session(["crm"])) as any
+    );
+    const response = responseHarness();
+    await handler({ params: { codeOrId: salePublicId }, query: {}, headers: {} } as any, response);
+
+    expect(list).toHaveBeenCalled();
+    expect(getForDownload).toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.headers["Content-Type"]).toBe("application/pdf");
+    expect(response.headers["Content-Disposition"]).toContain("orcamento-O-21.pdf");
+    expect(response.body).toEqual(Buffer.from("PDF-BYTES"));
+  });
 });

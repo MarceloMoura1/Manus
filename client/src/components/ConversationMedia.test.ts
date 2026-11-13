@@ -32,6 +32,24 @@ describe("ConversationMedia documents", () => {
     expect(html).not.toContain("Documento indisponível");
   });
 
+  it("resolves quote PDF url automatically when fileName matches orcamento-*.pdf", () => {
+    const html = renderToStaticMarkup(
+      createElement(ConversationMedia, {
+        conversationId: "conv-1",
+        message: {
+          type: "document",
+          fileName: "orcamento-O-21.pdf",
+        },
+        fallback: createElement("span", null, "Documento indisponível"),
+      })
+    );
+
+    expect(html).toContain('href="/api/crm/quotes/O-21/pdf"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain("orcamento-O-21.pdf");
+    expect(html).not.toContain("Documento indisponível");
+  });
+
   it("falls back when no media source exists", () => {
     const html = renderToStaticMarkup(
       createElement(ConversationMedia, {

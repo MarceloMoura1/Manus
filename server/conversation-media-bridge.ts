@@ -15,6 +15,7 @@ import { hasConversationAccess } from "./routers-conversations";
 import { normalizeProviderMessageReference } from "./conversation-provider-reference";
 import { evoGetMediaBase64 } from "./evolution/client";
 import { evolutionMediaDownloadEnvelope, parseEvolutionIncomingMessage } from "./evolution/webhook";
+import { getSalePdfFile } from "./modules/erp/sales/documents-http";
 
 function safeName(value: unknown): string {
   return safeConversationMediaFileName(value) ?? "arquivo";
@@ -160,6 +161,39 @@ export function createConversationMediaHandler(
         const legacyContent = dataUrl(reference.mediaData);
         if (legacyContent) content = { bytes: legacyContent.bytes, mimeType: legacyContent.mime,
           ...(typeof reference.fileName === "string" ? { fileName: reference.fileName } : {}) };
+      }
+      if (!content) {
+        // Quote document / Sale PDF resolution (e.g. storage: "quote_document", or orcamento-*.pdf)
+        const quoteIdentifier = typeof reference.publicId === "string" && reference.publicId
+          ? reference.publicId
+          : typeof reference.orderNumber === "string" && reference.orderNumber
+          ? reference.orderNumber
+          : typeof reference.fileName === "string"
+          ? (/orcamento-([A-Za-z0-9_-]+)\.pdf/i.exec(reference.fileName)?.[1] ?? null)
+          : null;
+
+        if (quoteIdentifier || reference.storage === "quote_document") {
+          try {
+            const quoteFile = quoteIdentifier ? await getSalePdfFile(
+              {
+                clientId: identity.tenantId,
+                userId: identity.userId,
+                role: identity.role,
+                userName: null,
+              },
+              quoteIdentifier
+            ) : null;
+            if (quoteFile) {
+              content = {
+                bytes: quoteFile.bytes,
+                mimeType: quoteFile.mimeType,
+                fileName: quoteFile.fileName,
+              };
+            }
+          } catch {
+            // Will fallback to provider or error diagnostic below
+          }
+        }
       }
       if (!content) {
         const providerReference = normalizeProviderMessageReference(rows[0].providerMessageReference);

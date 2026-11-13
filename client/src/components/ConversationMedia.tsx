@@ -10,6 +10,19 @@ import { FileText } from "lucide-react";
 type Props = { conversationId: string; message: any; fallback: React.ReactNode };
 
 export function ConversationMedia({ conversationId, message, fallback }: Props) {
+  const resolvedQuoteUrl = React.useMemo(() => {
+    const rawFileName = String(message.fileName || message.text || message.caption || "").trim();
+    const match = /orcamento-([A-Za-z0-9_-]+)\.pdf/i.exec(rawFileName);
+    if (match && match[1]) {
+      return `/api/crm/quotes/${match[1]}/pdf`;
+    }
+    const publicId = message.publicId || message.mediaReference?.publicId;
+    if (typeof publicId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(publicId)) {
+      return `/api/crm/quotes/${publicId}/pdf`;
+    }
+    return null;
+  }, [message.fileName, message.text, message.caption, message.publicId, message.mediaReference?.publicId]);
+
   const directUrl =
     (typeof message.mediaUrl === "string" && message.mediaUrl) ||
     (typeof message.media_url === "string" && message.media_url) ||
@@ -19,6 +32,7 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
     (typeof message.mediaReference?.mediaUrl === "string" && message.mediaReference.mediaUrl) ||
     (typeof message.mediaReference?.media_url === "string" && message.mediaReference.media_url) ||
     (typeof message.mediaReference?.mediaData === "string" && message.mediaReference.mediaData) ||
+    resolvedQuoteUrl ||
     null;
 
   const [url, setUrl] = React.useState<string | null>(directUrl);
