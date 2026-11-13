@@ -50,6 +50,25 @@ describe("ConversationMedia documents", () => {
     expect(html).not.toContain("Documento indisponível");
   });
 
+  it("extracts quote code O-22 from message caption when fileName is customized without the code", () => {
+    const html = renderToStaticMarkup(
+      createElement(ConversationMedia, {
+        conversationId: "conv-1",
+        message: {
+          type: "document",
+          fileName: "Orcamento - FaYers Company - 21-04-2026.pdf",
+          text: "Olá, FaYers Company! Segue em anexo o orçamento comercial O-22 no valor de R$ 2.500,00.",
+          mediaReference: { storage: "private", messageId: "msg-22" },
+        },
+        fallback: createElement("span", null, "Documento indisponível"),
+      })
+    );
+
+    expect(html).toContain('href="/api/crm/quotes/O-22/pdf"');
+    expect(html).toContain("Orcamento - FaYers Company - 21-04-2026.pdf");
+    expect(html).not.toContain("Documento indisponível");
+  });
+
   it("falls back when no media source exists", () => {
     const html = renderToStaticMarkup(
       createElement(ConversationMedia, {

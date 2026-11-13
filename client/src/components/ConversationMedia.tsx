@@ -8,23 +8,118 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-type Props = { conversationId: string; message: any; fallback: React.ReactNode };
+type Props = {
+  conversationId: string;
+  message: any;
+  caption?: string;
+  fallback: React.ReactNode;
+};
 
-export function ConversationMedia({ conversationId, message, fallback }: Props) {
-  const resolvedQuoteUrl = React.useMemo(() => {
-    const rawFileName = String(message.fileName || message.text || message.caption || "").trim();
-    const match = /orcamento-([A-Za-z0-9_-]+)\.pdf/i.exec(rawFileName);
-    if (match && match[1]) {
-      return `/api/crm/quotes/${match[1]}/pdf`;
-    }
-    const publicId = message.publicId || message.mediaReference?.publicId;
-    if (typeof publicId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(publicId)) {
-      return `/api/crm/quotes/${publicId}/pdf`;
-    }
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function extractQuotePdfCode(message: any, explicitCaption?: string): string | null {
+  if (!message || typeof message !== "object") return null;
+
+  const candidateUrls = [
+    message.mediaUrl,
+    message.media_url,
+    message.url,
+    message.mediaData,
+    message.mediaReference?.url,
+    message.mediaReference?.mediaUrl,
+    message.mediaReference?.media_url,
+    message.mediaReference?.mediaData,
+  ].filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+
+  const fileName = String(
+    message.fileName || message.mediaReference?.fileName || ""
+  ).trim();
+
+  const messageText = [
+    explicitCaption,
+    message.text,
+    message.message,
+    message.content,
+    message.caption,
+    message.mediaReference?.caption,
+  ]
+    .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+    .join(" ");
+
+  const publicId = message.publicId || message.mediaReference?.publicId;
+  const hasValidUuidPublicId = typeof publicId === "string" && UUID_REGEX.test(publicId.trim());
+
+  const isQuotePdf =
+    candidateUrls.some((u) => /\/api\/(?:crm\/quotes|erp\/sales)\//i.test(u)) ||
+    /^or[çc]amento/i.test(fileName) ||
+    /(?:or[çc]amento|proposta)\s+comercial/i.test(messageText) ||
+    message.mediaReference?.storage === "quote_document" ||
+    hasValidUuidPublicId;
+
+  if (!isQuotePdf) {
     return null;
-  }, [message.fileName, message.text, message.caption, message.publicId, message.mediaReference?.publicId]);
+  }
 
-  const directUrl =
+  // 1. Da mediaUrl / url (ex: /api/crm/quotes/O-22/pdf ou /api/erp/sales/<id>/pdf -> O-22)
+  for (const rawUrl of candidateUrls) {
+    const urlMatch = /\/api\/(?:crm\/quotes|erp\/sales)\/([^/?#]+)\/pdf/i.exec(rawUrl);
+    if (urlMatch?.[1]) {
+      return decodeURIComponent(urlMatch[1]);
+    }
+  }
+
+  // 2. Do fileName (ex: orcamento-O-22.pdf -> O-22)
+  const fileMatch = /or[çc]amento-([A-Za-z0-9_-]+)\.pdf/i.exec(fileName);
+  if (fileMatch?.[1]) {
+    return fileMatch[1];
+  }
+
+  // 3. Do texto da mensagem via regex (ex: "orçamento comercial O-22" ou "proposta comercial *O-22*")
+  const textMatch =
+    /or[çc]amento\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(messageText) ||
+    /proposta\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(messageText);
+  if (textMatch?.[1]) {
+    return textMatch[1];
+  }
+
+  // 4. De orderNumber ou publicId
+  const orderNumber = message.orderNumber || message.mediaReference?.orderNumber;
+  if (typeof orderNumber === "string" && orderNumber.trim().length > 0) {
+    return orderNumber.trim();
+  }
+  if (hasValidUuidPublicId) {
+    return publicId.trim();
+  }
+
+  return null;
+}
+
+export function ConversationMedia({ conversationId, message, caption, fallback }: Props) {
+  const quoteCode = React.useMemo(
+    () => extractQuotePdfCode(message, caption),
+    [
+      message?.fileName,
+      message?.text,
+      message?.message,
+      message?.content,
+      message?.caption,
+      message?.mediaUrl,
+      message?.media_url,
+      message?.url,
+      message?.mediaData,
+      message?.publicId,
+      message?.orderNumber,
+      message?.mediaReference,
+      caption,
+    ]
+  );
+
+  const resolvedQuoteUrl = React.useMemo(
+    () => (quoteCode ? `/api/crm/quotes/${encodeURIComponent(quoteCode)}/pdf` : null),
+    [quoteCode]
+  );
+
+  const explicitDirectUrl =
     (typeof message.mediaUrl === "string" && message.mediaUrl) ||
     (typeof message.media_url === "string" && message.media_url) ||
     (typeof message.url === "string" && message.url) ||
@@ -33,8 +128,9 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
     (typeof message.mediaReference?.mediaUrl === "string" && message.mediaReference.mediaUrl) ||
     (typeof message.mediaReference?.media_url === "string" && message.mediaReference.media_url) ||
     (typeof message.mediaReference?.mediaData === "string" && message.mediaReference.mediaData) ||
-    resolvedQuoteUrl ||
     null;
+
+  const directUrl = explicitDirectUrl || resolvedQuoteUrl || null;
 
   const [url, setUrl] = React.useState<string | null>(directUrl);
   const [previewOpen, setPreviewOpen] = React.useState(false);
@@ -82,30 +178,36 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
   if (message.type === "video") return <video controls preload="metadata" src={url} className="max-h-80 rounded-xl" />;
   const openDocument = async (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
-    if (!url || isOpeningDocument) return;
+    event.stopPropagation();
+    const targetUrl = resolvedQuoteUrl || url;
+    if (!targetUrl || isOpeningDocument) return;
 
-    if (url.startsWith("data:")) {
+    if (targetUrl.startsWith("data:")) {
       // Browsers block top-level navigation to data: URLs; convert to a blob URL first.
       const popup = window.open("", "_blank");
-      void fetch(url)
+      void fetch(targetUrl)
         .then(response => response.blob())
         .then(blob => {
           const blobUrl = URL.createObjectURL(blob);
           if (popup) popup.location.href = blobUrl;
-          else window.open(blobUrl, "_blank");
+          else window.location.assign(blobUrl);
           window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
         })
         .catch(() => popup?.close());
       return;
     }
 
-    if (url.startsWith("blob:")) {
-      window.open(url, "_blank", "noopener,noreferrer");
+    // Abertura imediata da nova aba de forma síncrona antes de qualquer await para evitar bloqueio de popup
+    const pdfTab = window.open("", "_blank");
+
+    if (targetUrl.startsWith("blob:")) {
+      if (pdfTab && !pdfTab.closed) {
+        pdfTab.location.href = targetUrl;
+      } else {
+        window.location.assign(targetUrl);
+      }
       return;
     }
-
-    // Abertura imediata de aba vazia no gesto síncrono do clique para evitar bloqueio de popup pelo navegador
-    const newTab = window.open("about:blank", "_blank");
 
     setIsOpeningDocument(true);
     try {
@@ -126,7 +228,7 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
         // Ignora parse se inválido
       }
 
-      const res = await fetch(url, {
+      const res = await fetch(targetUrl, {
         method: "GET",
         credentials: "include",
         headers,
@@ -138,19 +240,20 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
 
       const blob = await res.blob();
       const mime = res.headers.get("content-type") || "application/pdf";
-      const finalBlob = mime.toLowerCase().includes("pdf") && blob.type !== "application/pdf"
+      const isPdfTarget = Boolean(resolvedQuoteUrl) || mime.toLowerCase().includes("pdf") || /\.pdf$/i.test(String(message.fileName || ""));
+      const finalBlob = isPdfTarget && blob.type !== "application/pdf"
         ? new Blob([blob], { type: "application/pdf" })
         : blob;
 
       const blobUrl = URL.createObjectURL(finalBlob);
-      if (newTab && !newTab.closed) {
-        newTab.location.href = blobUrl;
+      if (pdfTab && !pdfTab.closed) {
+        pdfTab.location.href = blobUrl;
       } else {
         window.location.assign(blobUrl);
       }
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
     } catch (err: any) {
-      newTab?.close();
+      pdfTab?.close();
       console.error("[ConversationMedia] Erro ao abrir documento autenticado:", err);
       toast.error(`Não foi possível carregar o documento (${err?.message || "falha de rede"}).`);
     } finally {

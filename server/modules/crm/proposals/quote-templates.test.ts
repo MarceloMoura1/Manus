@@ -482,11 +482,13 @@ describe("QuoteTemplatesService", () => {
 
       // Verificar que foi executado INSERT na tabela megadesk_domain_conversations
       const insertConvCall = dbExecCalls.find((c) =>
-        c.sql.includes("INSERT INTO megadesk_domain_conversations")
+        c.sql.includes("INSERT INTO megadesk_domain_conversations") &&
+        !c.sql.includes("megadesk_domain_conversations_messages")
       );
       expect(insertConvCall).toBeDefined();
       expect(insertConvCall.sql).toContain("assigned_user_id");
       expect(insertConvCall.sql).toContain("public_code");
+      expect(insertConvCall.sql).toContain("'agent'");
       expect(insertConvCall.params).toContain(identity.userId);
       expect(insertConvCall.params).toContain(identity.userName);
       expect(insertConvCall.params).toContain("Mariana Souza");

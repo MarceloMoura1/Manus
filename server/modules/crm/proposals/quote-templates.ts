@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import { TRPCError } from "@trpc/server";
 import { getPool } from "../../../db";
@@ -942,6 +942,25 @@ export class QuoteTemplatesService {
 
     // ─── PERSISTÊNCIA DA MENSAGEM NO CHAT (ATENDIMENTO) ────────────────────────
     try {
+      let resolvedAssignedUserId: string | null = identity.userId || null;
+      let resolvedAssignedUserName: string = identity.userName || "Operador";
+      try {
+        const userRes = await pool.execute<RowDataPacket[]>(
+          `SELECT user_id, name FROM megadesk_domain_client_users
+           WHERE client_id = ? AND status = 'active' AND role IN ('admin','manager','agent')
+             AND JSON_CONTAINS(permissions_json, JSON_QUOTE('conversations'))
+           ORDER BY (user_id = ?) DESC LIMIT 1`,
+          [identity.clientId, identity.userId || ""]
+        );
+        const userRows = Array.isArray(userRes) && Array.isArray(userRes[0]) ? userRes[0] : [];
+        if (userRows.length > 0 && userRows[0].user_id) {
+          resolvedAssignedUserId = String(userRows[0].user_id);
+          resolvedAssignedUserName = String(userRows[0].name || resolvedAssignedUserName);
+        }
+      } catch {
+        // Fallback para identity.userId / identity.userName
+      }
+
       // Regra 1: Verificar se existe conversa ABERTA/ATIVA (status 'open' ou 'bot') para o cliente/telefone
       // Regra 2: Se não houver conversa aberta (todas fechadas ou inexistente), criar nova conversa automaticamente
       const searchRes = await pool.execute<RowDataPacket[]>(
@@ -962,19 +981,53 @@ export class QuoteTemplatesService {
         isNewConversation = true;
         const timeLabel = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
         const generatedCode = generateConversationPublicCode();
+
+        let contactId: string | null = null;
+        let activeKey: string | null = null;
+        try {
+          const candidateContactId = `contact-${randomUUID()}`;
+          await pool.execute(
+            `INSERT INTO megadesk_conversation_contacts
+             (contact_id, client_id, display_name, canonical_phone, channel, provider, external_identity, crm_client_id)
+             VALUES (?, ?, ?, ?, 'whatsapp', 'evolution', ?, ?)
+             ON DUPLICATE KEY UPDATE
+               display_name = CASE
+                 WHEN (display_name = canonical_phone OR display_name = external_identity) AND VALUES(display_name) <> '' THEN VALUES(display_name)
+                 ELSE display_name
+               END,
+               crm_client_id = COALESCE(VALUES(crm_client_id), crm_client_id)`,
+            [candidateContactId, identity.clientId, quote.customerName || "Cliente", phoneNorm.value, phoneNorm.value, quote.crmClientId || null]
+          );
+          const contactRes = await pool.execute<RowDataPacket[]>(
+            `SELECT contact_id FROM megadesk_conversation_contacts
+             WHERE client_id = ? AND channel = 'whatsapp' AND provider = 'evolution' AND external_identity = ? LIMIT 1`,
+            [identity.clientId, phoneNorm.value]
+          );
+          const contactRows = Array.isArray(contactRes) && Array.isArray(contactRes[0]) ? contactRes[0] : [];
+          if (contactRows[0]?.contact_id) {
+            contactId = String(contactRows[0].contact_id);
+            activeKey = createHash("sha256").update(`${identity.clientId}\0evolution\0${instanceName}\0${contactId}`).digest("hex");
+          }
+        } catch {
+          // Vínculo opcional de contato
+        }
+
         await pool.execute(
           `INSERT INTO megadesk_domain_conversations
-           (conversation_id, client_id, crm_client_id, public_code, customer_name, phone, company, status, assigned_user_id, assigned_user_name, last_message, last_message_from, time_label, messages_json, opened_at, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, '', 'open', ?, ?, ?, 'operator', ?, '[]', NOW(), NOW(), NOW())`,
+           (conversation_id, client_id, crm_client_id, public_code, contact_id, origin, channel, provider, integration_id, active_key, customer_name, phone, company, status, assigned_user_id, assigned_user_name, last_message, last_message_from, time_label, messages_json, opened_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'outbound', 'whatsapp', 'evolution', ?, ?, ?, ?, '', 'open', ?, ?, ?, 'agent', ?, '[]', NOW(), NOW(), NOW())`,
           [
             conversationId,
             identity.clientId,
             quote.crmClientId,
             generatedCode,
+            contactId,
+            instanceName,
+            activeKey,
             quote.customerName || "Cliente",
             phoneNorm.value,
-            identity.userId || null,
-            identity.userName || "Operador",
+            resolvedAssignedUserId,
+            resolvedAssignedUserName,
             messageCaption.substring(0, 255),
             timeLabel,
           ]
@@ -985,18 +1038,21 @@ export class QuoteTemplatesService {
       const now = new Date();
       const timeLabel = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       const pdfUrl = `/api/erp/sales/${quote.publicId}/pdf`;
+      const quotePdfUrl = `/api/crm/quotes/${encodeURIComponent(quote.orderNumber || quote.publicId)}/pdf`;
       const mediaReference = {
         messageId: messageRecordId,
         url: pdfUrl,
         mediaUrl: pdfUrl,
         media_url: pdfUrl,
         mediaData: pdfUrl,
+        quotePdfUrl,
         fileName,
         mimeType: "application/pdf",
         byteSize: pdfBytes.length,
         caption: messageCaption,
         storage: "quote_document",
         publicId: quote.publicId,
+        orderNumber: quote.orderNumber,
       };
 
       // Inserir o registro em megadesk_domain_conversations_messages
@@ -1011,8 +1067,8 @@ export class QuoteTemplatesService {
           conversationId,
           identity.clientId,
           messageId || null,
-          identity.userId,
-          identity.userName || "Operador",
+          resolvedAssignedUserId,
+          resolvedAssignedUserName,
           JSON.stringify(mediaReference),
           messageCaption,
           now,
@@ -1043,6 +1099,9 @@ export class QuoteTemplatesService {
         mediaUrl: pdfUrl,
         media_url: pdfUrl,
         mediaData: pdfUrl,
+        quotePdfUrl,
+        publicId: quote.publicId,
+        orderNumber: quote.orderNumber,
         mediaReference,
         time: timeLabel,
         timestamp: now.toISOString(),
@@ -1050,9 +1109,19 @@ export class QuoteTemplatesService {
       });
       await pool.execute(
         `UPDATE megadesk_domain_conversations
-         SET messages_json = ?, last_message = ?, last_message_from = 'operator', updated_at = NOW()
+         SET messages_json = ?, last_message = ?, last_message_from = 'agent', status = 'open',
+             assigned_user_id = COALESCE(NULLIF(assigned_user_id, 'bot_system'), ?),
+             assigned_user_name = COALESCE(NULLIF(assigned_user_name, 'Bot'), ?),
+             updated_at = NOW()
          WHERE conversation_id = ? AND client_id = ?`,
-        [JSON.stringify(messagesList), messageCaption.substring(0, 255), conversationId, identity.clientId]
+        [
+          JSON.stringify(messagesList),
+          messageCaption.substring(0, 255),
+          resolvedAssignedUserId,
+          resolvedAssignedUserName,
+          conversationId,
+          identity.clientId,
+        ]
       );
 
       // Emitir o evento via WebSocket (/api/ws/whatsapp) para atualizar timeline em tempo real
@@ -1072,6 +1141,9 @@ export class QuoteTemplatesService {
             mediaUrl: pdfUrl,
             media_url: pdfUrl,
             mediaData: pdfUrl,
+            quotePdfUrl,
+            publicId: quote.publicId,
+            orderNumber: quote.orderNumber,
             mediaReference,
             timestamp: now.toISOString(),
             time: timeLabel,
@@ -1091,8 +1163,8 @@ export class QuoteTemplatesService {
               name: quote.customerName,
               phone: phoneNorm.value,
               status: "open",
-              assignedUserId: identity.userId || null,
-              assignedUserName: identity.userName || "Operador",
+              assignedUserId: resolvedAssignedUserId,
+              assignedUserName: resolvedAssignedUserName,
               lastMessage: messageCaption.substring(0, 255),
               lastMessageFrom: "agent",
               createdAt: now.toISOString(),

@@ -136,7 +136,7 @@ export function createConversationMediaHandler(
   try {
     const [rows] = await pool.execute(
       `SELECT m.media_reference AS mediaReference, m.provider_message_reference AS providerMessageReference,
-        m.provider, m.integration_id AS integrationId, m.message_type AS messageType
+        m.provider, m.integration_id AS integrationId, m.message_type AS messageType, m.message AS messageText
        FROM megadesk_domain_conversations_messages m
        INNER JOIN megadesk_domain_conversations c ON c.conversation_id = m.conversation_id AND c.client_id = m.client_id
        WHERE m.message_id = ? AND m.conversation_id = ? AND m.client_id = ? LIMIT 1`,
@@ -163,14 +163,21 @@ export function createConversationMediaHandler(
           ...(typeof reference.fileName === "string" ? { fileName: reference.fileName } : {}) };
       }
       if (!content) {
-        // Quote document / Sale PDF resolution (e.g. storage: "quote_document", or orcamento-*.pdf)
-        const quoteIdentifier = typeof reference.publicId === "string" && reference.publicId
-          ? reference.publicId
-          : typeof reference.orderNumber === "string" && reference.orderNumber
-          ? reference.orderNumber
-          : typeof reference.fileName === "string"
-          ? (/orcamento-([A-Za-z0-9_-]+)\.pdf/i.exec(reference.fileName)?.[1] ?? null)
-          : null;
+        // Quote document / Sale PDF resolution (e.g. storage: "quote_document", or orcamento-*.pdf, or caption "orçamento comercial O-22")
+        const captionOrText = [
+          typeof reference.caption === "string" ? reference.caption : "",
+          typeof rows[0].messageText === "string" ? rows[0].messageText : "",
+        ].join(" ");
+        const quoteIdentifier =
+          (typeof reference.publicId === "string" && reference.publicId) ||
+          (typeof reference.orderNumber === "string" && reference.orderNumber) ||
+          (typeof reference.url === "string" &&
+            /\/api\/(?:crm\/quotes|erp\/sales)\/([^/?#]+)\/pdf/i.exec(reference.url)?.[1]) ||
+          (typeof reference.fileName === "string" &&
+            /or[çc]amento-([A-Za-z0-9_-]+)\.pdf/i.exec(reference.fileName)?.[1]) ||
+          /or[çc]amento\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(captionOrText)?.[1] ||
+          /proposta\s+comercial\s+\*?([A-Za-z0-9_-]+)\*?/i.exec(captionOrText)?.[1] ||
+          null;
 
         if (quoteIdentifier || reference.storage === "quote_document") {
           try {

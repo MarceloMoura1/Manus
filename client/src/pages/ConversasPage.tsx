@@ -1015,6 +1015,7 @@ export function ConversasPage() {
                     <ConversationMedia
                       conversationId={selectedConversation}
                       message={message}
+                      caption={message.text || message.content || message.caption}
                       fallback={<span>{message.text}</span>}
                     />
                     {message.type === "document" &&

@@ -1860,7 +1860,7 @@ function ConversationMessageItem({
     if (msgType === 'document') {
       return (
         <div className="space-y-2">
-          <ConversationMedia conversationId={selectedConvId} message={msg} fallback={<div className="flex items-center gap-2"><FileText className="w-4 h-4 flex-shrink-0" /><span className="text-sm">Documento indisponível</span></div>} />
+          <ConversationMedia conversationId={selectedConvId} message={msg} caption={msgText} fallback={<div className="flex items-center gap-2"><FileText className="w-4 h-4 flex-shrink-0" /><span className="text-sm">Documento indisponível</span></div>} />
           {msgText && !/^\[documento\]$/i.test(msgText) && <p className="whitespace-pre-wrap break-words text-sm">{msgText}</p>}
         </div>
       );
