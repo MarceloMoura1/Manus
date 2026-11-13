@@ -248,7 +248,8 @@ export function createDirectSalePdfDownloadHandler(
       res.status(400).end();
       return;
     }
-    const headerTenant = req.headers["x-tenant-id"];
+    const queryTenant = typeof req.query?.tenantId === "string" ? req.query.tenantId : typeof req.query?.tenant_id === "string" ? req.query.tenant_id : undefined;
+    const headerTenant = req.headers["x-tenant-id"] || queryTenant;
     const effectiveTenantId = (typeof headerTenant === "string" && headerTenant.trim())
       ? headerTenant.trim()
       : session.tenantId;

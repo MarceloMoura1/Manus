@@ -73,6 +73,18 @@ describe("conversation timeline", () => {
     expect(afterRefetch.findIndex(item => item.id === "event-x")).toBe(1);
     expect(afterRefetch.filter(item => item.id === "msg-d" || item.id === "pending-attempt-d")).toHaveLength(1);
   });
+
+  it("keeps pending and optimistic messages at the bottom even when local clock is behind server timestamp", () => {
+    const history = [
+      { id: "msg-1", text: "Primeira", timestamp: "2026-09-02T12:05:00.000Z" },
+      { id: "msg-2", text: "Segunda", timestamp: "2026-09-02T12:06:00.000Z" },
+    ];
+    const optimisticBehind = [
+      { id: "pending-attempt-lagged", clientAttemptId: "attempt-lagged", text: "Otimista", timestamp: "2026-09-02T12:05:10.000Z", pending: true },
+    ];
+    const timeline = mergeConversationTimeline(reconcileConversationMessages(history, optimisticBehind), []);
+    expect(timeline.map(item => item.id)).toEqual(["msg-1", "msg-2", "pending-attempt-lagged"]);
+  });
 });
 
 const at = (minute: number) => `2026-09-06T10:${String(minute).padStart(2, "0")}:00.000Z`;

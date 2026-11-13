@@ -2564,6 +2564,11 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
     });
     const clientAttemptId = attempt.clientAttemptId;
     const optimisticId = `pending-${clientAttemptId}`;
+    const lastExistingTimestamp = Math.max(0, ...((conversationMessages as any[]) || []).map((m: any) => {
+      const t = new Date(m.timestamp || m.createdAt || 0).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    }));
+    const safeDate = new Date(Math.max(Date.now(), lastExistingTimestamp + 1000));
     setOptimisticMessages(previous => [...previous, {
       id: optimisticId,
       clientAttemptId,
@@ -2576,9 +2581,11 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       mimeType: audio.mimeType,
       fileName: audio.fileName,
       replyTo,
-      timestamp: new Date().toISOString(),
-       time: formatConversationTime(new Date()),
+      timestamp: safeDate.toISOString(),
+      time: formatConversationTime(safeDate),
       pending: true,
+      optimistic: true,
+      status: 'sending',
     }]);
     try {
       await outboundAttemptLedger.transition(attempt, "submitted");
@@ -2634,6 +2641,11 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
     }
     const clientAttemptId = stableAttempt.clientAttemptId;
     const optimisticId = `pending-${clientAttemptId}`;
+    const lastExistingTimestamp = Math.max(0, ...((conversationMessages as any[]) || []).map((m: any) => {
+      const t = new Date(m.timestamp || m.createdAt || 0).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    }));
+    const safeDate = new Date(Math.max(Date.now(), lastExistingTimestamp + 1000));
     setOptimisticMessages(previous => [...previous, {
       id: optimisticId,
       clientAttemptId,
@@ -2646,9 +2658,11 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       mimeType: attachmentToSend?.mimeType,
       fileName: attachmentToSend?.fileName,
       replyTo,
-      timestamp: new Date().toISOString(),
-       time: formatConversationTime(new Date()),
+      timestamp: safeDate.toISOString(),
+      time: formatConversationTime(safeDate),
       pending: true,
+      optimistic: true,
+      status: 'sending',
     }]);
     setMessageInput('');
     setAttachment(null);

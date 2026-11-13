@@ -188,7 +188,7 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
   }
   if (message.type === "audio") return <audio controls preload="metadata" src={effectiveUrl} className="max-w-full" />;
   if (message.type === "video") return <video controls preload="metadata" src={effectiveUrl} className="max-h-80 rounded-xl" />;
-  const openDocument = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+  const openDocument = async (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const targetUrl = resolvedQuoteUrl || effectiveUrl;
@@ -224,14 +224,18 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
     setIsOpeningDocument(true);
     try {
       const headers: Record<string, string> = {};
-      const token = localStorage.getItem("megadesk-session-token");
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
+      let sessionToken = localStorage.getItem("megadesk-session-token");
+      if (sessionToken) {
+        headers["Authorization"] = `Bearer ${sessionToken}`;
       }
       try {
         const storedSession = localStorage.getItem("megadesk_session_v1");
         if (storedSession) {
           const parsed = JSON.parse(storedSession);
+          if (parsed?.token && !headers["Authorization"]) {
+            sessionToken = String(parsed.token);
+            headers["Authorization"] = `Bearer ${parsed.token}`;
+          }
           if (parsed?.clientId) headers["x-tenant-id"] = String(parsed.clientId);
           if (parsed?.userRole) headers["x-user-role"] = String(parsed.userRole);
           if (parsed?.userEmail) headers["x-user-email"] = String(parsed.userEmail);
@@ -240,7 +244,14 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
         // Ignora parse se inválido
       }
 
-      const res = await fetch(targetUrl, {
+      let fetchUrl = targetUrl;
+      const effectiveToken = sessionToken || (headers["Authorization"] ? headers["Authorization"].replace(/^Bearer\s+/i, "") : null);
+      if (effectiveToken && !fetchUrl.includes("token=")) {
+        const separator = fetchUrl.includes("?") ? "&" : "?";
+        fetchUrl = `${fetchUrl}${separator}token=${encodeURIComponent(effectiveToken)}`;
+      }
+
+      const res = await fetch(fetchUrl, {
         method: "GET",
         credentials: "include",
         headers,
@@ -274,15 +285,15 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
   };
 
   return (
-    <a
-      href={effectiveUrl}
-      target="_blank"
-      rel="noopener noreferrer"
+    <button
+      type="button"
+      data-href={effectiveUrl}
+      data-target="_blank"
       onClick={openDocument}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       aria-busy={isOpeningDocument}
-      className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 dark:bg-white/10 px-3 py-2 text-sm font-semibold underline decoration-current/40 hover:bg-black/20 dark:hover:bg-white/20 hover:decoration-current transition"
+      className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 dark:bg-white/10 px-3 py-2 text-sm font-semibold underline decoration-current/40 hover:bg-black/20 dark:hover:bg-white/20 hover:decoration-current transition text-left"
     >
       {isOpeningDocument ? (
         <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin text-blue-500" />
@@ -292,6 +303,6 @@ export function ConversationMedia({ conversationId, message, caption, fallback }
       <span className="truncate max-w-[220px]">
         {isOpeningDocument ? "Abrindo documento…" : (message.fileName || "Baixar documento")}
       </span>
-    </a>
+    </button>
   );
 }

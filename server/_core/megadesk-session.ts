@@ -171,16 +171,21 @@ export function hashOperationalSessionToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
-export function readOperationalSessionToken(req: Pick<Request, "headers">): string | null {
-  const header = req.headers.cookie;
+export function readOperationalSessionToken(req: { headers?: Request["headers"]; query?: Record<string, any> }): string | null {
+  const header = req.headers?.cookie;
   if (header) {
     const value = parseCookieHeader(header)[MEGADESK_SESSION_COOKIE];
     if (typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value)) return value;
   }
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers?.authorization;
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
     const token = authHeader.slice(7).trim();
     if (/^[A-Za-z0-9_-]{43}$/.test(token)) return token;
+  }
+  const queryToken = req.query?.token || req.query?.access_token;
+  if (typeof queryToken === "string") {
+    const trimmed = queryToken.trim();
+    if (/^[A-Za-z0-9_-]{43}$/.test(trimmed)) return trimmed;
   }
   return null;
 }
@@ -221,7 +226,7 @@ export async function createOperationalSession(
   return { expiresAt };
 }
 
-export async function resolveOperationalSession(req: Pick<Request, "headers">, repository: OperationalSessionRepository = defaultRepository(), now = new Date()): Promise<OperationalIdentity | null> {
+export async function resolveOperationalSession(req: { headers?: Request["headers"]; query?: Record<string, any> }, repository: OperationalSessionRepository = defaultRepository(), now = new Date()): Promise<OperationalIdentity | null> {
   const token = readOperationalSessionToken(req);
   if (!token) return null;
   const session = await repository.findByTokenHash(hashOperationalSessionToken(token));
@@ -232,7 +237,7 @@ export async function resolveOperationalSession(req: Pick<Request, "headers">, r
 }
 
 /** Authentication-only variant for endpoints that must never write while resolving a session. */
-export async function resolveOperationalSessionReadOnly(req: Pick<Request, "headers">, repository: OperationalSessionRepository = defaultRepository(), now = new Date()): Promise<OperationalIdentity | null> {
+export async function resolveOperationalSessionReadOnly(req: { headers?: Request["headers"]; query?: Record<string, any> }, repository: OperationalSessionRepository = defaultRepository(), now = new Date()): Promise<OperationalIdentity | null> {
   const token = readOperationalSessionToken(req);
   if (!token) return null;
   const session = await repository.findByTokenHash(hashOperationalSessionToken(token));
@@ -241,7 +246,7 @@ export async function resolveOperationalSessionReadOnly(req: Pick<Request, "head
   return { sessionId: session.sessionId, userId: session.userId, tenantId: session.tenantId, role: session.role, permissions: session.permissions, userEmail: session.userEmail, userName: session.userName };
 }
 
-export async function revokeOperationalSession(req: Pick<Request, "headers">, repository: OperationalSessionRepository = defaultRepository()): Promise<boolean> {
+export async function revokeOperationalSession(req: { headers?: Request["headers"]; query?: Record<string, any> }, repository: OperationalSessionRepository = defaultRepository()): Promise<boolean> {
   const token = readOperationalSessionToken(req);
   if (!token) return false;
   return repository.revokeByTokenHash(hashOperationalSessionToken(token), new Date());

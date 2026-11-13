@@ -41,7 +41,25 @@ function timelineItemId(item: ConversationTimelineItem) {
   return item.kind === "message" ? String(item.id ?? item.clientAttemptId ?? "") : item.id;
 }
 
+export function isPendingOrOptimistic(candidate: TimelineCandidate): boolean {
+  if (candidate.kind !== "message") return false;
+  const msg = candidate as any;
+  if (msg.pending === true || msg.isOptimistic === true || msg.optimistic === true || msg.status === "sending") {
+    return true;
+  }
+  const id = String(msg.id ?? msg.clientAttemptId ?? "");
+  if (id.startsWith("pending-") || id.startsWith("temp-") || id.startsWith("optimistic-")) {
+    return true;
+  }
+  return false;
+}
+
 function compareTimelineCandidates(left: TimelineCandidate, right: TimelineCandidate) {
+  const leftPending = isPendingOrOptimistic(left);
+  const rightPending = isPendingOrOptimistic(right);
+  if (leftPending !== rightPending) {
+    return leftPending ? 1 : -1;
+  }
   const leftTimestamp = timestampValue(left.timestamp);
   const rightTimestamp = timestampValue(right.timestamp);
   if (leftTimestamp === null || rightTimestamp === null) return left.sourceOrder - right.sourceOrder;
