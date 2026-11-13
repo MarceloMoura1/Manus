@@ -9,6 +9,7 @@ import {
   Sparkles,
   SwatchBook,
   WandSparkles,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -22,11 +23,13 @@ import { useUserPersonalization } from "@/hooks/useUserPersonalization";
 import {
   CONVERSATION_BACKGROUND_PRESETS,
   CONVERSATION_BUBBLE_COLOR_SWATCHES,
+  CONVERSATION_BUBBLE_STYLES,
   DEFAULT_CONVERSATION_BACKGROUND,
   conversationBubbleForegroundColor,
   getConversationBackgroundPreset,
   normalizeConversationBackgroundPreference,
   type ConversationBackgroundPreference,
+  type ConversationBubbleStyle,
 } from "@shared/user-personalization";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -47,26 +50,58 @@ const BACKGROUND_MODES: ReadonlyArray<{
   {
     id: "default",
     label: "Padrão",
-    description: "Visual original do MegaDesk",
+    description: "Visual original MegaDesk",
     icon: RotateCcw,
   },
   {
     id: "solid",
     label: "Cor sólida",
-    description: "Uma cor limpa para as mensagens",
+    description: "Cores limpas para mensagens",
     icon: Palette,
   },
   {
     id: "pattern",
     label: "Fundo estilizado",
-    description: "Texturas sutis e profissionais",
+    description: "Temas Typebot & degradês",
     icon: WandSparkles,
   },
   {
     id: "custom",
     label: "Sua imagem",
-    description: "Use uma imagem da sua preferência",
+    description: "Upload de imagem própria",
     icon: ImagePlus,
+  },
+];
+
+const BUBBLE_STYLE_OPTIONS: ReadonlyArray<{
+  id: ConversationBubbleStyle;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "classic_tail",
+    label: "Clássico",
+    description: "Bordas arredondadas tradicionais",
+  },
+  {
+    id: "pill_soft",
+    label: "Pill Soft",
+    description: "Cápsula suave e moderna",
+  },
+  {
+    id: "glassmorphism",
+    label: "Glassmorphism",
+    description: "Translúcido com efeito vidro",
+  },
+  {
+    id: "neon_border",
+    label: "Neon Border",
+    description: "Contorno com brilho neon",
+  },
+  {
+    id: "minimal_flat",
+    label: "Minimal Flat",
+    description: "Design plano e limpo",
   },
 ];
 
@@ -81,7 +116,10 @@ export function hasUnsavedConversationBackground(
     draft.backgroundType !== saved.backgroundType ||
     draft.presetId !== saved.presetId ||
     draft.incomingBubbleColor !== saved.incomingBubbleColor ||
-    draft.outgoingBubbleColor !== saved.outgoingBubbleColor
+    draft.outgoingBubbleColor !== saved.outgoingBubbleColor ||
+    (Boolean(draft.bubbleStyle) &&
+      Boolean(saved.bubbleStyle) &&
+      draft.bubbleStyle !== saved.bubbleStyle)
   );
 }
 
@@ -151,12 +189,22 @@ function BubbleColorPalette({
       className="min-w-0"
       data-testid={`bubble-color-${direction}-selector`}
     >
-      <legend className="text-sm font-semibold text-slate-900">{label}</legend>
-      <p className="mt-1 text-xs leading-5 text-slate-500">
-        Escolha uma cor segura ou mantenha o padrão atual.
-      </p>
+      <div className="flex items-center justify-between mb-1.5">
+        <legend className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+          Balões {label}
+        </legend>
+        <button
+          type="button"
+          aria-pressed={value === null}
+          disabled={disabled}
+          onClick={() => onChange(null)}
+          className="text-[11px] font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50"
+        >
+          {value === null ? "✓ Padrão" : "Restaurar padrão"}
+        </button>
+      </div>
       <div
-        className="mt-3 flex flex-wrap gap-2"
+        className="flex flex-wrap gap-1.5"
         role="group"
         aria-label={`Cores dos balões ${label.toLowerCase()}`}
       >
@@ -170,31 +218,21 @@ function BubbleColorPalette({
               aria-label={`${label}: ${color}${selected ? ", selecionada" : ""}`}
               disabled={disabled}
               onClick={() => onChange(color)}
-              className="flex size-9 items-center justify-center rounded-full border-2 border-white shadow-sm ring-1 ring-slate-300 transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-55"
+              className={`flex size-7 items-center justify-center rounded-full border-2 border-white shadow-xs ring-1 ring-slate-300 transition hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:pointer-events-none disabled:opacity-50 ${
+                selected ? "scale-110 ring-2 ring-blue-600" : ""
+              }`}
               style={{
                 backgroundColor: color,
                 color: conversationBubbleForegroundColor(color),
               }}
             >
-              {selected && <Check className="size-4" aria-hidden="true" />}
+              {selected && <Check className="size-3.5" aria-hidden="true" />}
               <span className="sr-only">
                 {selected ? "Selecionada" : color}
               </span>
             </button>
           );
         })}
-        <button
-          type="button"
-          aria-pressed={value === null}
-          disabled={disabled}
-          onClick={() => onChange(null)}
-          className="rounded-full border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-55"
-        >
-          {value === null && (
-            <Check className="mr-1 inline size-3.5" aria-hidden="true" />
-          )}
-          Usar padrão
-        </button>
       </div>
     </fieldset>
   );
@@ -252,9 +290,13 @@ export function UserPersonalizationTab() {
             presetId: presetId ?? null,
             customImageUrl: null,
             hasCustomImage: false,
+            bubbleStyle: visiblePreference.bubbleStyle,
+            incomingBubbleColor: visiblePreference.incomingBubbleColor,
+            outgoingBubbleColor: visiblePreference.outgoingBubbleColor,
           })
         : {
             ...DEFAULT_CONVERSATION_BACKGROUND,
+            bubbleStyle: visiblePreference.bubbleStyle,
             incomingBubbleColor: visiblePreference.incomingBubbleColor,
             outgoingBubbleColor: visiblePreference.outgoingBubbleColor,
           }
@@ -263,6 +305,15 @@ export function UserPersonalizationTab() {
       backgroundType === "preset"
         ? (getConversationBackgroundPreset(presetId)?.kind ?? "solid")
         : "default"
+    );
+  };
+
+  const selectBubbleStyle = (style: ConversationBubbleStyle) => {
+    setPreview(prev =>
+      normalizeConversationBackgroundPreference({
+        ...(prev ?? personalization.preference),
+        bubbleStyle: style,
+      })
     );
   };
 
@@ -280,6 +331,7 @@ export function UserPersonalizationTab() {
       presetId: null,
       customImageUrl: nextUrl,
       hasCustomImage: true,
+      bubbleStyle: visiblePreference.bubbleStyle,
       incomingBubbleColor: visiblePreference.incomingBubbleColor,
       outgoingBubbleColor: visiblePreference.outgoingBubbleColor,
     });
@@ -303,6 +355,10 @@ export function UserPersonalizationTab() {
   const save = async () => {
     if (!preview || !hasUnsavedChanges || !canPersist || isSaving) return;
     const imageToUpload = pendingImage;
+
+    if (preview.bubbleStyle) {
+      personalization.setBubbleStyle(preview.bubbleStyle);
+    }
 
     if (preview.backgroundType === "custom" && imageToUpload) {
       setUploading(true);
@@ -329,7 +385,7 @@ export function UserPersonalizationTab() {
         const saved = persistedCustomBackgroundFromUpload(payload);
         if (!saved)
           throw new Error(
-            "A imagem foi enviada, mas a preferÃªncia salva nÃ£o pÃ´de ser confirmada."
+            "A imagem foi enviada, mas a preferência salva não pôde ser confirmada."
           );
         utils.userPersonalization.get.setData(
           personalization.cacheIdentity,
@@ -338,7 +394,7 @@ export function UserPersonalizationTab() {
         setPreview(null);
         setPendingImage(null);
         setObjectUrl(null);
-        toast.success("Fundo da conversa salvo.");
+        toast.success("Fundo e estilo da conversa salvos.");
       } catch (error) {
         toast.error(
           error instanceof Error
@@ -360,7 +416,7 @@ export function UserPersonalizationTab() {
         saved
       );
       setPreview(null);
-      toast.success("Fundo da conversa salvo.");
+      toast.success("Fundo e estilo da conversa salvos.");
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -386,359 +442,368 @@ export function UserPersonalizationTab() {
   };
 
   return (
-    <div className="space-y-6 pb-8" data-testid="personalization-tab">
+    <div className="space-y-5 pb-6" data-testid="personalization-tab">
       <header
-        className="flex items-start gap-3 px-1"
+        className="flex items-center justify-between border-b border-slate-200/80 pb-4"
         data-testid="personalization-section-header"
       >
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700 shadow-sm">
-          <Palette className="size-5" />
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700 shadow-xs">
+            <Palette className="size-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-slate-950">
+              Personalização do Chat
+            </h2>
+            <p className="text-xs text-slate-500">
+              Configure temas estilo Typebot, texturas, cores e formatos de balão.
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-            Personalização
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Organize a aparência da área de conversas do seu jeito.
-          </p>
+
+        <div className="flex items-center gap-2">
+          {hasUnsavedChanges && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+              <span className="size-1.5 rounded-full bg-amber-500" />
+              Alterações pendentes
+            </span>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            className="bg-blue-600 font-semibold shadow-xs hover:bg-blue-700"
+            disabled={!hasUnsavedChanges || !canPersist || isSaving}
+            onClick={() => void save()}
+          >
+            {isSaving ? (
+              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+            ) : (
+              <Save className="mr-1.5 size-3.5" />
+            )}
+            {isSaving ? "Salvando…" : "Salvar alterações"}
+          </Button>
         </div>
       </header>
 
-      <section
-        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-        aria-labelledby="conversation-appearance-title"
-      >
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
-          <div className="flex gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white">
-              <Sparkles className="size-4" />
-            </div>
-            <div>
-              <h3
-                id="conversation-appearance-title"
-                className="text-base font-semibold text-slate-950"
+      {/* 2-Column Responsive Cockpit */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Controls */}
+        <div className="lg:col-span-7 space-y-4">
+          {/* Card 1: Background Modes */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-blue-700" />
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Fundo da Conversa
+                </h3>
+              </div>
+              <span
+                className="text-[11px] font-medium text-slate-500"
+                data-testid="active-background-mode"
               >
-                Aparência das conversas
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Escolha o fundo que aparece na área de mensagens.
-              </p>
+                Ativo: {activeBackgroundLabel(visiblePreference)}
+              </span>
             </div>
-          </div>
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800"
-            data-testid="active-background-mode"
-          >
-            <Check className="size-3.5" />
-            Em uso na prévia: {activeBackgroundLabel(visiblePreference)}
-          </span>
-        </div>
-        <div
-          className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-4 sm:p-4"
-          aria-label="Modo de fundo"
-        >
-          {BACKGROUND_MODES.map(({ id, label, description, icon: Icon }) => {
-            const selected = controlMode === id;
-            if (id === "custom") {
-              return (
-                <div
-                  key={id}
-                  className={`group relative overflow-hidden rounded-xl border transition duration-150 ${selected ? "border-blue-600 bg-blue-50/70 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"}`}
-                  data-testid="custom-image-option"
-                >
+
+            {/* Mode Selector Tabs */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 rounded-xl bg-slate-100 p-1">
+              {BACKGROUND_MODES.map(({ id, label, icon: Icon }) => {
+                const selected = controlMode === id;
+                return (
                   <button
+                    key={id}
                     type="button"
                     aria-pressed={selected}
-                    onClick={() => setControlMode("custom")}
+                    onClick={() => activateMode(id)}
                     disabled={isSaving}
-                    className="flex min-h-24 w-full items-start gap-3 p-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600 disabled:pointer-events-none disabled:opacity-55"
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-2 px-2 text-xs font-semibold transition ${
+                      selected
+                        ? "bg-white text-blue-700 shadow-xs ring-1 ring-slate-200"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                    }`}
                   >
-                    <span
-                      className={`flex size-9 shrink-0 items-center justify-center rounded-lg transition ${selected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 group-hover:bg-blue-100 group-hover:text-blue-700"}`}
-                    >
-                      <Icon className="size-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        {label}
-                        {activeMode === id && (
-                          <Check
-                            className="size-3.5 text-blue-700"
-                            aria-label="Fundo atual"
-                          />
-                        )}
-                      </span>
-                      <span className="mt-1 block text-xs leading-5 text-slate-500">
-                        {description}
-                      </span>
-                    </span>
+                    <Icon className="size-3.5" />
+                    <span>{label}</span>
                   </button>
-                  <div className="border-t border-blue-100 px-3.5 pb-3.5 pt-3">
-                    <p className="text-xs leading-5 text-slate-500">
-                      JPG, PNG ou WebP de até 5 MB.
-                    </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="mt-2 w-full border-blue-200 bg-white text-blue-800 hover:bg-blue-100"
-                      disabled={isSaving}
-                      onClick={() => fileInput.current?.click()}
-                    >
-                      <ImagePlus className="size-4" /> Enviar imagem
-                    </Button>
-                    {(pendingImage ||
-                      visiblePreference.backgroundType === "custom") && (
-                      <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-blue-800">
-                        <Check className="size-3.5" />
-                        {pendingImage
-                          ? "Imagem pronta para salvar"
-                          : "Imagem personalizada ativa"}
-                      </p>
-                    )}
+                );
+              })}
+            </div>
+
+            {/* Mode Content Panes */}
+            <div className="mt-3.5 pt-3 border-t border-slate-100">
+              {controlMode === "default" && (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3.5 text-center">
+                  <p className="text-xs font-semibold text-slate-800">
+                    Fundo Padrão MegaDesk
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    Base neutra equilibrada e otimizada para legibilidade.
+                  </p>
+                </div>
+              )}
+
+              {controlMode === "solid" && (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-slate-500">
+                    Selecione uma tonalidade sólida para o plano de fundo:
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {CONVERSATION_BACKGROUND_PRESETS.filter(
+                      p => p.kind === "solid"
+                    ).map(preset => {
+                      const selected =
+                        visiblePreference.backgroundType === "preset" &&
+                        visiblePreference.presetId === preset.id;
+                      const dark =
+                        preset.id === "solid-black" ||
+                        preset.id === "solid-navy";
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => selectBackground("preset", preset.id)}
+                          disabled={isSaving}
+                          className={`group relative flex h-14 items-end rounded-xl border p-2 text-left transition ${
+                            selected
+                              ? "border-blue-600 ring-2 ring-blue-500/20 shadow-xs"
+                              : "border-slate-200 hover:border-blue-300"
+                          }`}
+                          style={preset.style}
+                        >
+                          <span
+                            className={`text-[11px] font-semibold truncate ${
+                              dark ? "text-white" : "text-slate-900"
+                            }`}
+                          >
+                            {preset.name}
+                          </span>
+                          {selected && (
+                            <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-blue-600 text-white">
+                              <Check className="size-2.5" />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              );
-            }
-            return (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => activateMode(id)}
-                disabled={isSaving}
-                className={`group relative flex min-h-24 items-start gap-3 rounded-xl border p-3.5 text-left transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-55 ${selected ? "border-blue-600 bg-blue-50/70 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"}`}
-              >
-                <span
-                  className={`flex size-9 shrink-0 items-center justify-center rounded-lg transition ${selected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 group-hover:bg-blue-100 group-hover:text-blue-700"}`}
-                >
-                  <Icon className="size-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    {label}
-                    {activeMode === id && (
-                      <Check
-                        className="size-3.5 text-blue-700"
-                        aria-label="Fundo atual"
-                      />
-                    )}
-                  </span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500">
-                    {description}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+              )}
 
-      <div className="space-y-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <section
-          className="border-t border-slate-100"
-          aria-labelledby="background-controls-title"
-        >
-          <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
-            <div className="flex items-center gap-2">
-              <SwatchBook className="size-4 text-blue-700" />
-              <h3
-                id="background-controls-title"
-                className="text-sm font-semibold text-slate-950"
-              >
-                Escolha seu fundo
-              </h3>
-            </div>
-            <p className="mt-1 text-sm text-slate-500">
-              As mudanças aparecem ao vivo na prévia antes de salvar.
-            </p>
-          </div>
-          <div className="p-5 sm:p-6">
-            {controlMode === "default" && (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-900">
-                  Fundo padrão selecionado
-                </p>
-                <p className="mt-1 text-sm leading-6 text-slate-500">
-                  Uma base neutra para manter a conversa confortável e legível.
-                </p>
-              </div>
-            )}
-            {controlMode === "solid" && (
-              <fieldset>
-                <legend className="text-sm font-semibold text-slate-900">
-                  Cores sólidas
-                </legend>
-                <p className="mt-1 text-sm text-slate-500">
-                  Selecione uma cor para aplicar na área de mensagens.
-                </p>
-                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {CONVERSATION_BACKGROUND_PRESETS.filter(
-                    preset => preset.kind === "solid"
-                  ).map(preset => {
-                    const selected =
-                      visiblePreference.backgroundType === "preset" &&
-                      visiblePreference.presetId === preset.id;
-                    const dark =
-                      preset.id === "solid-black" || preset.id === "solid-navy";
-                    return (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => selectBackground("preset", preset.id)}
-                        disabled={isSaving}
-                        className={`group relative flex min-h-20 items-end overflow-hidden rounded-xl border p-3 text-left transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-55 ${selected ? "border-blue-600 ring-2 ring-blue-100" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}
-                        style={preset.style}
-                      >
-                        <span
-                          className={`absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t ${dark ? "from-slate-950/45" : "from-white/70"}`}
-                          aria-hidden="true"
-                        />
-                        <span
-                          className={`relative flex w-full items-center justify-between gap-2 text-xs font-semibold ${dark ? "text-white" : "text-slate-900"}`}
+              {controlMode === "pattern" && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] text-slate-500">
+                      Temas Typebot, degradês imersivos e texturas executivas:
+                    </p>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                      Typebot Ready
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {CONVERSATION_BACKGROUND_PRESETS.filter(
+                      p => p.kind === "pattern"
+                    ).map(preset => {
+                      const selected =
+                        visiblePreference.backgroundType === "preset" &&
+                        visiblePreference.presetId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => selectBackground("preset", preset.id)}
+                          disabled={isSaving}
+                          className={`group relative flex flex-col justify-between h-20 overflow-hidden rounded-xl border p-2.5 text-left transition ${
+                            selected
+                              ? "border-blue-600 ring-2 ring-blue-500/30 shadow-xs"
+                              : "border-slate-200 hover:border-blue-300"
+                          }`}
+                          style={{
+                            ...preset.style,
+                            backgroundSize: "cover",
+                          }}
                         >
-                          {preset.name}
-                          {selected && (
-                            <Check
-                              className="size-3.5"
-                              aria-label="Cor selecionada"
-                            />
-                          )}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </fieldset>
-            )}
-            {controlMode === "pattern" && (
-              <fieldset>
-                <legend className="text-sm font-semibold text-slate-900">
-                  Fundos estilizados
-                </legend>
-                <p className="mt-1 text-sm text-slate-500">
-                  Compare as texturas antes de escolher a que combina com seu
-                  atendimento.
-                </p>
-                <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                  {CONVERSATION_BACKGROUND_PRESETS.filter(
-                    preset => preset.kind === "pattern"
-                  ).map(preset => {
-                    const selected =
-                      visiblePreference.backgroundType === "preset" &&
-                      visiblePreference.presetId === preset.id;
-                    return (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => selectBackground("preset", preset.id)}
-                        disabled={isSaving}
-                        className={`group relative min-h-28 overflow-hidden rounded-xl border p-3 text-left transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-55 ${selected ? "border-blue-600 ring-2 ring-blue-100" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}
-                        style={{ ...preset.style, backgroundSize: "24px 24px" }}
-                      >
-                        <span
-                          className="absolute inset-0 bg-white/30 transition group-hover:bg-white/15"
-                          aria-hidden="true"
-                        />
-                        <span className="relative flex h-full flex-col justify-between">
-                          <span className="flex items-center justify-end">
+                          <div className="flex items-center justify-end w-full">
                             {selected && (
-                              <span className="flex size-5 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm">
-                                <Check
-                                  className="size-3"
-                                  aria-label="Fundo selecionado"
-                                />
+                              <span className="flex size-4 items-center justify-center rounded-full bg-blue-600 text-white shadow-xs">
+                                <Check className="size-2.5" />
                               </span>
                             )}
-                          </span>
-                          <span className="rounded-lg bg-white/80 px-2.5 py-2 backdrop-blur-sm">
-                            <span className="block text-xs font-semibold text-slate-900">
+                          </div>
+                          <div className="rounded-md bg-slate-950/70 p-1.5 backdrop-blur-xs">
+                            <span className="block text-xs font-semibold text-white leading-tight">
                               {preset.name}
                             </span>
-                            <span className="mt-0.5 block text-[11px] leading-4 text-slate-600">
+                            <span className="block text-[10px] text-slate-300 truncate leading-tight mt-0.5">
                               {preset.description}
                             </span>
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </fieldset>
-            )}
-            {false && controlMode === "custom" && (
-              <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/45 p-4 sm:p-5">
-                <div className="flex size-10 items-center justify-center rounded-xl bg-white text-blue-700 shadow-sm">
-                  <ImagePlus className="size-5" />
-                </div>
-                <h4 className="mt-4 text-sm font-semibold text-slate-950">
-                  Adicione sua própria imagem
-                </h4>
-                <p className="mt-1 text-sm leading-6 text-slate-500">
-                  JPG, PNG ou WebP com até 5 MB. A imagem é exibida na prévia
-                  antes de ser salva.
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="mt-4 border-blue-200 bg-white text-blue-800 hover:bg-blue-100"
-                  disabled={isSaving}
-                  onClick={() => fileInput.current?.click()}
+              )}
+
+              {controlMode === "custom" && (
+                <div
+                  className="rounded-xl border border-dashed border-blue-200 bg-blue-50/30 p-4 text-center"
+                  data-testid="custom-image-option"
                 >
-                  <ImagePlus className="size-4" />
-                  Enviar imagem
-                </Button>
-                {(pendingImage ||
-                  visiblePreference.backgroundType === "custom") && (
-                  <p className="mt-4 flex items-center gap-2 text-xs font-semibold text-blue-800">
-                    <Check className="size-3.5" />
-                    {pendingImage
-                      ? `Imagem pronta para salvar: ${pendingImage?.name ?? "imagem selecionada"}`
-                      : "Imagem personalizada ativa"}
+                  <ImagePlus className="mx-auto size-7 text-blue-600" />
+                  <p className="mt-2 text-xs font-semibold text-slate-900">
+                    Imagem Personalizada
                   </p>
+                  <p className="text-[11px] text-slate-500">
+                    JPG, PNG ou WebP de até 5 MB.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-3 border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
+                    disabled={isSaving}
+                    onClick={() => fileInput.current?.click()}
+                  >
+                    <ImagePlus className="mr-1.5 size-3.5" /> Escolher arquivo
+                  </Button>
+                  {(pendingImage ||
+                    visiblePreference.backgroundType === "custom") && (
+                    <p className="mt-2 text-xs font-medium text-emerald-700">
+                      ✓ Imagem selecionada:{" "}
+                      {pendingImage?.name ?? "Imagem ativa"}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Card 2: Bubble Styles (Typebot & Modern Shapes) */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="size-4 text-blue-700" />
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Estilo dos Balões
+                </h3>
+              </div>
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                Geometria & Acabamento
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {BUBBLE_STYLE_OPTIONS.map(opt => {
+                const selected =
+                  (visiblePreference.bubbleStyle ?? "classic_tail") === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => selectBubbleStyle(opt.id)}
+                    disabled={isSaving}
+                    className={`flex flex-col text-left p-2.5 rounded-xl border transition ${
+                      selected
+                        ? "border-blue-600 bg-blue-50/70 ring-1 ring-blue-500/20"
+                        : "border-slate-200 hover:border-blue-300 hover:bg-slate-50/60"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-900">
+                        {opt.label}
+                      </span>
+                      {selected && (
+                        <Check className="size-3.5 text-blue-700" />
+                      )}
+                    </div>
+                    <span className="text-[11px] text-slate-500 mt-0.5 leading-tight">
+                      {opt.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Card 3: Bubble Colors */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <div className="mb-3 flex items-center gap-2">
+              <SwatchBook className="size-4 text-blue-700" />
+              <h3 className="text-sm font-semibold text-slate-900">
+                Cores dos Balões
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <BubbleColorPalette
+                direction="incoming"
+                label="Recebidas"
+                value={visiblePreference.incomingBubbleColor}
+                disabled={isSaving}
+                onChange={color => selectBubbleColor("incoming", color)}
+              />
+              <BubbleColorPalette
+                direction="outgoing"
+                label="Enviadas"
+                value={visiblePreference.outgoingBubbleColor}
+                disabled={isSaving}
+                onChange={color => selectBubbleColor("outgoing", color)}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Sticky Live Preview & Action Bar */}
+        <div className="lg:col-span-5 sticky top-4 space-y-4">
+          <div
+            className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs"
+            data-testid="conversation-preview-wide"
+          >
+            <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-semibold text-slate-800">
+                  Prévia em Tempo Real
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-500">
+                {visiblePreference.bubbleStyle ?? "classic_tail"}
+              </span>
+            </div>
+
+            <div className="p-3">
+              <ConversationAppearancePreview preference={visiblePreference} />
+            </div>
+
+            <div className="border-t border-slate-100 bg-slate-50/60 p-3.5 flex items-center justify-between">
+              <div className="text-xs text-slate-500">
+                {hasUnsavedChanges ? (
+                  <span className="font-medium text-amber-700">
+                    Modificações não salvas
+                  </span>
+                ) : (
+                  <span>Aparência salva e ativa</span>
                 )}
               </div>
-            )}
+              <Button
+                type="button"
+                size="sm"
+                className="bg-blue-600 font-semibold shadow-xs hover:bg-blue-700"
+                disabled={!hasUnsavedChanges || !canPersist || isSaving}
+                onClick={() => void save()}
+              >
+                {isSaving ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                ) : (
+                  <Save className="mr-1.5 size-3.5" />
+                )}
+                {isSaving ? "Salvando…" : "Salvar"}
+              </Button>
+            </div>
           </div>
-        </section>
-        <section
-          className="border-t border-slate-100 px-5 py-5 sm:px-6"
-          aria-labelledby="message-bubbles-title"
-        >
-          <h3
-            id="message-bubbles-title"
-            className="text-sm font-semibold text-slate-950"
-          >
-            Balões de mensagem
-          </h3>
-          <p className="mt-1 text-sm text-slate-500">
-            Personalize mensagens recebidas e enviadas sem mudar o conteúdo da
-            conversa.
-          </p>
-          <div className="mt-5 grid gap-6 lg:grid-cols-2">
-            <BubbleColorPalette
-              direction="incoming"
-              label="Recebidas"
-              value={visiblePreference.incomingBubbleColor}
-              disabled={isSaving}
-              onChange={color => selectBubbleColor("incoming", color)}
-            />
-            <BubbleColorPalette
-              direction="outgoing"
-              label="Enviadas"
-              value={visiblePreference.outgoingBubbleColor}
-              disabled={isSaving}
-              onChange={color => selectBubbleColor("outgoing", color)}
-            />
-          </div>
-        </section>
-        <div
-          className="border-t border-slate-100 p-4 sm:p-6"
-          data-testid="conversation-preview-wide"
-        >
-          <ConversationAppearancePreview preference={visiblePreference} />
         </div>
       </div>
 
@@ -750,37 +815,6 @@ export function UserPersonalizationTab() {
         onChange={onFileChange}
         aria-label="Enviar imagem de fundo"
       />
-      <footer className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-5">
-        <div className="min-h-5 text-sm" aria-live="polite">
-          {hasUnsavedChanges ? (
-            <span className="inline-flex items-center gap-2 font-medium text-amber-800">
-              <span
-                className="size-2 rounded-full bg-amber-500"
-                aria-hidden="true"
-              />
-              Alterações não salvas
-            </span>
-          ) : (
-            <span className="text-slate-500">
-              As alterações salvas aparecem em Conversas e Novo Atendimento.
-            </span>
-          )}
-        </div>
-        <Button
-          type="button"
-          size="lg"
-          className="min-w-44 bg-blue-600 px-6 font-semibold shadow-sm transition hover:bg-blue-700 focus-visible:ring-blue-600"
-          disabled={!hasUnsavedChanges || !canPersist || isSaving}
-          onClick={() => void save()}
-        >
-          {isSaving ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Save className="size-4" />
-          )}
-          {isSaving ? "Salvando…" : "Salvar alterações"}
-        </Button>
-      </footer>
     </div>
   );
 }

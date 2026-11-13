@@ -296,9 +296,33 @@ export class ErpRepository {
   async summary(clientId: string) {
     const [metrics] = await this.database().execute<RowDataPacket[]>("SELECT SUM(p.active=1) activeProducts,SUM(p.active=0) inactiveProducts,SUM(COALESCE(b.quantity,0)=0) emptyProducts,SUM(COALESCE(b.quantity,0)>0 AND COALESCE(b.quantity,0)<=p.minimum_stock) lowProducts,COALESCE(SUM(COALESCE(b.quantity,0)),0) totalQuantity,COALESCE(SUM(ROUND(COALESCE(b.quantity,0)*p.cost_price_cents)),0) costValueCents,COALESCE(SUM(ROUND(COALESCE(b.quantity,0)*p.sale_price_cents)),0) saleValueCents FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id WHERE p.client_id=? AND p.active <> -1", [clientId]);
     const [variantMetrics] = await this.database().execute<RowDataPacket[]>("SELECT COUNT(*) totalVariants, COALESCE(SUM(v.active = 1), 0) activeVariants, COALESCE(SUM(v.active = 0), 0) inactiveVariants FROM erp_product_variants v INNER JOIN erp_products p ON p.client_id=v.client_id AND p.id=v.product_id WHERE v.client_id = ? AND p.active <> -1", [clientId]);
-    const critical = await this.listProducts(clientId, { search: "", active: true, stock: "low", sort: "stock", direction: "asc", page: 1, pageSize: 5 });
-    const recent = await this.listMovements(clientId, { search: "", page: 1, pageSize: 5 });
-    return { metrics: { ...(metrics[0] ?? {}), ...(variantMetrics[0] ?? {}) }, critical: critical.items, recent: recent.items };
+    let monthOrdersCount = 0;
+    let monthRevenueCents = 0;
+    try {
+      const [sales] = await this.database().execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(total_cents), 0) AS totalCents
+         FROM erp_sale_orders
+         WHERE client_id = ? AND commercial_status IN ('approved', 'converted', 'active', 'completed')
+           AND commercial_date >= DATE_FORMAT(CURRENT_DATE, '%Y-%m-01')`,
+        [clientId]
+      );
+      monthOrdersCount = Number(sales[0]?.count ?? 0);
+      monthRevenueCents = Number(sales[0]?.totalCents ?? 0);
+    } catch {
+      // Se a tabela erp_sale_orders ainda não tiver registros do mês
+    }
+    const critical = await this.listProducts(clientId, { search: "", active: true, stock: "low", sort: "stock", direction: "asc", page: 1, pageSize: 6 });
+    const recent = await this.listMovements(clientId, { search: "", page: 1, pageSize: 6 });
+    return {
+      metrics: {
+        ...(metrics[0] ?? {}),
+        ...(variantMetrics[0] ?? {}),
+        monthOrdersCount,
+        monthRevenueCents,
+      },
+      critical: critical.items,
+      recent: recent.items,
+    };
   }
 
   getPool(): Pool { return this.database(); }

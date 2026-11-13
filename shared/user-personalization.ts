@@ -113,7 +113,93 @@ export const CONVERSATION_BACKGROUND_PRESETS: readonly ConversationBackgroundPre
           "radial-gradient(circle at 20% 18%, rgba(14,165,233,0.10) 0 4px, transparent 4.5px), radial-gradient(circle at 78% 74%, rgba(99,102,241,0.09) 0 5px, transparent 5.5px), linear-gradient(135deg, transparent 48%, rgba(148,163,184,0.08) 50%, transparent 52%)",
       },
     },
+    {
+      id: "midnight-aurora",
+      name: "Midnight Aurora",
+      description: "Degradê escuro com reflexo aurora",
+      kind: "pattern",
+      style: {
+        backgroundColor: "#090d16",
+        backgroundImage:
+          "radial-gradient(ellipse at 20% 0%, rgba(120, 119, 198, 0.28), transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(56, 189, 248, 0.22), transparent 50%), linear-gradient(180deg, #090d16 0%, #030712 100%)",
+      },
+    },
+    {
+      id: "obsidian-pro",
+      name: "Obsidian Pro",
+      description: "Grade executiva minimalista escura",
+      kind: "pattern",
+      style: {
+        backgroundColor: "#0b0f19",
+        backgroundImage:
+          "radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.08) 1px, transparent 0)",
+      },
+    },
+    {
+      id: "oceanic-glass",
+      name: "Oceanic Glass",
+      description: "Tons oceânicos profundos translúcidos",
+      kind: "pattern",
+      style: {
+        backgroundColor: "#081b29",
+        backgroundImage:
+          "radial-gradient(circle at 50% 20%, rgba(56, 189, 248, 0.22), transparent 45%), linear-gradient(135deg, #081b29 0%, #0f3047 50%, #0c2333 100%)",
+      },
+    },
+    {
+      id: "soft-daylight",
+      name: "Soft Daylight",
+      description: "Claro, moderno e acolhedor",
+      kind: "pattern",
+      style: {
+        backgroundColor: "#f8fafc",
+        backgroundImage:
+          "radial-gradient(circle at 10% 10%, rgba(219, 234, 254, 0.6), transparent 30%), radial-gradient(circle at 90% 90%, rgba(243, 232, 255, 0.5), transparent 40%), linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)",
+      },
+    },
+    {
+      id: "emerald-dark",
+      name: "Emerald Dark",
+      description: "Verde esmeralda sofisticado",
+      kind: "pattern",
+      style: {
+        backgroundColor: "#022c22",
+        backgroundImage:
+          "radial-gradient(circle at 80% 20%, rgba(16, 185, 129, 0.22), transparent 45%), linear-gradient(135deg, #022c22 0%, #064e3b 60%, #022c22 100%)",
+      },
+    },
+    {
+      id: "whatsapp-classic",
+      name: "WhatsApp Clássico",
+      description: "O tom tradicional e familiar do WhatsApp",
+      kind: "pattern",
+      style: {
+        backgroundColor: "#efeae2",
+        backgroundImage:
+          "radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.05) 1px, transparent 0), linear-gradient(135deg, #efeae2 0%, #e6dfd5 100%)",
+      },
+    },
   ] as const;
+
+export const CONVERSATION_BUBBLE_STYLES = [
+  "classic_tail",
+  "pill_soft",
+  "glassmorphism",
+  "neon_border",
+  "minimal_flat",
+] as const;
+
+export type ConversationBubbleStyle =
+  (typeof CONVERSATION_BUBBLE_STYLES)[number];
+
+export function isConversationBubbleStyle(
+  value: unknown
+): value is ConversationBubbleStyle {
+  return (
+    typeof value === "string" &&
+    (CONVERSATION_BUBBLE_STYLES as readonly string[]).includes(value)
+  );
+}
 
 export type ConversationBackgroundPreference = {
   backgroundType: ConversationBackgroundType;
@@ -124,6 +210,7 @@ export type ConversationBackgroundPreference = {
   incomingBubbleColor: string | null;
   /** Null keeps the established MegaDesk visual default for existing users. */
   outgoingBubbleColor: string | null;
+  bubbleStyle?: ConversationBubbleStyle;
 };
 
 export type ConversationBubbleDirection = "incoming" | "outgoing";
@@ -189,6 +276,7 @@ export const DEFAULT_CONVERSATION_BACKGROUND: ConversationBackgroundPreference =
     hasCustomImage: false,
     incomingBubbleColor: null,
     outgoingBubbleColor: null,
+    bubbleStyle: "classic_tail",
   };
 
 export function getConversationBackgroundPreset(
@@ -221,6 +309,11 @@ export function normalizeConversationBackgroundPreference(
       value?.outgoingBubbleColor
     ),
   };
+  const bubbleStyle: ConversationBubbleStyle =
+    value?.bubbleStyle && isConversationBubbleStyle(value.bubbleStyle)
+      ? value.bubbleStyle
+      : "classic_tail";
+
   if (
     value?.backgroundType === "preset" &&
     isConversationBackgroundPresetId(value.presetId)
@@ -230,6 +323,7 @@ export function normalizeConversationBackgroundPreference(
       presetId: value.presetId,
       customImageUrl: null,
       hasCustomImage: Boolean(value.hasCustomImage),
+      bubbleStyle,
       ...bubbleColors,
     };
   }
@@ -243,12 +337,14 @@ export function normalizeConversationBackgroundPreference(
       presetId: null,
       customImageUrl: value.customImageUrl,
       hasCustomImage: true,
+      bubbleStyle,
       ...bubbleColors,
     };
   }
   return {
     ...DEFAULT_CONVERSATION_BACKGROUND,
     hasCustomImage: Boolean(value?.hasCustomImage),
+    bubbleStyle,
     ...bubbleColors,
   };
 }

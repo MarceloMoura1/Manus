@@ -555,7 +555,7 @@ export class ErpService {
   }
   async summary(identity: Identity) {
     const result = await this.repository.summary(identity.clientId);
-    const metrics = result.metrics;
+    const metrics = result.metrics as any;
     return {
       metrics: {
         activeProducts: Number(metrics?.activeProducts ?? 0),
@@ -568,6 +568,8 @@ export class ErpService {
         totalVariants: Number(metrics?.totalVariants ?? 0),
         activeVariants: Number(metrics?.activeVariants ?? 0),
         inactiveVariants: Number(metrics?.inactiveVariants ?? 0),
+        monthOrdersCount: Number(metrics?.monthOrdersCount ?? 0),
+        monthRevenueCents: Number(metrics?.monthRevenueCents ?? 0),
       },
       critical: result.critical.map(publicProduct),
       recent: result.recent.map(publicMovement),

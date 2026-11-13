@@ -6,12 +6,19 @@ import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Activity,
   AlertCircle,
+  ArrowDownRight,
+  ArrowUpRight,
   BarChart3,
   Boxes,
+  CheckCircle2,
+  CreditCard,
   DollarSign,
   Eye,
+  FileText,
   Image as ImageIcon,
+  Layers,
   LayoutDashboard,
   LayoutGrid,
   LayoutList,
@@ -27,6 +34,7 @@ import {
   ShoppingCart,
   Trash2,
   TrendingDown,
+  TrendingUp,
   Truck,
   Upload,
   Users,
@@ -180,17 +188,305 @@ function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) 
   if (query.error) return <StateMessage title="Não foi possível carregar o resumo." retry={() => void query.refetch()}/>;
   if (!query.data) return null;
   const data = query.data;
-  const cards = [
-    ["Produtos ativos", data.metrics.activeProducts, Boxes], ["Produtos inativos", data.metrics.inactiveProducts, Boxes],
-    ["Estoque baixo", data.metrics.lowProducts, TrendingDown], ["Sem estoque", data.metrics.emptyProducts, AlertCircle],
-    ["Valor pelo custo", money.format(data.metrics.costValueCents / 100), WalletCards], ["Potencial de venda", money.format(data.metrics.saleValueCents / 100), WalletCards],
-  ] as const;
-  return <div className="space-y-6" data-testid="erp-summary-page">
-    <header><h1 className="text-2xl font-bold text-slate-900">Resumo do ERP</h1></header>
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">{cards.map(([label,value,Icon]) => <article key={label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><Icon className="mb-3 h-5 w-5 text-blue-600"/><p className="text-sm text-slate-500">{label}</p><p className="mt-1 break-words text-2xl font-bold text-slate-900">{value}</p></article>)}</div>
-    {data.metrics.activeProducts + data.metrics.inactiveProducts === 0 ? <StateMessage title="Nenhum produto cadastrado. Cadastre o primeiro produto para iniciar o estoque."/> : <div className="grid gap-6 lg:grid-cols-2"><section className="rounded-2xl border bg-white p-5"><h2 className="font-bold">Estoque crítico</h2>{data.critical.length ? data.critical.map(product => <p key={product.publicId} className="mt-3 flex flex-wrap justify-between gap-2 text-sm"><span>{product.name}</span><span>{formatQuantity(product.quantity)} / mín. {formatQuantity(product.minimumStock)}</span></p>) : <p className="mt-3 text-sm text-slate-500">Nenhum alerta.</p>}</section><section className="rounded-2xl border bg-white p-5"><h2 className="font-bold">Movimentações recentes</h2>{data.recent.length ? data.recent.map(item => <p key={item.publicId} className="mt-3 text-sm">{item.productName}: {item.direction === "in" ? "+" : "-"}{formatQuantity(item.quantity)}</p>) : <p className="mt-3 text-sm text-slate-500">Nenhuma movimentação.</p>}</section></div>}
-    {data.canWrite && <div className="flex flex-wrap gap-3"><Button onClick={() => onNavigate("products")}><PackagePlus className="mr-2 h-4 w-4"/>Cadastrar produto</Button><Button variant="outline" onClick={() => onNavigate("stock")}>Movimentar estoque</Button></div>}
-  </div>;
+  const metrics = data.metrics as any;
+
+  const costValue = Number(metrics.costValueCents || 0);
+  const saleValue = Number(metrics.saleValueCents || 0);
+  const estimatedMargin = saleValue > 0 ? Math.round(((saleValue - costValue) / saleValue) * 100) : 0;
+  const totalCatalog = Number(metrics.activeProducts || 0) + Number(metrics.inactiveProducts || 0);
+  const monthOrders = Number(metrics.monthOrdersCount || 0);
+  const monthRevenue = Number(metrics.monthRevenueCents || 0);
+
+  return (
+    <div className="space-y-6" data-testid="erp-summary-page">
+      {/* ─── Topo: Barra de Ações Rápidas Executivas ─── */}
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900/60 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="flex size-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">Cockpit Operacional</span>
+          </div>
+          <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Resumo do ERP</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Gestão integrada de catálogo, estoque, faturamento e movimentações.</p>
+        </div>
+
+        {data.canWrite && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => onNavigate("products")}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-xs"
+            >
+              <PackagePlus className="mr-1.5 size-4" />
+              + Novo Produto
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onNavigate("services")}
+              className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+            >
+              <Wrench className="mr-1.5 size-4 text-purple-600" />
+              + Novo Serviço
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onNavigate("stock")}
+              className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+            >
+              <Boxes className="mr-1.5 size-4 text-emerald-600" />
+              Movimentar Estoque
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onNavigate("sales")}
+              className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+            >
+              <ShoppingCart className="mr-1.5 size-4 text-amber-600" />
+              Nova Venda/Orçamento
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onNavigate("finance")}
+              className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+            >
+              <CreditCard className="mr-1.5 size-4 text-cyan-600" />
+              Lançamento Financeiro
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* ─── Grid de KPIs Principais ─── */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Card 1: Produtos Ativos / Inativos */}
+        <article className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-start justify-between">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+              <Boxes className="size-5" />
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              Total: {totalCatalog}
+            </span>
+          </div>
+          <p className="mt-3 text-xs font-medium text-slate-500 dark:text-slate-400">Produtos ativos</p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {metrics.activeProducts}
+            </span>
+            <span className="text-xs text-slate-400">
+              ({metrics.inactiveProducts} inativos)
+            </span>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span className="font-semibold text-slate-700 dark:text-slate-300">Produtos inativos:</span> {metrics.inactiveProducts}
+          </div>
+        </article>
+
+        {/* Card 2: Alertas de Estoque (Baixo + Zerado) */}
+        <article className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-start justify-between">
+            <span className={`flex size-10 items-center justify-center rounded-xl ${
+              metrics.emptyProducts > 0 || metrics.lowProducts > 0
+                ? "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400"
+            }`}>
+              <AlertCircle className="size-5" />
+            </span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+              metrics.emptyProducts > 0 || metrics.lowProducts > 0
+                ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300"
+                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+            }`}>
+              {metrics.emptyProducts > 0 || metrics.lowProducts > 0 ? "Atenção necessária" : "Estoque OK"}
+            </span>
+          </div>
+          <p className="mt-3 text-xs font-medium text-slate-500 dark:text-slate-400">Estoque baixo</p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-2xl font-bold tracking-tight text-rose-600 dark:text-rose-400">
+              {metrics.lowProducts}
+            </span>
+            <span className="text-xs text-slate-500">
+              abaixo do mín.
+            </span>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span className="font-semibold text-slate-700 dark:text-slate-300">Sem estoque:</span> {metrics.emptyProducts} produto(s) zerado(s)
+          </div>
+        </article>
+
+        {/* Card 3: Valor em Estoque & Margem */}
+        <article className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-start justify-between">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
+              <WalletCards className="size-5" />
+            </span>
+            <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+              <TrendingUp className="size-3" />
+              {estimatedMargin}% margem
+            </span>
+          </div>
+          <p className="mt-3 text-xs font-medium text-slate-500 dark:text-slate-400">Potencial de venda</p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {money.format(saleValue / 100)}
+            </span>
+          </div>
+          <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
+            <span><strong>Valor pelo custo:</strong> {money.format(costValue / 100)}</span>
+          </div>
+        </article>
+
+        {/* Card 4: Pedidos & Faturamento do Mês */}
+        <article className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-start justify-between">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400">
+              <ShoppingCart className="size-5" />
+            </span>
+            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+              Mês Atual
+            </span>
+          </div>
+          <p className="mt-3 text-xs font-medium text-slate-500 dark:text-slate-400">Faturamento em Vendas</p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {money.format(monthRevenue / 100)}
+            </span>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span className="font-semibold text-slate-700 dark:text-slate-300">Pedidos concluídos:</span> {monthOrders} no período
+          </div>
+        </article>
+      </div>
+
+      {/* ─── Visão Analítica em 2 Colunas ─── */}
+      {totalCatalog === 0 ? (
+        <StateMessage title="Nenhum produto cadastrado. Cadastre o primeiro produto para iniciar o estoque." />
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Painel: Estoque Crítico com Ação Rápida */}
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="size-4 text-amber-500" />
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">Estoque crítico</h2>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavigate("stock")}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+              >
+                Ver estoque completo →
+              </Button>
+            </div>
+
+            {data.critical.length ? (
+              <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+                {data.critical.map((product) => {
+                  const qty = Number(product.quantity || 0);
+                  const min = Number(product.minimumStock || 0);
+                  const isZero = qty <= 0;
+                  return (
+                    <div key={product.publicId} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-1 last:pb-1">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{product.name}</p>
+                        <p className="text-xs text-slate-500">
+                          Atual: <strong className={isZero ? "text-rose-600" : "text-amber-600"}>{formatQuantity(product.quantity)}</strong> / mín. {formatQuantity(product.minimumStock)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          isZero ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                        }`}>
+                          {isZero ? "Zerado" : "Abaixo do mín."}
+                        </span>
+                        {data.canWrite && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onNavigate("stock")}
+                            className="h-7 border-slate-200 px-2.5 text-xs font-medium hover:bg-blue-50 hover:text-blue-700 dark:border-slate-700"
+                          >
+                            + Repor
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <CheckCircle2 className="size-8 text-emerald-500" />
+                <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">Nenhum alerta de estoque crítico.</p>
+                <p className="text-xs text-slate-400">Todos os produtos estão com níveis acima do estoque mínimo configurado.</p>
+              </div>
+            )}
+          </section>
+
+          {/* Painel: Movimentações Recentes com Badges Visuais */}
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Activity className="size-4 text-blue-500" />
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">Movimentações recentes</h2>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavigate("stock")}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+              >
+                Histórico completo →
+              </Button>
+            </div>
+
+            {data.recent.length ? (
+              <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+                {data.recent.map((item) => {
+                  const isIn = item.direction === "in";
+                  return (
+                    <div key={item.publicId} className="flex items-center justify-between gap-3 py-3 first:pt-1 last:pb-1">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${
+                          isIn ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400" : "bg-rose-50 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+                        }`}>
+                          {isIn ? <ArrowUpRight className="size-4" /> : <ArrowDownRight className="size-4" />}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.productName}</p>
+                          <p className="text-xs text-slate-400">
+                            {isIn ? "Entrada no estoque" : "Saída do estoque"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className={`inline-block font-mono text-sm font-bold ${
+                          isIn ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                        }`}>
+                          {isIn ? "+" : "-"}{formatQuantity(item.quantity)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <Boxes className="size-8 text-slate-400" />
+                <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">Nenhuma movimentação registrada.</p>
+                <p className="text-xs text-slate-400">As entradas e saídas de produtos no estoque serão listadas aqui em tempo real.</p>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ProductThumbnail({

@@ -5,6 +5,7 @@ import {
   normalizeConversationBackgroundPreference,
   type ConversationBackgroundPreference,
   type ConversationBubbleDirection,
+  type ConversationBubbleStyle,
 } from "@shared/user-personalization";
 
 type ConversationMessageBubbleProps = {
@@ -19,8 +20,29 @@ export const conversationMessageAreaClasses =
   "min-h-0 space-y-3 overflow-y-auto p-4";
 
 export function conversationMessageBubbleClasses(
-  direction: ConversationBubbleDirection
+  direction: ConversationBubbleDirection,
+  bubbleStyle?: ConversationBubbleStyle
 ) {
+  if (bubbleStyle === "pill_soft") {
+    return direction === "outgoing"
+      ? "max-w-[85%] rounded-3xl px-4 py-2.5 text-sm shadow-sm bg-blue-600 text-white"
+      : "max-w-[85%] rounded-3xl px-4 py-2.5 text-sm shadow-sm border border-slate-200/80 bg-white/95 text-slate-700";
+  }
+  if (bubbleStyle === "glassmorphism") {
+    return direction === "outgoing"
+      ? "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm shadow-lg bg-blue-600/85 backdrop-blur-md text-white border border-white/20"
+      : "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm shadow-lg bg-white/80 backdrop-blur-md text-slate-800 border border-white/35";
+  }
+  if (bubbleStyle === "neon_border") {
+    return direction === "outgoing"
+      ? "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm bg-slate-950 text-blue-300 border-2 border-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.35)]"
+      : "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm bg-slate-900 text-slate-100 border-2 border-slate-700 shadow-sm";
+  }
+  if (bubbleStyle === "minimal_flat") {
+    return direction === "outgoing"
+      ? "max-w-[85%] rounded-lg px-3 py-2 text-sm shadow-none bg-blue-600 text-white border-0"
+      : "max-w-[85%] rounded-lg px-3 py-2 text-sm shadow-none bg-slate-100 text-slate-800 border border-slate-200";
+  }
   return direction === "outgoing"
     ? "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm bg-blue-600 text-white"
     : "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm border border-slate-200/80 bg-white/95 text-slate-700";
@@ -98,7 +120,11 @@ export function ConversationMessageBubble({
       <div
         data-testid={`conversation-message-${direction}`}
         data-bubble-color={style?.backgroundColor ?? "default"}
-        className={cn(conversationMessageBubbleClasses(direction), className)}
+        data-bubble-style={preference?.bubbleStyle ?? "classic_tail"}
+        className={cn(
+          conversationMessageBubbleClasses(direction, preference?.bubbleStyle),
+          className
+        )}
         style={style}
       >
         {children}

@@ -128,21 +128,45 @@ export function FiscalPage() {
         ))}
       </nav>
       {tab === "summary" && (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            ["Documentos", summary.data?.documents],
-            ["Rascunhos", summary.data?.drafts],
-            ["Preparados para integração", summary.data?.ready],
-            ["Produtos incompletos", summary.data?.incompleteProducts],
-          ].map(([label, value]) => (
-            <article
-              key={String(label)}
-              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-            >
-              <p className="text-sm text-slate-500">{label}</p>
-              <strong className="text-2xl">{Number(value ?? 0)}</strong>
-            </article>
-          ))}
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["Documentos", summary.data?.documents, "border-blue-200/60 bg-blue-50/20 text-blue-700"],
+              ["Rascunhos", summary.data?.drafts, "border-amber-200/60 bg-amber-50/20 text-amber-700"],
+              ["Preparados para integração", summary.data?.ready, "border-emerald-200/60 bg-emerald-50/20 text-emerald-700"],
+              ["Produtos incompletos", summary.data?.incompleteProducts, "border-rose-200/60 bg-rose-50/20 text-rose-700"],
+            ].map(([label, value, colorClass]) => (
+              <article
+                key={String(label)}
+                className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs"
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    {label}
+                  </p>
+                  <span
+                    className={`size-2 rounded-full ${
+                      typeof colorClass === "string"
+                        ? colorClass.split(" ")[2]?.replace("text", "bg")
+                        : "bg-blue-600"
+                    }`}
+                  />
+                </div>
+                <strong className="mt-2 block text-2xl font-bold text-slate-900">
+                  {Number(value ?? 0)}
+                </strong>
+              </article>
+            ))}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+              Visão Geral de Conformidade Fiscal
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              O módulo fiscal do MegaDesk prepara a base documental e cadastral dos produtos (NCM, CFOP, Alíquotas) para emissão de NF-e, NFS-e e NFC-e.
+            </p>
+          </div>
         </div>
       )}
       {tab === "settings" && (

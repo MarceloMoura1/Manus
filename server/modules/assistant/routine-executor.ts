@@ -8,7 +8,8 @@ import {
 import { AssistantThreadsRepository, assistantThreadsRepository } from "./repository";
 import { AssistantRoutinesRepository, assistantRoutinesRepository } from "./routines-repository";
 import { recordAiUsageLog } from "../ai-usage/ai-usage.service";
-import type { MegadeskAiRoutine } from "../../../drizzle/schema";
+import { getDb } from "../../db";
+import { megadeskNotifications, type MegadeskAiRoutine } from "../../../drizzle/schema";
 
 export interface ExecuteRoutineOptions {
   aiGenerator?: typeof generateText;
@@ -128,6 +129,23 @@ Não gere mensagens de confirmação de aprovação nem faça perguntas ao usuá
       await routinesRepo.updateLastRunAt(routine.id);
     } catch (err: any) {
       console.warn("[RoutineExecutor] Não foi possível salvar log no banco:", err?.message);
+    }
+
+    // 3. Notificação no sistema MegaDesk
+    try {
+      const db = getDb();
+      await (db.insert(megadeskNotifications) as any).values({
+        notificationId: `notif_routine_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        clientId: routine.tenantId,
+        userId: routine.userId,
+        title: `Rotina IA Concluída: ${routine.title}`,
+        message: outputSummary.slice(0, 300),
+        type: "success",
+        isRead: false,
+        actionUrl: "/assistente-ia",
+      });
+    } catch (notifErr: any) {
+      console.warn("[RoutineExecutor] Não foi possível criar notificação:", notifErr?.message);
     }
 
     return {

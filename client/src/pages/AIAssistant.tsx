@@ -19,6 +19,7 @@ import {
   Sun,
   Moon,
   CheckCircle2,
+  Copy,
   Play,
   Calendar,
   AlertCircle,
@@ -507,6 +508,39 @@ export function AIAssistant() {
       promptInstruction: "Consulte o faturamento e vendas registradas no dia, os chamados fechados e os que continuam em andamento ou pendentes. Monte um relatório executivo com o título '📊 FECHAMENTO E PENDÊNCIAS DO DIA' contendo balanço geral, conquistas do turno e pendências prioritárias para amanhã.",
       actionTarget: "chat_thread" as const,
     },
+    {
+      triggerType: "custom" as const,
+      title: "🎫 Auditoria de Chamados e SLA Crítico",
+      description: "Varre os chamados pendentes com SLA atrasado ou em risco de estouro e organiza ações para o time.",
+      scheduleTime: "09:00",
+      scheduleDays: ["seg", "ter", "qua", "qui", "sex"],
+      promptInstruction: "Consulte todos os chamados em aberto {{chamados_abertos}} e filtre os com SLA atrasado {{tickets_atrasados}}. Crie um relatório com o título '🎫 AUDITORIA DE CHAMADOS E SLA' indicando número, cliente, tempo de espera e plano de ação urgente.",
+      actionTarget: "chat_thread" as const,
+    },
+    {
+      triggerType: "custom" as const,
+      title: "🎯 Resumo Comercial & Vendas",
+      description: "Acompanha o faturamento do dia, taxa de conversão e orçamentos em aberto na esteira comercial.",
+      scheduleTime: "17:30",
+      scheduleDays: ["seg", "ter", "qua", "qui", "sex"],
+      promptInstruction: "Analise o faturamento do dia {{faturamento_dia}}, os orçamentos abertos {{orcamentos_abertos}} e os leads pendentes {{leads_pendentes}}. Gere um panorama executivo com o título '🎯 BALANÇO COMERCIAL' destacando oportunidades quentes e faturamento acumulado.",
+      actionTarget: "chat_thread" as const,
+    },
+  ];
+
+  const ROUTINE_VARIABLES = [
+    { tag: "{{chamados_abertos}}", label: "Chamados Abertos" },
+    { tag: "{{leads_pendentes}}", label: "Leads Pendentes" },
+    { tag: "{{orcamentos_abertos}}", label: "Orçamentos Abertos" },
+    { tag: "{{faturamento_dia}}", label: "Faturamento do Dia" },
+    { tag: "{{tickets_atrasados}}", label: "SLA Crítico" },
+  ];
+
+  const QUICK_TEMPLATES = [
+    { label: "📋 Briefing Matinal", text: "Consulte os chamados em aberto {{chamados_abertos}}, leads pendentes {{leads_pendentes}} e orçamentos {{orcamentos_abertos}}. Monte a lista com as prioridades imediatas do dia com o título '📋 O QUE TEMOS PARA HOJE'." },
+    { label: "⏱️ Radar de Follow-up", text: "Verifique negociações e orçamentos abertos {{orcamentos_abertos}} sem resposta há mais de 48h. Elabore lista com contatos prioritários para abordagem imediata." },
+    { label: "🎫 Auditoria de SLA", text: "Analise todos os chamados com SLA atrasado {{tickets_atrasados}} ou críticos {{chamados_abertos}} e apresente plano de resolução urgente para a equipe." },
+    { label: "📊 Fechamento do Dia", text: "Consulte o faturamento do dia {{faturamento_dia}} e propostas convertidas. Gere o balanço executivo do turno e pendências para amanhã." },
   ];
 
   const WEEKDAYS = [
@@ -546,6 +580,21 @@ export function AIAssistant() {
       isActive: routine.isActive,
     });
     setEditingRoutine(routine);
+    setIsRoutineModalOpen(true);
+  };
+
+  const handleDuplicateRoutine = (routine: any) => {
+    setRoutineForm({
+      id: undefined,
+      title: `${routine.title} (Cópia)`,
+      triggerType: routine.triggerType,
+      promptInstruction: routine.promptInstruction,
+      scheduleTime: routine.scheduleTime,
+      scheduleDays: Array.isArray(routine.scheduleDays) ? [...routine.scheduleDays] : ["seg", "ter", "qua", "qui", "sex"],
+      actionTarget: routine.actionTarget || "chat_thread",
+      isActive: true,
+    });
+    setEditingRoutine(null);
     setIsRoutineModalOpen(true);
   };
 
@@ -2146,6 +2195,16 @@ export function AIAssistant() {
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
 
+                          {/* Duplicar */}
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateRoutine(routine)}
+                            className="p-1.5 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer"
+                            title="Duplicar rotina"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+
                           {/* Excluir */}
                           <button
                             type="button"
@@ -2329,159 +2388,233 @@ export function AIAssistant() {
           </div>
         )}
 
-        {/* MODAL: CRIAR / EDITAR ROTINA */}
+        {/* MODAL: CRIAR / EDITAR ROTINA (EDITOR AMPLO EM 2 COLUNAS SEM SCROLL INTERNO) */}
         {isRoutineModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-            <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/50">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-blue-400" />
-                  <h3 className="text-base font-semibold text-slate-100">
-                    {routineForm.id ? "Editar Rotina Autônoma" : "Criar Nova Rotina Autônoma"}
-                  </h3>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+            <div className="relative w-full max-w-5xl flex flex-col rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden max-h-[92vh]">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/70">
+                <div className="flex items-center gap-3">
+                  <span className="flex size-9 items-center justify-center rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30">
+                    <Clock className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-100">
+                      {routineForm.id ? "Editar Rotina Autônoma" : "Nova Rotina Autônoma"}
+                    </h3>
+                    <p className="text-xs text-slate-400">Configure automações de IA para execução programada com canal de saída executivo.</p>
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setIsRoutineModalOpen(false)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleSaveRoutineForm} className="flex-1 overflow-y-auto p-6 space-y-4">
-                {/* Nome da rotina */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Nome da Rotina</label>
-                  <input
-                    type="text"
-                    required
-                    value={routineForm.title}
-                    onChange={(e) => setRoutineForm((prev) => ({ ...prev, title: e.target.value }))}
-                    placeholder="Ex: 📋 Briefing Matinal: O que tenho que fazer hoje?"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
+              {/* Form Body em 2 Colunas */}
+              <form onSubmit={handleSaveRoutineForm} className="flex-1 overflow-y-auto p-6 flex flex-col justify-between">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {/* Coluna Esquerda: Configuração e Agendamento (5 cols) */}
+                  <div className="lg:col-span-5 space-y-4 border-b lg:border-b-0 lg:border-r border-slate-800 pb-5 lg:pb-0 lg:pr-6">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Sliders className="size-3.5 text-blue-400" /> Parâmetros de Agendamento
+                    </h4>
 
-                {/* Tipo de rotina */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Tipo de Rotina</label>
-                  <select
-                    value={routineForm.triggerType}
-                    onChange={(e) => {
-                      const newType = e.target.value as any;
-                      const preset = ROUTINE_PRESETS.find((p) => p.triggerType === newType);
-                      setRoutineForm((prev) => ({
-                        ...prev,
-                        triggerType: newType,
-                        title: preset?.title || prev.title,
-                        promptInstruction: preset?.promptInstruction || prev.promptInstruction,
-                        scheduleTime: preset?.scheduleTime || prev.scheduleTime,
-                      }));
-                    }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="morning_briefing">📋 Briefing Matinal (Prioridades do Dia)</option>
-                    <option value="stale_leads">⏱️ Radar de Clientes Parados (Follow-up 48h)</option>
-                    <option value="eod_summary">📊 Fechamento e Pendências do Dia</option>
-                    <option value="custom">⚙️ Tarefa Personalizada (Prompt Livre)</option>
-                  </select>
-                </div>
+                    {/* Nome da rotina */}
+                    <div>
+                      <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Nome da Rotina</label>
+                      <input
+                        type="text"
+                        required
+                        value={routineForm.title}
+                        onChange={(e) => setRoutineForm((prev) => ({ ...prev, title: e.target.value }))}
+                        placeholder="Ex: 📋 Briefing Matinal: O que tenho que fazer hoje?"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500 transition"
+                      />
+                    </div>
 
-                {/* Se Personalizada: Textarea */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-semibold text-slate-300">
-                      Instrução para a Inteligência Artificial
-                    </label>
-                    <span className="text-[11px] text-slate-500">Modelo IA Multimodal</span>
-                  </div>
-                  <textarea
-                    rows={4}
-                    required
-                    value={routineForm.promptInstruction}
-                    onChange={(e) => setRoutineForm((prev) => ({ ...prev, promptInstruction: e.target.value }))}
-                    placeholder="Descreva exatamente o que a IA deve analisar e produzir..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
-                  />
-                </div>
+                    {/* Tipo / Categoria */}
+                    <div>
+                      <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Tipo / Categoria da Rotina</label>
+                      <select
+                        value={routineForm.triggerType}
+                        onChange={(e) => {
+                          const newType = e.target.value as any;
+                          const preset = ROUTINE_PRESETS.find((p) => p.triggerType === newType);
+                          setRoutineForm((prev) => ({
+                            ...prev,
+                            triggerType: newType,
+                            title: preset?.title || prev.title,
+                            promptInstruction: preset?.promptInstruction || prev.promptInstruction,
+                            scheduleTime: preset?.scheduleTime || prev.scheduleTime,
+                          }));
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500 transition"
+                      >
+                        <option value="morning_briefing">📋 Briefing Matinal (Prioridades do Dia)</option>
+                        <option value="stale_leads">⏱️ Cobrança / Follow-up 48h</option>
+                        <option value="chamados_audit">🎫 Auditoria de Chamados e SLA Crítico</option>
+                        <option value="commercial_summary">🎯 Resumo Comercial & Vendas</option>
+                        <option value="eod_summary">📊 Fechamento e Pendências do Dia</option>
+                        <option value="custom">⚙️ Tarefa Personalizada (Prompt Livre)</option>
+                      </select>
+                    </div>
 
-                {/* Horário de execução e canal de saída */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Horário de Execução</label>
-                    <input
-                      type="time"
-                      required
-                      value={routineForm.scheduleTime}
-                      onChange={(e) => setRoutineForm((prev) => ({ ...prev, scheduleTime: e.target.value }))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
+                    {/* Horário & Canal de Saída */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Horário</label>
+                        <input
+                          type="time"
+                          required
+                          value={routineForm.scheduleTime}
+                          onChange={(e) => setRoutineForm((prev) => ({ ...prev, scheduleTime: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Canal de Saída</label>
-                    <select
-                      value={routineForm.actionTarget}
-                      onChange={(e) => setRoutineForm((prev) => ({ ...prev, actionTarget: e.target.value as any }))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="chat_thread">💬 Chat do Copiloto (Operações do Dia)</option>
-                      <option value="internal_notification">🔔 Notificação Interna</option>
-                      <option value="whatsapp">📱 WhatsApp Executivo</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Checkboxes de dias da semana */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 mb-2 block">Dias da Semana</label>
-                  <div className="flex flex-wrap gap-2">
-                    {WEEKDAYS.map((w) => {
-                      const isChecked = routineForm.scheduleDays.includes(w.key);
-                      return (
-                        <button
-                          key={w.key}
-                          type="button"
-                          onClick={() => {
-                            setRoutineForm((prev) => {
-                              const exists = prev.scheduleDays.includes(w.key);
-                              const newDays = exists
-                                ? prev.scheduleDays.filter((d) => d !== w.key)
-                                : [...prev.scheduleDays, w.key];
-                              return {
-                                ...prev,
-                                scheduleDays: newDays.length > 0 ? newDays : [w.key],
-                              };
-                            });
-                          }}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                            isChecked
-                              ? "bg-blue-600 text-white shadow-sm"
-                              : "bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200"
-                          }`}
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Canal de Saída</label>
+                        <select
+                          value={routineForm.actionTarget}
+                          onChange={(e) => setRoutineForm((prev) => ({ ...prev, actionTarget: e.target.value as any }))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
                         >
-                          {w.label}
-                        </button>
-                      );
-                    })}
+                          <option value="chat_thread">💬 Copiloto (Operações)</option>
+                          <option value="internal_notification">🔔 Notificação</option>
+                          <option value="whatsapp">📱 WhatsApp do Gestor</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Dias da Semana */}
+                    <div>
+                      <label className="text-xs font-semibold text-slate-300 mb-2 block">Dias da Semana</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {WEEKDAYS.map((w) => {
+                          const isChecked = routineForm.scheduleDays.includes(w.key);
+                          return (
+                            <button
+                              key={w.key}
+                              type="button"
+                              onClick={() => {
+                                setRoutineForm((prev) => {
+                                  const exists = prev.scheduleDays.includes(w.key);
+                                  const newDays = exists
+                                    ? prev.scheduleDays.filter((d) => d !== w.key)
+                                    : [...prev.scheduleDays, w.key];
+                                  return {
+                                    ...prev,
+                                    scheduleDays: newDays.length > 0 ? newDays : [w.key],
+                                  };
+                                });
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                                isChecked
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              {w.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Toggle de Ativação */}
+                    <div className="flex items-center gap-2 pt-2">
+                      <input
+                        type="checkbox"
+                        id="routine-active-checkbox"
+                        checked={routineForm.isActive}
+                        onChange={(e) => setRoutineForm((prev) => ({ ...prev, isActive: e.target.checked }))}
+                        className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 size-4 cursor-pointer"
+                      />
+                      <label htmlFor="routine-active-checkbox" className="text-xs text-slate-300 cursor-pointer">
+                        Ativar rotina imediatamente após salvar
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Coluna Direita: Prompt / Instrução da IA (7 cols) */}
+                  <div className="lg:col-span-7 space-y-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                          <Sparkles className="size-3.5 text-blue-400" /> Instrução / Prompt para a IA
+                        </label>
+                        <span className="text-[11px] font-medium text-slate-500">Auto-ajuste de altura</span>
+                      </div>
+
+                      {/* Chips de Variáveis Dinâmicas */}
+                      <div className="mb-2">
+                        <span className="text-[11px] text-slate-400 block mb-1">Inserir variáveis dinâmicas (clique para adicionar):</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {ROUTINE_VARIABLES.map((v) => (
+                            <button
+                              key={v.tag}
+                              type="button"
+                              onClick={() => {
+                                setRoutineForm((prev) => ({
+                                  ...prev,
+                                  promptInstruction: prev.promptInstruction ? `${prev.promptInstruction} ${v.tag}` : v.tag,
+                                }));
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md bg-blue-950/70 border border-blue-800/60 px-2 py-0.5 text-[11px] font-mono text-blue-300 hover:bg-blue-900/60 hover:text-blue-200 transition cursor-pointer"
+                              title={`Inserir ${v.tag}`}
+                            >
+                              <Plus className="size-2.5" />
+                              {v.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Templates Rápidos */}
+                      <div className="mb-3">
+                        <span className="text-[11px] text-slate-400 block mb-1">Templates prontos com 1 clique:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {QUICK_TEMPLATES.map((tmpl) => (
+                            <button
+                              key={tmpl.label}
+                              type="button"
+                              onClick={() => {
+                                setRoutineForm((prev) => ({
+                                  ...prev,
+                                  promptInstruction: tmpl.text,
+                                }));
+                              }}
+                              className="rounded-md bg-slate-950 border border-slate-800 px-2 py-0.5 text-[11px] text-slate-300 hover:border-slate-700 hover:text-white transition cursor-pointer"
+                            >
+                              {tmpl.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Textarea sem rolamento interno preso */}
+                      <textarea
+                        required
+                        value={routineForm.promptInstruction}
+                        onChange={(e) => setRoutineForm((prev) => ({ ...prev, promptInstruction: e.target.value }))}
+                        placeholder="Descreva exatamente o que a IA deve consultar e produzir..."
+                        className="w-full min-h-[220px] bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-100 focus:outline-none focus:border-blue-500 leading-relaxed font-sans transition"
+                        style={{ height: "auto" }}
+                      />
+                    </div>
+
+                    <p className="text-[11px] text-slate-500">
+                      A rotina consultará automaticamente os dados do seu tenant (chamados, vendas e contatos) e enviará o relatório no canal escolhido.
+                    </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 pt-2">
-                  <input
-                    type="checkbox"
-                    id="routine-active-checkbox"
-                    checked={routineForm.isActive}
-                    onChange={(e) => setRoutineForm((prev) => ({ ...prev, isActive: e.target.checked }))}
-                    className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500"
-                  />
-                  <label htmlFor="routine-active-checkbox" className="text-xs text-slate-300 cursor-pointer">
-                    Ativar rotina imediatamente após salvar
-                  </label>
-                </div>
-
-                <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-800">
+                {/* Footer com botões */}
+                <div className="flex justify-end gap-3 pt-5 mt-4 border-t border-slate-800">
                   <Button
                     type="button"
                     variant="outline"
@@ -2493,7 +2626,7 @@ export function AIAssistant() {
                   <Button
                     type="submit"
                     disabled={upsertRoutineMutation.isPending}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2 rounded-xl shadow-sm cursor-pointer disabled:opacity-50"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-6 py-2 rounded-xl shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     {upsertRoutineMutation.isPending ? "Salvando..." : "Salvar Rotina"}
                   </Button>
