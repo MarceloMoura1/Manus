@@ -5897,7 +5897,17 @@ function getActiveModuleName(active: RouteId): string {
   return "Home";
 }
 
-function Shell() {
+export interface AuthenticatedShellProps {
+  session: MegaDeskSession;
+  onLogout?: () => void;
+  onSessionUpdate?: (session: MegaDeskSession) => void;
+}
+
+export function AuthenticatedShell({
+  session,
+  onLogout,
+  onSessionUpdate,
+}: AuthenticatedShellProps) {
   const { theme, toggleTheme } = useTheme();
   const [active, setActive] = useState<RouteId>(() => {
     if (window.location.pathname === "/clientes" || window.location.pathname === "/erp/clientes") {
@@ -5930,8 +5940,6 @@ function Shell() {
     const stored = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY);
     return stored === "active-attendance" ? "conversations" : (stored as RouteId) || "home";
   });
-  const [session, setSession] = useState<MegaDeskSession | null>(null);
-  const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const sidebarRef = React.useRef<HTMLDivElement>(null);
@@ -6118,45 +6126,6 @@ function Shell() {
     return () => window.removeEventListener('megadesk-navigate', handleNavigate);
   }, [navigateToRoute]);
 
-  useEffect(() => {
-    const storedSession = localStorage.getItem(MEGADESK_SESSION_KEY);
-    if (storedSession) {
-      try {
-        const parsed = JSON.parse(storedSession);
-        setSession(parsed);
-        setLoading(false);
-      } catch (e) {
-        console.error("Failed to parse session:", e);
-        setLoading(false);
-      }
-    } else {
-      setLoading(false);
-    }
-  }, []);
-
-  if (loading) return <LoadingSpinner />;
-  if (!session) return <LoginPage onLoginSuccess={(newSession) => setSession(newSession)} />;
-
-  const isAdmin = session.role === "admin" || session.userRole === "admin";
-
-  const navItems = [
-    { id: "home" as RouteId, label: "Home", icon: HomeIcon },
-    { id: "conversations" as RouteId, label: "Atendimento", icon: MessageCircle },
-    { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
-    { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
-    { id: "crm-summary" as RouteId, label: "CRM", icon: Users },
-    { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
-    { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
-    { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
-    { id: "settings" as RouteId, label: "Configurações", icon: Cog },
-    { id: "admin-settings" as RouteId, label: "Configurações Admin", icon: Cog },
-    { id: "help" as RouteId, label: "Ajuda", icon: AlertCircle },
-    { id: "notifications" as RouteId, label: "Notificações", icon: Bell },
-  ];
-
-  // Itens que são sempre visíveis independente de permissões
-  const alwaysVisibleItems = ["home", "settings", "help", "notifications"];
-
   const enabledModules = session.enabledModules;
 
   // Proteção e redirecionamento de rotas desabilitadas
@@ -6198,6 +6167,44 @@ function Shell() {
       }
     }
   }, [session, enabledModules, active, navigateToRoute]);
+
+  const doLogout = async () => {
+    try {
+      await logoutMutation.mutateAsync();
+    } catch {
+      // ignore
+    }
+    clearSession();
+    localStorage.removeItem(MEGADESK_SESSION_KEY);
+    localStorage.removeItem(MEGADESK_ACTIVE_PAGE_KEY);
+    localStorage.removeItem("megadesk-session-token");
+    localStorage.removeItem("manus-runtime-user-info");
+    if (onLogout) {
+      onLogout();
+    } else {
+      window.location.replace("/");
+    }
+  };
+
+  const isAdmin = session.role === "admin" || session.userRole === "admin";
+
+  const navItems = [
+    { id: "home" as RouteId, label: "Home", icon: HomeIcon },
+    { id: "conversations" as RouteId, label: "Atendimento", icon: MessageCircle },
+    { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
+    { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
+    { id: "crm-summary" as RouteId, label: "CRM", icon: Users },
+    { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
+    { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
+    { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
+    { id: "settings" as RouteId, label: "Configurações", icon: Cog },
+    { id: "admin-settings" as RouteId, label: "Configurações Admin", icon: Cog },
+    { id: "help" as RouteId, label: "Ajuda", icon: AlertCircle },
+    { id: "notifications" as RouteId, label: "Notificações", icon: Bell },
+  ];
+
+  // Itens que são sempre visíveis independente de permissões
+  const alwaysVisibleItems = ["home", "settings", "help", "notifications"];
 
   const filteredNavItems = navItems.filter(item => {
     // Itens sempre visíveis
@@ -6403,16 +6410,7 @@ function Shell() {
 
           {/* Logout Button */}
           <button
-            onClick={async () => {
-              try { await logoutMutation.mutateAsync(); }
-              catch { return; }
-              localStorage.removeItem(MEGADESK_SESSION_KEY);
-              localStorage.removeItem(MEGADESK_ACTIVE_PAGE_KEY);
-              localStorage.removeItem("megadesk-session-token");
-              localStorage.removeItem("manus-runtime-user-info");
-              setSession(null);
-              window.location.replace("/");
-            }}
+            onClick={() => void doLogout()}
             className={cn(
               "flex items-center py-3 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-900/20 transition-all duration-200 px-2"
             )}
@@ -6603,15 +6601,9 @@ function Shell() {
           </button>
           <button
             type="button"
-            onClick={async () => {
+            onClick={() => {
               setMobileDrawerOpen(false);
-              try { await logoutMutation.mutateAsync(); } catch { return; }
-              localStorage.removeItem(MEGADESK_SESSION_KEY);
-              localStorage.removeItem(MEGADESK_ACTIVE_PAGE_KEY);
-              localStorage.removeItem("megadesk-session-token");
-              localStorage.removeItem("manus-runtime-user-info");
-              setSession(null);
-              window.location.replace("/");
+              void doLogout();
             }}
             className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm text-slate-300 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"
           >
@@ -6935,6 +6927,60 @@ function useSessionRefresh(session: MegaDeskSession | null, setSession: (session
   }, [session?.userEmail]);
 }
 
+export interface ShellProps {
+  session?: MegaDeskSession | null;
+  onLogout?: () => void;
+  onSessionUpdate?: (session: MegaDeskSession) => void;
+}
+
+export function Shell({
+  session: propSession,
+  onLogout,
+  onSessionUpdate,
+}: ShellProps = {}) {
+  const [session, setSession] = useState<MegaDeskSession | null>(() => propSession ?? loadSession());
+
+  useEffect(() => {
+    if (propSession !== undefined) {
+      setSession(propSession);
+    }
+  }, [propSession]);
+
+  const handleLogin = (newSession: MegaDeskSession) => {
+    saveSession(newSession);
+    setSession(newSession);
+    onSessionUpdate?.(newSession);
+  };
+
+  const handleLogout = () => {
+    clearSession();
+    localStorage.removeItem(MEGADESK_SESSION_KEY);
+    localStorage.removeItem(MEGADESK_ACTIVE_PAGE_KEY);
+    localStorage.removeItem("megadesk-session-token");
+    localStorage.removeItem("manus-runtime-user-info");
+    setSession(null);
+    onLogout?.();
+  };
+
+  const handleSessionUpdate = (updated: MegaDeskSession) => {
+    saveSession(updated);
+    setSession(updated);
+    onSessionUpdate?.(updated);
+  };
+
+  if (!session) {
+    return <MegaDeskLoginGate onLogin={handleLogin} />;
+  }
+
+  return (
+    <AuthenticatedShell
+      session={session}
+      onLogout={handleLogout}
+      onSessionUpdate={handleSessionUpdate}
+    />
+  );
+}
+
 export function Home() {
   const [session, setSession] = useState<MegaDeskSession | null>(() => loadSession());
   const [isValidating, setIsValidating] = useState(true);
@@ -6994,5 +7040,11 @@ export function Home() {
     return <MegaDeskLoginGate onLogin={setSession} />;
   }
 
-  return <Shell />;
+  return (
+    <Shell
+      session={session}
+      onLogout={() => setSession(null)}
+      onSessionUpdate={setSession}
+    />
+  );
 }
