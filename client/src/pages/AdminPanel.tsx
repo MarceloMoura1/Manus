@@ -156,6 +156,33 @@ function DeleteClientButton({ client, onSuccess }: { client: any; onSuccess: () 
   );
 }
 
+function DeleteTestClientButton({ client, onSuccess }: { client: any; onSuccess: () => void }) {
+  const deleteTestMutation = trpc.megaadmin.deleteTestClient.useMutation({
+    onSuccess() {
+      toast.success(`Cliente de teste ${client.company} excluído definitivamente.`);
+      onSuccess();
+    },
+    onError(err: any) {
+      toast.error(err.message || "Erro ao excluir cliente de teste");
+    },
+  });
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (window.confirm(`Excluir definitivamente o cliente de teste "${client.company}" e todos os seus registros vinculados? Esta ação é irreversível.`)) {
+          deleteTestMutation.mutate({ clientId: client.clientId });
+        }
+      }}
+      disabled={deleteTestMutation.isPending}
+      className="rounded-xl border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-200 hover:border-rose-400 hover:bg-rose-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {deleteTestMutation.isPending ? "Excluindo..." : "Excluir"}
+    </button>
+  );
+}
+
 function MetricCard({
   title,
   value,
@@ -1386,6 +1413,9 @@ export default function AdminPanel() {
                                     Editar
                                   </button>
                                   <DeleteClientButton client={client} onSuccess={() => { summaryQuery.refetch(); setSelectedClient(null); }} />
+                                  {(client.statusType === "test" || String(client.company || "").startsWith("Synthetic Gate 02B")) && (
+                                    <DeleteTestClientButton client={client} onSuccess={() => { summaryQuery.refetch(); setSelectedClient(null); }} />
+                                  )}
                                 </div>
                               </td>
                             </tr>

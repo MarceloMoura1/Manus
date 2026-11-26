@@ -12,6 +12,12 @@ try {
 import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
 import { generateText, isStepCount, jsonSchema, tool } from "ai";
 import { getPool, getUserHermesPreferences, saveUserHermesPreferences, type UserHermesPreferences } from "./db";
+import {
+  formatTenantMemoryForPrompt,
+  getTenantAiMemory,
+  getTenantCompanyName,
+  upsertLearnedRoutine,
+} from "./modules/ai-memory/tenant-ai-memory";
 import { nanoid } from "nanoid";
 import { dropEmptyArgs } from "./hermes-sanitize";
 import { evoGetStatus } from "./evolution/client";
@@ -1458,6 +1464,45 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     }
   },
   {
+    name: "upsert_company_knowledge",
+    type: "READ",
+    requiredPermissions: ["ai-assistant"],
+    declaration: {
+      name: "upsert_company_knowledge",
+      description:
+        "Salva ou substitui imediatamente na memória oficial da empresa uma regra operacional, rotina, horário, função de funcionário ou política informada pelo usuário.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          topic: {
+            type: "STRING",
+            description: "Identificador curto do tema (ex: horario_entrega, responsavel_financeiro, politica_atendimento)",
+          },
+          summary: {
+            type: "STRING",
+            description: "Descrição completa e vigente da regra, rotina ou responsabilidade aprendida",
+          },
+          previousRule: {
+            type: "STRING",
+            description: "Regra ou informação anterior que está sendo substituída, se mencionada",
+          },
+        },
+        required: ["topic", "summary"],
+      },
+    },
+    validateArgs: (args) => {
+      objectArgs(args);
+      rejectUnknownArgs(args, ["topic", "summary", "previousRule"]);
+      return {
+        topic: stringArg(args, "topic", { min: 1, max: 100 }),
+        summary: stringArg(args, "summary", { min: 2, max: 2_000 }),
+        ...(typeof args.previousRule === "string"
+          ? { previousRule: stringArg(args, "previousRule", { min: 1, max: 1_000 }) }
+          : {}),
+      };
+    },
+  },
+  {
     name: "get_erp_products",
     type: "READ",
     requiredPermissions: ["products", "erp"],
@@ -2111,6 +2156,28 @@ export async function executeClientFunction(
     return JSON.stringify({ status });
   }
   const pool = getPool();
+
+  if (functionName === "upsert_company_knowledge") {
+    const knowledge = validatedArgs as { topic: string; summary: string; previousRule?: string };
+    const result = await upsertLearnedRoutine(
+      {
+        clientId,
+        topic: knowledge.topic,
+        summary: knowledge.summary,
+        previousRule: knowledge.previousRule,
+        author: userId || "Operador",
+      },
+      pool
+    );
+    return JSON.stringify({
+      success: true,
+      replaced: result.replaced,
+      entry: result.entry,
+      message: result.replaced
+        ? "Regra anterior substituída e memória da empresa atualizada com sucesso."
+        : "Nova regra aprendida e salva na memória da empresa com sucesso.",
+    });
+  }
 
   if (functionName === "set_user_preference") {
     const prefs = validatedArgs as { preferredName?: string; honorific?: string; communicationStyle?: string; customRule?: string };
@@ -2837,8 +2904,13 @@ export function detectUserPreferencesFromMessage(message: string): Partial<UserH
 
 export function buildSystemInstruction(
   allowedTools: readonly HermesToolDefinition[],
-  preferences?: UserHermesPreferences
+  preferences?: UserHermesPreferences,
+  tenantContext?: { companyName?: string; memoryBlock?: string }
 ): string {
+  const companyName = tenantContext?.companyName?.trim() || "Empresa";
+  const memoryBlock =
+    tenantContext?.memoryBlock ||
+    `BASE DE CONHECIMENTO DA EMPRESA ("${companyName}"):\n- Nenhuma rotina ou manual institucional foi carregado ainda. Atue de forma 100% neutra sem inventar produtos, preços ou rotinas.`;
   const names = allowedTools.map(tool => tool.name).join(", ") || "nenhuma";
   const preferredName = preferences?.preferredName || "Operador";
   const honorific = preferences?.honorific || "Você";
@@ -2851,7 +2923,7 @@ export function buildSystemInstruction(
   const dataExtenso = hoje.toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const anoAtual = hoje.getFullYear();
 
-  return `Você é o Hermes, a central de inteligência executiva e o braço direito dos sócios fundadores da MegaDesk. Atue como um COO experiente: ágil no diagnóstico, parceiro na decisão, seguro na comunicação e focado em manter a operação funcionando. Não soe como um chatbot de SAC, um terminal de comandos ou um consultor prolixo.
+  return `Você é o Hermes, assistente corporativo inteligente da empresa "${companyName}". Atue de forma ágil no diagnóstico, parceiro na decisão, seguro na comunicação e focado em apoiar a operação da empresa. Não soe como um chatbot genérico nem invente informações do negócio.
 
 =======================================================
 CONTEXTO TEMPORAL DINÂMICO E PRECISÃO DE CALENDÁRIO:
@@ -2869,7 +2941,7 @@ ${rulesList}
 
 REGRA ABSOLUTA DE PERSONALIDADE:
 Respeite rigorosamente a forma de tratamento solicitada acima em todas as saudações e frases.
-Mantenha continuidade contextual com as conversas passadas. Se a preferência gravada for "Senhor Marcelo", use esse tratamento com brevidade; não atribua esse nome a outros usuários.
+Mantenha continuidade contextual com as conversas passadas e respeite o tratamento gravado para cada usuário.
 Se o usuário alterar a forma de tratamento, confirme em uma frase curta.
 =======================================================
 
@@ -2893,7 +2965,7 @@ DISTINÇÃO DE ENTIDADES E CORREÇÕES DO OPERADOR:
 
 ESTILO EXECUTIVO:
 - Responda em português brasileiro com presença executiva, calor humano discreto e clareza. Prefira frases fluidas, tópicos limpos e destaque moderado em negrito para números e decisões; não entregue uma linha de comando crua como "Fornecedores: X, Y".
-- Trate o operador pela preferência gravada. Quando ela for "Senhor Marcelo", use-a naturalmente em aberturas ocasionais, sem repetir o nome em toda frase. Com outros usuários, respeite o tratamento deles.
+- Trate o operador pela preferência gravada de forma natural, sem repetir o nome em toda frase.
 - Varie aberturas apenas depois de uma ação realmente concluída, quando ajudarem a leitura: "Panorama na mão:", "Verificação concluída:". Nunca use "Na escuta" como preâmbulo antes de uma ferramenta.
 - Se houver um próximo passo concreto e autorizado, proponha-o em uma frase breve; nunca afirme que já o executou. Uma ação de escrita continua exigindo o Card de Aprovação.
 - Não faça palestras corporativas, listas conceituais de "3 pilares" ou aconselhamento genérico sem pedido explícito de aprofundamento.
@@ -2916,9 +2988,14 @@ CONTINUIDADE E MEMÓRIA DE CONVERSA:
 - Entenda linguagem coloquial e valores flexíveis ("120 conto", "60 pila", "coloca 120 reais", "muda o preço pra 50").
 - NUNCA zere valores informados pelo usuário. Mantenha os demais itens da proposta e seus preços anteriores preservados.
 
+APRENDIZADO CONTÍNUO DA EMPRESA:
+- Sempre que um usuário interno explicar como a empresa funciona, quem é responsável por cada área/função, ou informar uma nova rotina, horário, política ou mudança de processo (ex: "mudamos o horário...", "agora o João cuida do financeiro", "não trabalhamos mais com X, agora fazemos Y"), invoque IMEDIATAMENTE upsert_company_knowledge para salvar ou substituir a regra vigente na base persistente da empresa e confirme objetivamente o que foi aprendido.
+
+${memoryBlock}
+
 EXECUÇÃO DE FERRAMENTAS E FLUXO HITL:
-- Ao decidir executar consultas (READ) ou registrar preferências (set_user_preference), emita a functionCall correspondente sem mensagens preliminares.
-- Quando a solicitação demandar criação ou alteração (MUTATION), use apenas dados fornecidos pelo usuário ou consultados por ferramentas. Emita a ferramenta apropriada para preparar o Card de Aprovação (HITL); nenhuma escrita ocorre antes da confirmação humana.`;
+- Ao decidir executar consultas (READ), registrar preferências (set_user_preference) ou atualizar a base da empresa (upsert_company_knowledge), emita a functionCall correspondente sem mensagens preliminares.
+- Quando a solicitação demandar criação ou alteração operacional (MUTATION), use apenas dados fornecidos pelo usuário ou consultados por ferramentas. Emita a ferramenta apropriada para preparar o Card de Aprovação (HITL); nenhuma escrita ocorre antes da confirmação humana.`;
 }
 
 const ACTION_STOPWORDS = new Set([
@@ -3707,6 +3784,11 @@ async function chatWithClientGeminiInternal(
     }
   }
 
+  // 2.2 Carrega identidade e memória institucional isolada do tenant
+  const companyName = await getTenantCompanyName(clientId, pool);
+  const tenantMemory = await getTenantAiMemory(clientId, pool).catch(() => null);
+  const memoryBlock = formatTenantMemoryForPrompt(companyName, tenantMemory);
+
   // 3. Chamada ao Gemini via Vercel AI SDK com tool calling nativo
   const allowedTools = getAllowedHermesTools(userPermissions);
   const hermesTools = createHermesTools({
@@ -3746,7 +3828,7 @@ async function chatWithClientGeminiInternal(
     { role: "user" as const, content: userMessage },
   ];
 
-  const systemInstruction = buildSystemInstruction(allowedTools, userPreferences);
+  const systemInstruction = buildSystemInstruction(allowedTools, userPreferences, { companyName, memoryBlock });
 
   let aiResult: any;
   const targetModel = DEFAULT_GEMINI_MODEL;

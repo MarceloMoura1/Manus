@@ -17,7 +17,7 @@ import { SignJWT } from "jose";
 import { MEGAADMIN_COOKIE } from "./_core/context";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { createNewTenant, getTenantInfo, listAllTenants } from "./_core/tenant-operations";
-import { quarantineTenant, reactivateTenant, releaseTenantOperationalAccess, TENANT_QUARANTINE_REASONS } from "./_core/tenant-lifecycle";
+import { deleteTestTenant, quarantineTenant, reactivateTenant, releaseTenantOperationalAccess, TENANT_QUARANTINE_REASONS } from "./_core/tenant-lifecycle";
 import { chamadosRouter } from "./routers-chamados";
 import { crmRouter } from "./routers-crm";
 import { whatsappRouter as whatsappModuleRouter } from "./modules/whatsapp/whatsapp.router";
@@ -1066,6 +1066,36 @@ export const appRouter = router({
           clients.splice(0, clients.length);
         }
         return { ok: true, action: "quarantine" as const, message: `Cliente ${client.company} foi desativado e colocado em quarentena.` };
+      }),
+    deleteTestClient: adminProcedure
+      .input(z.object({ clientId: z.string().min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        await hydrateSyncState();
+        const clientIndex = clients.findIndex((c) => c.clientId === input.clientId);
+        if (clientIndex === -1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
+        }
+        const client = clients[clientIndex];
+        const isTestTenant =
+          client.statusType === "test" ||
+          String(client.company || "").startsWith("Synthetic Gate 02B");
+        if (!isTestTenant) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Exclusão definitiva permitida apenas para clientes de teste ou sintéticos.",
+          });
+        }
+        const operator = `admin:${ctx.user.id}`;
+        await deleteTestTenant({ clientId: input.clientId, operatorId: operator });
+        clients.splice(clientIndex, 1);
+        for (const list of [conversations, tickets, botScripts, operationalRecords, auditLogs] as Array<Array<{ clientId?: string }>>) {
+          for (let i = list.length - 1; i >= 0; i--) {
+            if (list[i]?.clientId === input.clientId) list.splice(i, 1);
+          }
+        }
+        audit("MegaAdmin", `Cliente de teste excluído definitivamente (${client.company})`, undefined);
+        await persistSyncState();
+        return { ok: true, action: "delete" as const, message: `Cliente de teste ${client.company} excluído definitivamente.` };
       }),
     // Backup Management
     createBackup: adminProcedure.mutation(async () => {
@@ -2260,6 +2290,42 @@ export const appRouter = router({
         const history = await loadConversationHistory(ctx.tenantId, userId);
         return { ok: true, history };
       }),
+
+    getCompanyKnowledge: megadeskProcedure.query(async ({ ctx }) => {
+      const { getTenantAiMemory, getTenantCompanyName } = await import("./modules/ai-memory/tenant-ai-memory");
+      const [memory, companyName] = await Promise.all([
+        getTenantAiMemory(ctx.tenantId),
+        getTenantCompanyName(ctx.tenantId),
+      ]);
+      return { ok: true, companyName, memory };
+    }),
+
+    saveCompanyPlaybook: megadeskProcedure
+      .input(z.object({
+        companyPlaybook: z.string().max(200_000),
+        sourceFilename: z.string().max(255).nullable().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { saveTenantPlaybook } = await import("./modules/ai-memory/tenant-ai-memory");
+        const memory = await saveTenantPlaybook({
+          clientId: ctx.tenantId,
+          companyPlaybook: input.companyPlaybook,
+          sourceFilename: input.sourceFilename ?? null,
+          updatedBy: ctx.userEmail || ctx.operationalUserId || "Operador",
+        });
+        audit("MegaDesk", `Base de conhecimento da empresa atualizada (${input.sourceFilename || "editor"})`, ctx.tenantId);
+        return { ok: true, memory };
+      }),
+
+    resetCompanyKnowledge: megadeskProcedure.mutation(async ({ ctx }) => {
+      const { resetTenantAiMemory } = await import("./modules/ai-memory/tenant-ai-memory");
+      const memory = await resetTenantAiMemory(
+        ctx.tenantId,
+        ctx.userEmail || ctx.operationalUserId || "Operador"
+      );
+      audit("MegaDesk", "Memória da IA da empresa zerada", ctx.tenantId);
+      return { ok: true, memory };
+    }),
 
     // ── Limpa histórico de conversa do usuário ──
     clearHistory: megadeskProcedure

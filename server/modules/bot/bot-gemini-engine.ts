@@ -4,8 +4,8 @@
  * utilizando o Gemini com persona configurada do tenant e ferramentas do ERP/CRM.
  *
  * Política de Transbordo Elegante:
- * - Para orçamentos, cotações de peças/serviços e dúvidas comerciais específicas,
- *   a IA acolhe o cliente, pede detalhes contextuais se útil (ex: modelo/ano) e
+ * - Para orçamentos, cotações de produtos/serviços e dúvidas comerciais específicas,
+ *   a IA acolhe o cliente, pede detalhes contextuais se útil e
  *   transfere para a equipe humana especializada.
  * - NUNCA inventa valores nem diz que o produto não existe.
  * - Elimina qualquer loop de saudação estática ("Olá! Como posso ajudar...").
@@ -18,6 +18,7 @@ import { getPool } from "../../db";
 import { queryErpProducts, queryTicketsByPhone, saveLead } from "./bot.router";
 import { checkBotEligibility, deliverBotMessage, transferConversationToHuman } from "./bot-runtime";
 import { recordAiUsageLog } from "../ai-usage/ai-usage.service";
+import { formatTenantMemoryForPrompt, getTenantAiMemory, getTenantCompanyName } from "../ai-memory/tenant-ai-memory";
 
 export interface ProcessBotMessageInput {
   tenantId: string;
@@ -63,19 +64,10 @@ export async function processCognitiveBotMessage(
       return { replied: false, error: eligibility.reason };
     }
 
-    // 2. Busca o nome da empresa (persona do tenant)
-    let companyName = "FaYerS Company LTDA";
-    try {
-      const [clientRows] = await pool.execute(
-        "SELECT company FROM megadesk_domain_clients WHERE client_id = ? LIMIT 1",
-        [tenantId]
-      ) as any[];
-      if (clientRows?.[0]?.company?.trim()) {
-        companyName = clientRows[0].company.trim();
-      }
-    } catch {
-      // fallback gracioso para a persona
-    }
+    // 2. Busca o nome da empresa e a base de conhecimento do tenant (100% isolado por tenantId)
+    const companyName = await getTenantCompanyName(tenantId, pool);
+    const tenantMemory = await getTenantAiMemory(tenantId, pool).catch(() => null);
+    const tenantMemoryBlock = formatTenantMemoryForPrompt(companyName, tenantMemory);
 
     const apiKey = getGeminiApiKey();
     if (!apiKey) {
@@ -128,7 +120,7 @@ export async function processCognitiveBotMessage(
       get_erp_products: tool({
         description: "Consulta o catálogo de produtos e serviços do ERP, seus preços e disponibilidade em estoque.",
         parameters: z.object({
-          search: z.string().optional().describe("Termo de busca, nome do produto, peça ou SKU"),
+          search: z.string().optional().describe("Termo de busca, nome do produto, serviço ou código"),
         }),
         execute: async ({ search }: { search?: string }) => {
           try {
@@ -137,7 +129,7 @@ export async function processCognitiveBotMessage(
             if (results.length === 0) {
               return {
                 found: false,
-                message: "Item não localizado no catálogo padrão ou requer cotação personalizada. Acolha cordialmente o cliente, informe que a equipe especializada irá verificar a disponibilidade e valores exatos, solicite detalhes como modelo/ano se útil, e acione transfer_to_human.",
+                message: "Item não localizado no catálogo padrão ou requer cotação personalizada. Acolha cordialmente o cliente, informe que a equipe especializada irá verificar a disponibilidade e valores exatos, solicite detalhes contextuais se útil, e acione transfer_to_human.",
               };
             }
             return {
@@ -235,18 +227,20 @@ Diretrizes obrigatórias de comportamento:
 1. Para perguntas gerais, saudações ou institucionais:
    - Responda de forma natural, calorosa e objetiva.
 
-2. Para orçamentos, cotações de peças/serviços, preços específicos ou dúvidas comerciais/técnicas:
-   - NUNCA invente, presuma ou alucine preços, prazos ou dados que não existam no catálogo oficial.
+2. Para orçamentos, cotações de produtos/serviços, preços específicos ou dúvidas comerciais/técnicas:
+   - NUNCA invente, presuma ou alucine preços, prazos, horários, políticas ou dados que não estejam na base de conhecimento oficial da empresa ou no catálogo do ERP.
    - NUNCA diga secamente que "o produto não existe", que "não foi localizado no catálogo" ou que "não temos o item". Isso prejudica a imagem da empresa.
    - Sempre acolha o cliente com gentileza e informe que você está transferindo o atendimento para um de nossos especialistas para confirmar os detalhes, a disponibilidade e os valores exatos.
-   - Sempre que aplicável, solicite cordialmente um dado contextual importante (ex: modelo, ano ou versão do veículo/equipamento) para que os especialistas já tenham o contexto completo ao assumirem.
+   - Sempre que aplicável, solicite cordialmente um detalhe contextual útil para que a equipe humana já tenha o contexto completo ao assumir.
    - ACIONE OBRIGATORIAMENTE a ferramenta transfer_to_human.
 
 3. Quando consultar a ferramenta get_erp_products:
    - Se o produto tiver preço e estoque claros e confirmados, informe cordialmente ao cliente.
    - Se o produto não for localizado ou o resultado for inconclusivo: acione imediatamente transfer_to_human e explique que os especialistas humanos farão a cotação correta.
 
-4. Formate mensagens de forma limpa para WhatsApp: use quebras de linha e negrito (*texto*) onde facilitar a leitura. Evite textos excessivamente longos.`;
+4. Formate mensagens de forma limpa para WhatsApp: use quebras de linha e negrito (*texto*) onde facilitar a leitura. Evite textos excessivamente longos.
+
+${tenantMemoryBlock}`;
 
     const googleInstance = createGoogleGenerativeAI({ apiKey });
     const targetModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";

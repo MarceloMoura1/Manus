@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
+import { CompanyKnowledgeCard } from "@/components/CompanyKnowledgeCard";
 
 export function renderInlineMarkdown(text: string): React.ReactNode[] {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
@@ -160,7 +161,7 @@ export function AssistantMarkdown({ content }: { content: string }) {
   return <div data-testid="assistant-markdown" className="space-y-1">{elements}</div>;
 }
 
-export type AIAssistantTab = "chat" | "themes" | "routines" | "settings";
+export type AIAssistantTab = "chat" | "knowledge" | "themes" | "routines" | "settings";
 
 export type AIThemeId = "deep-navy" | "midnight-black" | "aqua-glass" | "terminal-emerald";
 
@@ -425,6 +426,15 @@ export function AIAssistant() {
 
   // Aba Ativa (Typebot style)
   const [activeTab, setActiveTab] = useState<AIAssistantTab>("chat");
+
+  // ─── Base de Conhecimento da Empresa (tRPC) ────────────────────────────────
+  const companyKnowledgeQuery = trpc.assistant.getCompanyKnowledge.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
+  const isKnowledgeEmpty =
+    Boolean(companyKnowledgeQuery.data) &&
+    !companyKnowledgeQuery.data!.memory.companyPlaybook.trim() &&
+    companyKnowledgeQuery.data!.memory.learnedUpdates.length === 0;
 
   // ─── Rotinas Autônomas (tRPC) ───────────────────────────────────────────────
   const routinesQuery = trpc.assistantRoutines.listRoutines.useQuery(undefined, {
@@ -1569,6 +1579,20 @@ export function AIAssistant() {
 
             <button
               type="button"
+              data-testid="tab-knowledge"
+              onClick={() => setActiveTab("knowledge")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                activeTab === "knowledge"
+                  ? currentTheme.activeTabBg
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Base da Empresa</span>
+            </button>
+
+            <button
+              type="button"
               data-testid="tab-themes"
               onClick={() => setActiveTab("themes")}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
@@ -1632,6 +1656,29 @@ export function AIAssistant() {
                       Envie uma mensagem de texto ou grave um comando de voz pelo microfone para consultar vendas, CRM, chamados ou abrir solicitações em segundos.
                     </p>
                   </div>
+                  {isKnowledgeEmpty && (
+                    <div
+                      data-testid="empty-knowledge-banner"
+                      className="w-full rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 text-left space-y-2"
+                    >
+                      <p className="text-xs font-semibold text-emerald-300">
+                        Sua IA ainda está zerada para {companyKnowledgeQuery.data?.companyName || "esta empresa"}
+                      </p>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        Envie um arquivo <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-100">.txt</code> (bloco de notas) na aba <strong>Base da Empresa</strong> ou explique aqui mesmo no chat como a empresa funciona, sua rotina, horários e quem são os funcionários.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setActiveTab("knowledge")}
+                        className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 text-xs"
+                      >
+                        <FileText className="w-3.5 h-3.5 mr-1.5" />
+                        Enviar Bloco de Notas (.txt)
+                      </Button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
                     {quickSuggestions.map((suggestion) => (
                       <button
@@ -2284,6 +2331,13 @@ export function AIAssistant() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ─── ABA: BASE DE CONHECIMENTO DA EMPRESA ─────────────────────────── */}
+        {activeTab === "knowledge" && (
+          <div data-testid="knowledge-tab-view" className="flex-1 overflow-y-auto p-6 sm:p-8 max-w-4xl mx-auto w-full">
+            <CompanyKnowledgeCard />
           </div>
         )}
 

@@ -154,7 +154,7 @@ export async function processQuickVoiceRequest(
               type: "text" as const,
               text:
                 rawText ||
-                "Interprete o áudio a seguir enviado pelo atalho mãos-livres de campo/oficina, execute as ferramentas necessárias e retorne uma resposta concisa ideal para leitura em voz alta:",
+                "Interprete o áudio a seguir enviado pelo atalho mãos-livres de operação, execute as ferramentas necessárias e retorne uma resposta concisa ideal para leitura em voz alta:",
             },
             {
               type: "file" as const,
@@ -179,7 +179,7 @@ export async function processQuickVoiceRequest(
     const tenantTools = createHermesTools({ clientId: tenantId, userId });
 
     const systemInstruction = `Você é o Copiloto Mãos-Livres de Operações do MegaDesk.
-O usuário está em campo ou na oficina utilizando um atalho rápido de voz.
+O usuário está em operação externa ou atendimento utilizando um atalho rápido de voz.
 Execute imediatamente as ferramentas necessárias do tenant (consultar CRM, vendas, chamados ou preparar abertura de chamado) e responda em português do Brasil com uma frase objetiva, natural e direta (sem markdown complexo), ideal para ser lida em voz alta pelo celular.`;
 
     const aiResult = await aiGenerator({

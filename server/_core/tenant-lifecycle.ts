@@ -55,3 +55,58 @@ export async function validateOperationalAccess(input: { clientId: string; userE
 }
 
 export async function deleteTenant(): Promise<never> { throw new Error("Exclusão de tenant indisponível: use o lifecycle explícito."); }
+
+export async function deleteTestTenant(
+  input: { clientId: string; operatorId: string },
+  dependencies: LifecycleDependencies = defaultDependencies
+) {
+  const tx = await dependencies.begin();
+  try {
+    const tenant = rowsOf(
+      await tx.execute(
+        "SELECT client_id, company, status, status_type, tenant_database_name FROM megadesk_domain_clients WHERE client_id = ? FOR UPDATE",
+        [input.clientId]
+      )
+    )[0];
+    if (!tenant) throw new Error("Tenant não encontrado.");
+
+    const isTestTenant =
+      tenant.status_type === "test" ||
+      String(tenant.company || "").startsWith("Synthetic Gate 02B");
+    if (!isTestTenant) {
+      throw new Error("Exclusão definitiva permitida apenas para clientes de teste ou sintéticos.");
+    }
+
+    const colRows = rowsOf(
+      await tx.execute(
+        `SELECT TABLE_NAME, COLUMN_NAME
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND COLUMN_NAME IN ('client_id', 'clientId')
+         ORDER BY TABLE_NAME ASC`
+      )
+    );
+
+    const childTables = colRows.filter((r) => r.TABLE_NAME !== "megadesk_domain_clients");
+    await tx.execute("SET FOREIGN_KEY_CHECKS = 0");
+    try {
+      for (const row of childTables) {
+        const tableName = String(row.TABLE_NAME || "");
+        const colName = String(row.COLUMN_NAME || "");
+        if (!/^[A-Za-z0-9_]+$/.test(tableName) || !/^[A-Za-z0-9_]+$/.test(colName)) continue;
+        await tx.execute(`DELETE FROM \`${tableName}\` WHERE \`${colName}\` = ?`, [input.clientId]);
+      }
+      await tx.execute("DELETE FROM megadesk_domain_clients WHERE client_id = ?", [input.clientId]);
+    } finally {
+      await tx.execute("SET FOREIGN_KEY_CHECKS = 1");
+    }
+
+    await tx.commit();
+    return { clientId: input.clientId, company: String(tenant.company || ""), deleted: true as const };
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  } finally {
+    tx.release();
+  }
+}
