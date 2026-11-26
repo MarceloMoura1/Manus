@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import { resolveTenantEnabledModules } from "../../shared/tenant-modules";
+import { ensureTenantNicheColumns } from "../db";
 
 export type ProvisionedClient = {
   id: string;
@@ -73,6 +74,7 @@ function parseObject(value: string): Record<string, unknown> {
 }
 
 async function loadClient(connection: PoolConnection, clientId: string): Promise<ProvisionedClient> {
+  await ensureTenantNicheColumns(connection);
   const [clientRows] = await connection.execute<ClientRow[]>(
     "SELECT internal_id AS id, client_id AS clientId, tenant_database_name AS tenantDatabaseName, company, contact, email, phone, cnpj, plan, max_users AS maxUsers, status_type AS statusType, status, access_released AS accessReleased, api_token AS apiToken, modules_json AS modulesJson, integrations_json AS integrationsJson, niche_profile AS nicheProfile, enabled_modules AS enabledModules FROM megadesk_domain_clients WHERE client_id = ?",
     [clientId],
@@ -108,6 +110,7 @@ async function loadClient(connection: PoolConnection, clientId: string): Promise
 }
 
 async function executeProvisioning(connection: PoolConnection, input: ProvisionClientInput): Promise<{ client: ProvisionedClient; replay: boolean }> {
+  await ensureTenantNicheColumns(connection);
   const hash = payloadHash(input);
   const [requestRows] = await connection.execute<ProvisioningRow[]>(
     "SELECT payload_hash AS payloadHash, client_id AS clientId FROM megadesk_tenant_provisioning_requests WHERE idempotency_key = ? FOR UPDATE",

@@ -108,6 +108,15 @@ async function findAvailablePort(startPort = 3000): Promise<number> {
 async function startServer() {
   const disposableRuntime = isDisposableRuntimeEnabled();
   if (disposableRuntime) assertDisposableRuntimeConfig();
+
+  // Garantir idempotentemente que as colunas de nicho e módulos existam no MySQL
+  try {
+    const { ensureTenantNicheColumns } = await import("../db");
+    await ensureTenantNicheColumns();
+  } catch (err: any) {
+    console.error("[Startup] Erro ao verificar/adicionar colunas de nicho no MySQL:", err?.message || err);
+  }
+
   const app = express();
   const server = createServer(app);
   const releaseSha = process.env.MEGADESK_RELEASE_SHA?.trim() || null;

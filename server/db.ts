@@ -160,6 +160,7 @@ export function getPool(): mysql.Pool {
 }
 
 export async function closePool(): Promise<void> {
+  resetTenantNicheColumnsEnsuredState();
   const pool = globalPoolState.__megadesk_mysql_pool;
   if (pool) {
     globalPoolState.__megadesk_mysql_pool = undefined;
@@ -300,7 +301,51 @@ export async function cacheStateAfterSuccessfulPersistence(state: MegaDeskStruct
   inMemoryState = cloneState(state);
 }
 
+let nicheColumnsEnsured = false;
+
+export function resetTenantNicheColumnsEnsuredState(): void {
+  nicheColumnsEnsured = false;
+}
+
+export async function ensureTenantNicheColumns(pool: Pick<mysql.Pool, "execute"> = getPool()): Promise<void> {
+  if (nicheColumnsEnsured) return;
+  try {
+    const [columnRows] = await pool.execute(
+      "SELECT COLUMN_NAME AS columnName FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'megadesk_domain_clients'"
+    );
+    const existing = new Set(
+      (columnRows as Array<{ columnName: string }>).map((r) => r.columnName.toLowerCase())
+    );
+
+    if (!existing.has("niche_profile")) {
+      console.log("[Migration] Coluna niche_profile ausente em megadesk_domain_clients. Executando ALTER TABLE...");
+      await pool.execute(
+        "ALTER TABLE megadesk_domain_clients ADD COLUMN niche_profile VARCHAR(32) NOT NULL DEFAULT 'personalizado'"
+      );
+      console.log("[Migration] Coluna niche_profile criada com sucesso.");
+    }
+
+    if (!existing.has("enabled_modules")) {
+      console.log("[Migration] Coluna enabled_modules ausente em megadesk_domain_clients. Executando ALTER TABLE...");
+      await pool.execute(
+        "ALTER TABLE megadesk_domain_clients ADD COLUMN enabled_modules JSON NULL"
+      );
+      console.log("[Migration] Coluna enabled_modules criada com sucesso.");
+    }
+
+    nicheColumnsEnsured = true;
+  } catch (err: any) {
+    if (err?.code === "ER_DUP_FIELDNAME") {
+      nicheColumnsEnsured = true;
+      return;
+    }
+    console.error("[Migration] Erro ao verificar/adicionar colunas de nicho no MySQL:", err);
+    throw err;
+  }
+}
+
 async function ensureStructuredTables() {
+  await ensureTenantNicheColumns();
   await verifyMainSchema();
   return;
   // Código histórico abaixo é deliberadamente inalcançável e será removido
@@ -489,6 +534,7 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
     return inMemoryState;
   }
   try {
+    await ensureTenantNicheColumns();
     await seedMegaDeskStructuredState(defaultState);
     const pool = getPool();
     const [clientRows] = await pool.execute("SELECT * FROM megadesk_domain_clients ORDER BY created_at ASC");
@@ -587,6 +633,7 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
     inMemoryState = cloneState(state);
     return;
   }
+  await ensureTenantNicheColumns();
   await verifyMainSchema();
     const pool = getPool();
     const connection = await pool.getConnection();
