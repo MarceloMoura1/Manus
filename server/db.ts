@@ -5,6 +5,7 @@ import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainCo
 import { getTestDatabaseUrl } from "./test-integration-gates";
 import { sanitizeConversationMessagesForPersistence } from "./conversation-message-store";
 import { CONFIGURABLE_MODULES } from "@shared/const";
+import { resolveTenantEnabledModules } from "../shared/tenant-modules";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -322,6 +323,8 @@ async function ensureStructuredTables() {
     api_token VARCHAR(255) NOT NULL,
     modules_json LONGTEXT NOT NULL,
     integrations_json LONGTEXT NOT NULL,
+    niche_profile VARCHAR(32) NOT NULL DEFAULT 'personalizado',
+    enabled_modules JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`);
@@ -333,6 +336,8 @@ async function ensureStructuredTables() {
     "ALTER TABLE megadesk_domain_clients ADD COLUMN max_users INT NOT NULL DEFAULT 5",
     "ALTER TABLE megadesk_domain_clients ADD COLUMN status_type ENUM('active','test') NOT NULL DEFAULT 'test'",
     "ALTER TABLE megadesk_domain_clients ADD COLUMN integrations_json LONGTEXT NOT NULL",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN niche_profile VARCHAR(32) NOT NULL DEFAULT 'personalizado'",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN enabled_modules JSON NULL",
   ];
   for (const migration of migrations) {
     try {
@@ -516,7 +521,37 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
     }
 
     const loadedState = {
-      clients: (clientRows as any[]).map((row) => ({ id: row.internal_id, clientId: row.client_id, tenantDatabaseName: row.tenant_database_name, company: row.company, contact: row.contact, email: row.email || "", phone: row.phone, cnpj: row.cnpj || "", plan: row.plan, maxUsers: row.max_users || 5, status: row.status, statusType: row.status_type || "test", accessReleased: Boolean(row.access_released), apiToken: row.api_token, modules: resolveLoadedClientModules(row.status, row.modules_json), integrations: JSON.parse(row.integrations_json || "{}"), users: usersByClient.get(row.client_id) ?? [] })),
+      clients: (clientRows as any[]).map((row) => {
+        let parsedEnabledModules = null;
+        if (row.enabled_modules) {
+          try {
+            parsedEnabledModules = typeof row.enabled_modules === "string" ? JSON.parse(row.enabled_modules) : row.enabled_modules;
+          } catch {
+            parsedEnabledModules = null;
+          }
+        }
+        return {
+          id: row.internal_id,
+          clientId: row.client_id,
+          tenantDatabaseName: row.tenant_database_name,
+          company: row.company,
+          contact: row.contact,
+          email: row.email || "",
+          phone: row.phone,
+          cnpj: row.cnpj || "",
+          plan: row.plan,
+          maxUsers: row.max_users || 5,
+          status: row.status,
+          statusType: row.status_type || "test",
+          accessReleased: Boolean(row.access_released),
+          apiToken: row.api_token,
+          modules: resolveLoadedClientModules(row.status, row.modules_json),
+          nicheProfile: row.niche_profile || "personalizado",
+          enabledModules: resolveTenantEnabledModules(row.niche_profile, parsedEnabledModules),
+          integrations: JSON.parse(row.integrations_json || "{}"),
+          users: usersByClient.get(row.client_id) ?? []
+        };
+      }),
       conversations: (conversationRows as any[]).map((row) => ({ id: row.conversation_id, clientId: row.client_id, name: row.customer_name, phone: row.phone, company: row.company, status: row.status, lastMessage: row.last_message, time: row.time_label, messages: JSON.parse(row.messages_json || "[]") })),
       tickets: (ticketRows as any[]).map((row) => ({ id: row.ticket_id, clientId: row.client_id, company: row.company, customer: row.customer, problem: row.problem, category: row.category, status: row.status, createdAt: row.created_label, description: row.description })),
       botScripts: (scriptRows as any[]).map((row) => ({ id: row.script_id, clientId: row.client_id, name: row.name, description: row.description, initialMessage: row.initial_message, active: Boolean(row.active) })),
@@ -569,7 +604,18 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       // Sincronização normal é somente upsert. Ausência em memória nunca implica exclusão.
 
       for (const client of state.clients) {
-        await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), email=VALUES(email), phone=VALUES(phone), cnpj=VALUES(cnpj), plan=VALUES(plan), max_users=VALUES(max_users), status=VALUES(status), status_type=VALUES(status_type), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json), integrations_json=VALUES(integrations_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email || null, client.phone, client.cnpj || null, client.plan, client.maxUsers || 5, client.status, client.statusType || "test", client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? []), JSON.stringify(client.integrations ?? {})]);
+        const nicheProfile = client.nicheProfile || 'personalizado';
+        const enabledModules = client.enabledModules ? JSON.stringify(client.enabledModules) : null;
+        await connection.execute(
+          "INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json, niche_profile, enabled_modules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), email=VALUES(email), phone=VALUES(phone), cnpj=VALUES(cnpj), plan=VALUES(plan), max_users=VALUES(max_users), status=VALUES(status), status_type=VALUES(status_type), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json), integrations_json=VALUES(integrations_json), niche_profile=VALUES(niche_profile), enabled_modules=VALUES(enabled_modules)",
+          [
+            client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact,
+            client.email || null, client.phone, client.cnpj || null, client.plan, client.maxUsers || 5,
+            client.status, client.statusType || "test", client.accessReleased ? 1 : 0, client.apiToken,
+            JSON.stringify(client.modules ?? []), JSON.stringify(client.integrations ?? {}),
+            nicheProfile, enabledModules
+          ]
+        );
         for (const user of client.users ?? []) {
           // CAMADA 1: Prioridade do hash: (1) hash em memória, (2) hash salvo no banco, (3) null
           // Isso garante que um restart do servidor nunca apague o hash existente no banco

@@ -28,6 +28,13 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/conversationDateTime";
 import { MODULE_LABELS, normalizeModuleNamesToAdmin } from "@shared/const";
+import { TenantNicheModuleMatrix } from "@/components/TenantNicheModuleMatrix";
+import {
+  TenantNicheProfile,
+  TenantModuleKey,
+  resolveTenantEnabledModules,
+  ALL_MODULE_KEYS,
+} from "@shared/tenant-modules";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -530,6 +537,18 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
   const users = client.users ?? [];
   const [expandedUser, setExpandedUser] = useState<string>(users?.[0]?.id ?? "");
   const [editingPermissions, setEditingPermissions] = useState<Record<string, string[]>>({});
+  const [nicheProfile, setNicheProfile] = useState<TenantNicheProfile>((client.nicheProfile as TenantNicheProfile) || "personalizado");
+  const [enabledModules, setEnabledModules] = useState<TenantModuleKey[]>(resolveTenantEnabledModules(client.nicheProfile, client.enabledModules));
+  const [hasModuleChanges, setHasModuleChanges] = useState(false);
+
+  const updateClientInfo = trpc.megaadmin.updateClientInfo.useMutation({
+    onSuccess() {
+      toast.success("Nicho e módulos do tenant atualizados com sucesso!");
+      setHasModuleChanges(false);
+      onRefresh();
+    },
+    onError(err) { toast.error(err.message); },
+  });
 
   const toggleModule = trpc.megaadmin.toggleModule.useMutation({
     onSuccess() { onRefresh(); },
@@ -548,7 +567,47 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
   const activeModules: string[] = client.modules ?? [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      {/* Seção: Nicho & Matriz de Módulos da Empresa */}
+      <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-6">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h4 className="text-lg font-bold text-white">Nicho & Módulos da Empresa (CRM / ERP)</h4>
+            <p className="text-sm text-slate-400 mt-1">Configure o nicho de atuação e quais telas e submódulos este tenant pode ver.</p>
+          </div>
+          {hasModuleChanges && (
+            <button
+              onClick={() => {
+                updateClientInfo.mutate({
+                  clientId: client.clientId,
+                  nicheProfile,
+                  enabledModules,
+                });
+              }}
+              disabled={updateClientInfo.isPending}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:opacity-90 disabled:opacity-50"
+            >
+              <Save className="h-4 w-4" />
+              {updateClientInfo.isPending ? "Salvando..." : "Salvar Configuração de Módulos"}
+            </button>
+          )}
+        </div>
+
+        <TenantNicheModuleMatrix
+          nicheProfile={nicheProfile}
+          enabledModules={enabledModules}
+          onChangeNiche={(n) => {
+            setNicheProfile(n);
+            setHasModuleChanges(true);
+          }}
+          onChangeModules={(m) => {
+            setEnabledModules(m);
+            setHasModuleChanges(true);
+          }}
+          disabled={updateClientInfo.isPending}
+        />
+      </div>
+
       {/* Seção: Permissões por Usuário */}
       <div>
         <div className="mb-6">

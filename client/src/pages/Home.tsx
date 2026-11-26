@@ -19,6 +19,7 @@ import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorks
 import { Users } from "lucide-react";
 import { buildSalesPath, readSalesRoute } from "./erp/sales-navigation";
 import { NotificationsModernPage } from "./NotificationsModernPage";
+import { isModuleEnabled, hasAnyCrmEnabled, hasAnyErpEnabled, type TenantNicheProfile, type TenantModuleKey } from "@shared/tenant-modules";
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { ConversationMedia } from "@/components/ConversationMedia";
@@ -191,6 +192,8 @@ type MegaDeskSession = {
   role?: 'admin' | 'user'; // Compatibilidade com sistema de roles
   plan: string;
   modules: string[];
+  nicheProfile?: TenantNicheProfile | string;
+  enabledModules?: string[];
   // Token refresh management
   expiresAt?: number; // timestamp em ms quando a sessão expira
   refreshedAt?: number; // timestamp em ms da última renovação
@@ -6164,12 +6167,73 @@ function Shell() {
   // Itens que são sempre visíveis independente de permissões
   const alwaysVisibleItems = ["home", "settings", "help", "notifications"];
   
+  const enabledModules = session.enabledModules;
+
+  // Proteção e redirecionamento de rotas desabilitadas
+  React.useEffect(() => {
+    if (!session || !enabledModules) return;
+
+    if (active === "tracking" && !isModuleEnabled(enabledModules, "rastreamento")) {
+      navigateToRoute("home", { replace: true });
+      return;
+    }
+
+    if (active.startsWith("crm-") && !hasAnyCrmEnabled(enabledModules)) {
+      navigateToRoute("home", { replace: true });
+      return;
+    }
+
+    if (active.startsWith("erp-") && !hasAnyErpEnabled(enabledModules)) {
+      navigateToRoute("home", { replace: true });
+      return;
+    }
+
+    if (active === "erp-summary" && !isModuleEnabled(enabledModules, "erp.resumo")) {
+      const firstEnabledErp = [
+        { key: "erp.produtos" as const, route: "erp-products" as const },
+        { key: "erp.servicos" as const, route: "erp-services" as const },
+        { key: "erp.vendas" as const, route: "erp-sales" as const },
+        { key: "erp.estoque" as const, route: "erp-stock" as const },
+        { key: "erp.financeiro" as const, route: "erp-finance" as const },
+        { key: "erp.fiscal" as const, route: "erp-fiscal" as const },
+        { key: "erp.relatorios" as const, route: "erp-reports" as const },
+        { key: "erp.compras" as const, route: "erp-purchases" as const },
+        { key: "erp.fornecedores" as const, route: "erp-suppliers" as const },
+      ].find(item => isModuleEnabled(enabledModules, item.key));
+
+      if (firstEnabledErp) {
+        navigateToRoute(firstEnabledErp.route, { replace: true });
+      } else {
+        navigateToRoute("home", { replace: true });
+      }
+    }
+  }, [session, enabledModules, active, navigateToRoute]);
+
   const filteredNavItems = navItems.filter(item => {
     // Itens sempre visíveis
     if (alwaysVisibleItems.includes(item.id)) return true;
-    // Itens que dependem de permissões: active-attendance, conversations, tickets, tracking, erp, ai-assistant
-    if (item.id.startsWith("crm-")) return session.permissions.includes("crm");
-    return item.id.startsWith("erp-") ? session.permissions.includes("erp") : session.permissions.includes(item.id);
+
+    // Granular module checks
+    if (item.id === "conversations") {
+      return isModuleEnabled(enabledModules, "atendimento") && session.permissions.includes("conversas");
+    }
+    if (item.id === "tickets") {
+      return isModuleEnabled(enabledModules, "chamados") && session.permissions.includes("tickets");
+    }
+    if (item.id === "tracking") {
+      return isModuleEnabled(enabledModules, "rastreamento") && session.permissions.includes("tracking");
+    }
+    if (item.id === "ai-assistant") {
+      return isModuleEnabled(enabledModules, "assistente_ia") && session.permissions.includes("ai-assistant");
+    }
+    if (item.id.startsWith("crm-")) {
+      return hasAnyCrmEnabled(enabledModules) && session.permissions.includes("crm");
+    }
+    if (item.id.startsWith("erp-")) {
+      return hasAnyErpEnabled(enabledModules) && session.permissions.includes("erp");
+    }
+
+    return session.permissions.includes(item.id);
   });
 
   // Separar itens em seções (Assistente IA permanece no bloco superior de módulos, logo abaixo de ERP; Configurar Bot removido da sidebar)
@@ -6185,11 +6249,13 @@ function Shell() {
     canAccessFinance: session.userRole !== "agent",
     canAccessFiscal: session.userRole !== "agent",
     canAccessReports: session.userRole !== "agent",
+    enabledModules,
     onNavigate: navigateToErpSection,
   });
     const crmSection = (active === "crm-pipeline" ? "pipeline" : active === "crm-leads" ? "leads" : active === "crm-clients" ? "clients" : active === "crm-activities" ? "activities" : active === "crm-proposals" ? "proposals" : active === "crm-automations" ? "automations" : active === "crm-reports" ? "reports" : "summary") as CrmSection;
   const navigateToCrmSection = (section: CrmSection) => navigateToRoute(section === "pipeline" ? "crm-pipeline" : section === "leads" ? "crm-leads" : section === "clients" ? "crm-clients" : section === "activities" ? "crm-activities" : section === "proposals" ? "crm-proposals" : section === "automations" ? "crm-automations" : section === "reports" ? "crm-reports" : "crm-summary");
   const crmTopbarItems = getCrmTopbarItems({
+    enabledModules,
     onNavigate: navigateToCrmSection,
   });
 
@@ -6442,8 +6508,8 @@ function Shell() {
           />}
           {active === "tickets" && <TicketsPage onOpenMobileMenu={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} />}
           {active === "tracking" && <TrackingPage />}
-           {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} />}
-           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
+           {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} enabledModules={enabledModules} />}
+           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} enabledModules={enabledModules} />}
            {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

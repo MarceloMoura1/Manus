@@ -25,6 +25,7 @@ import {
   Users,
   Zap,
   XCircle,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -32,6 +33,14 @@ import { Toaster } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { formatTime } from "@/lib/conversationDateTime";
 import { MODULE_LABELS } from "@shared/const";
+import { TenantNicheModuleMatrix } from "@/components/TenantNicheModuleMatrix";
+import {
+  TenantNicheProfile,
+  TenantModuleKey,
+  resolveTenantEnabledModules,
+  ALL_MODULE_KEYS,
+  MODULE_CATALOG,
+} from "@shared/tenant-modules";
 import { AdminsSection } from "./AdminsSection";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { ClientEditPage } from "./ClientEditPage";
@@ -535,6 +544,8 @@ const defaultNewClient: NewClientForm = { company: "", contact: "", email: "", p
 
 function ClientWizard({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState<NewClientForm>(defaultNewClient);
+  const [nicheProfile, setNicheProfile] = useState<TenantNicheProfile>("personalizado");
+  const [enabledModules, setEnabledModules] = useState<TenantModuleKey[]>([...ALL_MODULE_KEYS]);
   const idempotencyKey = useRef(crypto.randomUUID());
   const create = trpc.megaadmin.createClient.useMutation({
     onSuccess() {
@@ -547,11 +558,11 @@ function ClientWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur">
-      <div className="w-full max-w-2xl rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-2xl">
+      <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-2xl">
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
             <h3 className="text-2xl font-semibold text-white">Cadastrar novo cliente</h3>
-            <p className="text-sm text-slate-400">Preencha os dados básicos para criar a conta.</p>
+            <p className="text-sm text-slate-400">Preencha os dados básicos e configure o perfil de nicho e módulos liberados.</p>
           </div>
           <button onClick={onClose} className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-slate-300">
             Fechar
@@ -569,12 +580,22 @@ function ClientWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
           <label className="block text-sm text-slate-300">Status<select value={form.statusType} onChange={(e) => setForm({ ...form, statusType: e.target.value as "active" | "test" })} className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-emerald-400"><option value="test">Teste</option><option value="active">Ativo</option></select></label>
         </div>
 
+        <div className="mt-8 border-t border-white/10 pt-6">
+          <TenantNicheModuleMatrix
+            nicheProfile={nicheProfile}
+            enabledModules={enabledModules}
+            onChangeNiche={setNicheProfile}
+            onChangeModules={setEnabledModules}
+            disabled={create.isPending}
+          />
+        </div>
+
         <div className="mt-8 flex justify-end gap-3">
           <button onClick={onClose} className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-slate-300">
             Cancelar
           </button>
           <button
-            onClick={() => create.mutate({ ...form, idempotencyKey: idempotencyKey.current })}
+            onClick={() => create.mutate({ ...form, nicheProfile, enabledModules, idempotencyKey: idempotencyKey.current })}
             disabled={!form.company || !form.contact || !form.email || !form.phone || create.isPending}
             className="rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-5 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
           >
@@ -597,6 +618,14 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
   const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<{ id: string; name: string; email: string } | null>(null);
   const [editUserForm, setEditUserForm] = useState({ name: "", email: "" });
+  const [detailNiche, setDetailNiche] = useState<TenantNicheProfile>((client.nicheProfile as TenantNicheProfile) || "personalizado");
+  const [detailModules, setDetailModules] = useState<TenantModuleKey[]>(resolveTenantEnabledModules(client.nicheProfile, client.enabledModules));
+  const [showEditMatrix, setShowEditMatrix] = useState(false);
+
+  useEffect(() => {
+    setDetailNiche((client.nicheProfile as TenantNicheProfile) || "personalizado");
+    setDetailModules(resolveTenantEnabledModules(client.nicheProfile, client.enabledModules));
+  }, [client.clientId, client.nicheProfile, client.enabledModules]);
 
   useEffect(() => {
     if (editingUser) {
@@ -775,19 +804,92 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
           )}
         </div>
 
-        {/* Modules */}
+        {/* Perfil de Nicho e Matriz Granular de Módulos (CRM / ERP) */}
         <div className="mb-6 rounded-2xl border border-white/10 bg-white/[.03] p-5">
-          <h4 className="mb-3 text-sm font-semibold text-white">Módulos liberados</h4>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {ALL_MODULES.map((mod) => (
-              <ModuleToggle
-                key={mod}
-                name={MODULE_LABELS[mod]}
-                enabled={editingModules.includes(mod)}
-                onToggle={() => toggleModule.mutate({ clientId: client.clientId, module: mod, enabled: !editingModules.includes(mod) })}
-              />
-            ))}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-emerald-400" />
+                Perfil de Nicho & Controle Granular de Módulos (CRM / ERP)
+              </h4>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Nicho configurado: <strong className="text-emerald-300 capitalize">{client.nicheProfile ?? "personalizado"}</strong> • {detailModules.length} de {ALL_MODULE_KEYS.length} módulos ativos
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                if (showEditMatrix) {
+                  setDetailNiche((client.nicheProfile as TenantNicheProfile) || "personalizado");
+                  setDetailModules(resolveTenantEnabledModules(client.nicheProfile, client.enabledModules));
+                  setShowEditMatrix(false);
+                } else {
+                  setShowEditMatrix(true);
+                }
+              }}
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"
+            >
+              {showEditMatrix ? "Cancelar Edição" : "Editar Módulos & Nicho"}
+            </button>
           </div>
+
+          {showEditMatrix ? (
+            <div className="space-y-4">
+              <TenantNicheModuleMatrix
+                nicheProfile={detailNiche}
+                enabledModules={detailModules}
+                onChangeNiche={setDetailNiche}
+                onChangeModules={setDetailModules}
+                disabled={updateClientInfo.isPending}
+              />
+              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDetailNiche((client.nicheProfile as TenantNicheProfile) || "personalizado");
+                    setDetailModules(resolveTenantEnabledModules(client.nicheProfile, client.enabledModules));
+                    setShowEditMatrix(false);
+                  }}
+                  className="rounded-xl border border-white/10 px-4 py-2 text-xs text-slate-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateClientInfo.mutate({
+                      clientId: client.clientId,
+                      nicheProfile: detailNiche,
+                      enabledModules: detailModules,
+                    });
+                    setShowEditMatrix(false);
+                  }}
+                  disabled={updateClientInfo.isPending}
+                  className="rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-4 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50"
+                >
+                  {updateClientInfo.isPending ? "Salvando..." : "Salvar Alterações de Nicho e Módulos"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {MODULE_CATALOG.map((mod) => {
+                const isModActive = detailModules.includes(mod.key);
+                return (
+                  <div
+                    key={mod.key}
+                    className={`flex items-center gap-2 p-2 rounded-xl text-xs border ${
+                      isModActive
+                        ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-200"
+                        : "border-white/5 bg-slate-900/20 text-slate-500 line-through opacity-60"
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isModActive ? "bg-emerald-400" : "bg-slate-600"}`} />
+                    <span className="truncate">{mod.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Users */}

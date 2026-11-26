@@ -422,6 +422,8 @@ export const megadeskDomainClients = mysqlTable(
     apiToken: varchar("api_token", { length: 255 }).notNull(),
     modulesJson: longtext("modules_json").notNull(),
     integrationsJson: longtext("integrations_json").notNull(),
+    nicheProfile: varchar("niche_profile", { length: 32 }).default("personalizado").notNull(),
+    enabledModules: json("enabled_modules").$type<string[]>(),
     aiMonthlyTokenLimit: int("ai_monthly_token_limit").default(1000000).notNull(),
     aiCycleRenewalDate: timestamp("ai_cycle_renewal_date", { mode: "string" }),
     createdAt: timestamp("created_at", { mode: "string" })

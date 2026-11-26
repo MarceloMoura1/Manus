@@ -2,6 +2,7 @@ import React from "react";
 import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
 import { ClientesPage } from "../ClientesPage";
 import type { CrmWhatsAppIntent } from "../../../../shared/crm";
+import { isModuleEnabled, type TenantModuleKey } from "@shared/tenant-modules";
 import { CrmSummaryPage } from "./CrmSummaryPage";
 import { ActivitiesPage } from "./ActivitiesPage";
 import { ProposalsPage } from "./ProposalsPage";
@@ -31,20 +32,24 @@ export type CrmSection =
   | "reports";
 
 export function getCrmTopbarItems({
+  enabledModules,
   onNavigate,
 }: {
+  enabledModules?: string[];
   onNavigate: (section: CrmSection) => void;
 }): ModuleTopbarItem[] {
+  const isEnabled = (key: TenantModuleKey) => isModuleEnabled(enabledModules, key);
   const items: ModuleTopbarItem[] = [
     { id: "summary" as const, label: "Resumo", icon: LayoutDashboard, onSelect: () => onNavigate("summary") },
-    { id: "clients" as const, label: "Clientes", icon: Users, onSelect: () => onNavigate("clients") },
-    { id: "proposals" as const, label: "Propostas", icon: FileText, onSelect: () => onNavigate("proposals") },
-    { id: "leads" as const, label: "Leads", icon: UserPlus, onSelect: () => onNavigate("leads") },
-    { id: "pipeline" as const, label: "Funil de Vendas", icon: Filter, onSelect: () => onNavigate("pipeline") },
+    { id: "clients" as const, label: "Clientes", icon: Users, hidden: !isEnabled("crm.clientes"), onSelect: () => onNavigate("clients") },
+    { id: "proposals" as const, label: "Propostas", icon: FileText, hidden: !isEnabled("crm.propostas"), onSelect: () => onNavigate("proposals") },
+    { id: "leads" as const, label: "Leads", icon: UserPlus, hidden: !isEnabled("crm.leads"), onSelect: () => onNavigate("leads") },
+    { id: "pipeline" as const, label: "Funil de Vendas", icon: Filter, hidden: !isEnabled("crm.pipeline"), onSelect: () => onNavigate("pipeline") },
     {
       id: "automations" as const,
       label: "Automações e IA",
       icon: SlidersHorizontal,
+      hidden: !isEnabled("assistente_ia"),
       badge: (
         <span className="ml-1 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/20 px-1 text-[10px] font-bold text-blue-400">
           IA
@@ -71,6 +76,7 @@ export function CRMWorkspace({
   whatsappConnected,
   canStartConversation,
   canPermanentlyDeleteClients,
+  enabledModules,
 }: {
   section: CrmSection;
   onNavigate: (section: CrmSection) => void;
@@ -83,12 +89,14 @@ export function CRMWorkspace({
   whatsappConnected: boolean;
   canStartConversation: boolean;
   canPermanentlyDeleteClients: boolean;
+  enabledModules?: string[];
 }) {
+  const isEnabled = (key: TenantModuleKey) => isModuleEnabled(enabledModules, key);
   const denied = (
     <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center dark:border-slate-800 dark:bg-slate-900">
       <h1 className="text-xl font-bold text-slate-900 dark:text-white">Acesso indisponível</h1>
       <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-        Este submódulo não está disponível para o seu perfil de usuário.
+        Este submódulo não está disponível para o seu perfil de usuário ou configurações da empresa.
       </p>
     </div>
   );
@@ -101,29 +109,29 @@ export function CRMWorkspace({
       break;
 
     case "pipeline":
-      content = (
+      content = isEnabled("crm.pipeline") ? (
         <PipelinePage
           onNavigate={onNavigate}
           onClientNavigate={onClientNavigate}
           whatsappConnected={whatsappConnected}
           canStartConversation={canStartConversation}
         />
-      );
+      ) : denied;
       break;
 
     case "leads":
-      content = (
+      content = isEnabled("crm.leads") ? (
         <LeadsPage
           onNavigate={onNavigate}
           onClientNavigate={onClientNavigate}
           whatsappConnected={whatsappConnected}
           canStartConversation={canStartConversation}
         />
-      );
+      ) : denied;
       break;
 
     case "clients":
-      content = canAccessClients ? (
+      content = canAccessClients && isEnabled("crm.clientes") ? (
         <ClientesPage
           initialSelectedId={initialCrmClientId}
           onNavigate={onClientNavigate}
@@ -148,7 +156,7 @@ export function CRMWorkspace({
       break;
 
     case "proposals":
-      content = (
+      content = isEnabled("crm.propostas") ? (
         <ProposalsPage
           onNavigate={onNavigate}
           onClientNavigate={onClientNavigate}
@@ -158,11 +166,11 @@ export function CRMWorkspace({
           initialSelectedId={initialSalePublicId}
           onSaleNavigate={onNavigateToSale}
         />
-      );
+      ) : denied;
       break;
 
     case "automations":
-      content = <AutomationsPage />;
+      content = isEnabled("assistente_ia") ? <AutomationsPage /> : denied;
       break;
 
     case "reports":

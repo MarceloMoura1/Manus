@@ -10,6 +10,7 @@ import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import { syncClientDataToDb, syncTeamUsersToDb, validateSyncIntegrity, getSyncedClientData } from "./sync-megadesk";
 import { getAiTokenUsageSummary } from "./modules/ai-usage/ai-usage.service";
+import { resolveTenantEnabledModules, ALL_MODULE_KEYS, type TenantModuleKey } from "../shared/tenant-modules";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -131,10 +132,31 @@ export const megadeskSettingsRouter = router({
           cycle_renewal_date: string;
           days_remaining: number;
         } | null,
+        nicheProfile: "personalizado",
+        enabledModules: [...ALL_MODULE_KEYS] as TenantModuleKey[],
       };
 
       if (!pool) {
         return result;
+      }
+
+      // 0. Nicho & Módulos Habilitados
+      try {
+        const [clientRows] = (await pool.execute(
+          "SELECT niche_profile, enabled_modules FROM megadesk_domain_clients WHERE client_id = ?",
+          [tenantId]
+        )) as any[];
+        if (clientRows && clientRows[0]) {
+          const profile = clientRows[0].niche_profile || "personalizado";
+          let parsed = clientRows[0].enabled_modules;
+          if (typeof parsed === "string") {
+            try { parsed = JSON.parse(parsed); } catch { parsed = null; }
+          }
+          result.nicheProfile = profile;
+          result.enabledModules = resolveTenantEnabledModules(profile, parsed);
+        }
+      } catch {
+        // Usa default se não encontrar
       }
 
       // 1. Atendimento (Conversas WhatsApp)

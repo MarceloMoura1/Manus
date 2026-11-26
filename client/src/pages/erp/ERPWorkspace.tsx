@@ -79,6 +79,7 @@ import {
   prepareProductCommand,
   formatCategoryOptionLabel,
 } from "./ProductFormDialog";
+import { isModuleEnabled, type TenantModuleKey } from "@shared/tenant-modules";
 
 export type ErpSection = "summary" | "clients" | "products" | "services" | "stock" | "suppliers" | "purchases" | "sales" | "finance" | "fiscal" | "reports";
 const planned = ["Integrações"];
@@ -89,6 +90,7 @@ export function getErpTopbarItems({
   canAccessFinance,
   canAccessFiscal,
   canAccessReports,
+  enabledModules,
   onNavigate,
 }: {
   canAccessClients: boolean;
@@ -96,20 +98,22 @@ export function getErpTopbarItems({
   canAccessFinance: boolean;
   canAccessFiscal: boolean;
   canAccessReports: boolean;
+  enabledModules?: string[];
   onNavigate: (section: ErpSection) => void;
 }): ModuleTopbarItem[] {
+  const isEnabled = (key: TenantModuleKey) => isModuleEnabled(enabledModules, key);
   const available = [
-    { id:"summary" as const, label: "Resumo", icon: LayoutDashboard },
-    { id:"products" as const, label: "Produtos", icon: Package },
-    { id:"services" as const, label: "Serviços", icon: Wrench },
-    { id:"stock" as const, label: "Estoque", icon: Boxes },
-    { id:"sales" as const, label: "Vendas", icon: ShoppingCart, hidden: !canAccessSales },
-    { id:"purchases" as const, label: "Compras", icon: ShoppingBag },
-    { id:"finance" as const, label: "Financeiro", icon: DollarSign, hidden: !canAccessFinance },
-    { id:"fiscal" as const, label: "Fiscal", icon: Receipt, hidden: !canAccessFiscal },
-    { id:"reports" as const, label:"Relatórios", icon: BarChart3, hidden: !canAccessReports },
-    { id:"suppliers" as const, label: "Fornecedores", icon: Truck },
-    ...(canAccessClients ? [{ id:"clients" as const, label: "Clientes", icon: Users }] : []),
+    { id:"summary" as const, label: "Resumo", icon: LayoutDashboard, hidden: !isEnabled("erp.resumo") },
+    { id:"products" as const, label: "Produtos", icon: Package, hidden: !isEnabled("erp.produtos") },
+    { id:"services" as const, label: "Serviços", icon: Wrench, hidden: !isEnabled("erp.servicos") },
+    { id:"stock" as const, label: "Estoque", icon: Boxes, hidden: !isEnabled("erp.estoque") },
+    { id:"sales" as const, label: "Vendas", icon: ShoppingCart, hidden: !canAccessSales || !isEnabled("erp.vendas") },
+    { id:"purchases" as const, label: "Compras", icon: ShoppingBag, hidden: !isEnabled("erp.compras") },
+    { id:"finance" as const, label: "Financeiro", icon: DollarSign, hidden: !canAccessFinance || !isEnabled("erp.financeiro") },
+    { id:"fiscal" as const, label: "Fiscal", icon: Receipt, hidden: !canAccessFiscal || !isEnabled("erp.fiscal") },
+    { id:"reports" as const, label:"Relatórios", icon: BarChart3, hidden: !canAccessReports || !isEnabled("erp.relatorios") },
+    { id:"suppliers" as const, label: "Fornecedores", icon: Truck, hidden: !isEnabled("erp.fornecedores") },
+    ...(canAccessClients && isEnabled("crm.clientes") ? [{ id:"clients" as const, label: "Clientes", icon: Users }] : []),
   ];
 
   return [
@@ -175,14 +179,36 @@ function StateMessage({ title, retry }: { title: string; retry?: () => void }) {
   return <ErpEmptyState title={title} action={retry ? { label: "Tentar novamente", onClick: retry } : undefined} />;
 }
 
-export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessSales, canAccessFinance, canAccessFiscal, canAccessReports, canPermanentlyDeleteClients, initialCrmClientId, initialSalePublicId, onClientNavigate, onNavigateToClient, onNavigateToSale, onNavigateToProposals, whatsappConnected, canStartConversation }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; canAccessSales: boolean; canAccessFinance: boolean; canAccessFiscal: boolean; canAccessReports: boolean; canPermanentlyDeleteClients: boolean; initialCrmClientId?: string; initialSalePublicId?: string; onClientNavigate: (intent: CrmWhatsAppIntent) => void; onNavigateToClient: (crmClientId: string) => void; onNavigateToSale: (salePublicId?: string) => void; onNavigateToProposals?: () => void; whatsappConnected: boolean; canStartConversation: boolean }) {
+export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessSales, canAccessFinance, canAccessFiscal, canAccessReports, canPermanentlyDeleteClients, initialCrmClientId, initialSalePublicId, onClientNavigate, onNavigateToClient, onNavigateToSale, onNavigateToProposals, whatsappConnected, canStartConversation, enabledModules }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; canAccessSales: boolean; canAccessFinance: boolean; canAccessFiscal: boolean; canAccessReports: boolean; canPermanentlyDeleteClients: boolean; initialCrmClientId?: string; initialSalePublicId?: string; onClientNavigate: (intent: CrmWhatsAppIntent) => void; onNavigateToClient: (crmClientId: string) => void; onNavigateToSale: (salePublicId?: string) => void; onNavigateToProposals?: () => void; whatsappConnected: boolean; canStartConversation: boolean; enabledModules?: string[] }) {
   useErpRealtime();
-  const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div>;
-  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={salePublicId => onNavigateToSale(salePublicId)} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "services" ? <ServicesPage/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? canAccessSales ? <SalesPage initialSelectedId={initialSalePublicId} onSaleNavigate={onNavigateToSale} onClientNavigate={onNavigateToClient} onNavigateToProposals={onNavigateToProposals}/> : denied : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
+  const isEnabled = (key: TenantModuleKey) => isModuleEnabled(enabledModules, key);
+  const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo ou tela não está habilitado para o perfil da sua empresa.</p></div>;
+  const content =
+    section === "summary"
+      ? (isEnabled("erp.resumo") ? <Summary onNavigate={onNavigate} enabledModules={enabledModules} /> : denied)
+      : section === "clients"
+      ? (canAccessClients && isEnabled("crm.clientes") ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={salePublicId => onNavigateToSale(salePublicId)} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied)
+      : section === "products"
+      ? (isEnabled("erp.produtos") ? <Products/> : denied)
+      : section === "services"
+      ? (isEnabled("erp.servicos") ? <ServicesPage/> : denied)
+      : section === "suppliers"
+      ? (isEnabled("erp.fornecedores") ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : denied)
+      : section === "purchases"
+      ? (isEnabled("erp.compras") ? <PurchasesPage onNavigate={onNavigate}/> : denied)
+      : section === "sales"
+      ? (canAccessSales && isEnabled("erp.vendas") ? <SalesPage initialSelectedId={initialSalePublicId} onSaleNavigate={onNavigateToSale} onClientNavigate={onNavigateToClient} onNavigateToProposals={onNavigateToProposals}/> : denied)
+      : section === "finance"
+      ? (canAccessFinance && isEnabled("erp.financeiro") ? <FinancePage/> : denied)
+      : section === "fiscal"
+      ? (canAccessFiscal && isEnabled("erp.fiscal") ? <FiscalPage/> : denied)
+      : section === "reports"
+      ? (canAccessReports && isEnabled("erp.relatorios") ? <ReportsPage/> : denied)
+      : (isEnabled("erp.estoque") ? <StockPage/> : denied);
   return <div className="w-full min-h-full bg-background text-foreground flex flex-col" data-testid="erp-workspace">{content}</div>;
 }
 
-function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) {
+function Summary({ onNavigate, enabledModules }: { onNavigate: (section: ErpSection) => void; enabledModules?: string[] }) {
   const query = trpc.erp.summary.useQuery();
   if (query.isLoading) return <StateMessage title="Carregando resumo do ERP…"/>;
   if (query.error) return <StateMessage title="Não foi possível carregar o resumo." retry={() => void query.refetch()}/>;
@@ -212,50 +238,60 @@ function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) 
 
         {data.canWrite && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() => onNavigate("products")}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-xs"
-            >
-              <PackagePlus className="mr-1.5 size-4" />
-              + Novo Produto
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onNavigate("services")}
-              className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-            >
-              <Wrench className="mr-1.5 size-4 text-purple-600" />
-              + Novo Serviço
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onNavigate("stock")}
-              className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-            >
-              <Boxes className="mr-1.5 size-4 text-emerald-600" />
-              Movimentar Estoque
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onNavigate("sales")}
-              className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-            >
-              <ShoppingCart className="mr-1.5 size-4 text-amber-600" />
-              Nova Venda/Orçamento
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onNavigate("finance")}
-              className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-            >
-              <CreditCard className="mr-1.5 size-4 text-cyan-600" />
-              Lançamento Financeiro
-            </Button>
+            {isModuleEnabled(enabledModules, "erp.produtos") && (
+              <Button
+                size="sm"
+                onClick={() => onNavigate("products")}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-xs"
+              >
+                <PackagePlus className="mr-1.5 size-4" />
+                + Novo Produto
+              </Button>
+            )}
+            {isModuleEnabled(enabledModules, "erp.servicos") && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onNavigate("services")}
+                className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+              >
+                <Wrench className="mr-1.5 size-4 text-purple-600" />
+                + Novo Serviço
+              </Button>
+            )}
+            {isModuleEnabled(enabledModules, "erp.estoque") && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onNavigate("stock")}
+                className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+              >
+                <Boxes className="mr-1.5 size-4 text-emerald-600" />
+                Movimentar Estoque
+              </Button>
+            )}
+            {isModuleEnabled(enabledModules, "erp.vendas") && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onNavigate("sales")}
+                className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+              >
+                <ShoppingCart className="mr-1.5 size-4 text-amber-600" />
+                Nova Venda/Orçamento
+              </Button>
+            )}
+            {isModuleEnabled(enabledModules, "erp.financeiro") && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onNavigate("finance")}
+                className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium text-xs rounded-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+              >
+                <CreditCard className="mr-1.5 size-4 text-cyan-600" />
+                Lançamento Financeiro
+              </Button>
+            )}
           </div>
         )}
       </div>

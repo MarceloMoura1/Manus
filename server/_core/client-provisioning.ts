@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
+import { resolveTenantEnabledModules } from "../../shared/tenant-modules";
 
 export type ProvisionedClient = {
   id: string;
@@ -17,6 +18,8 @@ export type ProvisionedClient = {
   accessReleased: boolean;
   apiToken: string;
   modules: string[];
+  nicheProfile?: string;
+  enabledModules?: string[];
   integrations: Record<string, unknown>;
   users: Array<{ id: string; name: string; email: string; role: "admin"; status: "active" | "blocked"; permissions: string[]; passwordHash?: string }>;
 };
@@ -31,6 +34,8 @@ export type ProvisionClientInput = {
   plan: string;
   maxUsers: number;
   statusType: "active" | "test";
+  nicheProfile?: string;
+  enabledModules?: string[];
   passwordHash: string;
   permissions: string[];
   actorId: string;
@@ -42,6 +47,7 @@ type ClientRow = RowDataPacket & {
   email: string | null; phone: string; cnpj: string | null; plan: string; maxUsers: number;
   statusType: "active" | "test"; status: ProvisionedClient["status"]; accessReleased: number;
   apiToken: string; modulesJson: string; integrationsJson: string;
+  nicheProfile: string | null; enabledModules: unknown;
 };
 type UserRow = RowDataPacket & {
   id: string; name: string; email: string; role: "admin"; status: "active" | "blocked";
@@ -68,7 +74,7 @@ function parseObject(value: string): Record<string, unknown> {
 
 async function loadClient(connection: PoolConnection, clientId: string): Promise<ProvisionedClient> {
   const [clientRows] = await connection.execute<ClientRow[]>(
-    "SELECT internal_id AS id, client_id AS clientId, tenant_database_name AS tenantDatabaseName, company, contact, email, phone, cnpj, plan, max_users AS maxUsers, status_type AS statusType, status, access_released AS accessReleased, api_token AS apiToken, modules_json AS modulesJson, integrations_json AS integrationsJson FROM megadesk_domain_clients WHERE client_id = ?",
+    "SELECT internal_id AS id, client_id AS clientId, tenant_database_name AS tenantDatabaseName, company, contact, email, phone, cnpj, plan, max_users AS maxUsers, status_type AS statusType, status, access_released AS accessReleased, api_token AS apiToken, modules_json AS modulesJson, integrations_json AS integrationsJson, niche_profile AS nicheProfile, enabled_modules AS enabledModules FROM megadesk_domain_clients WHERE client_id = ?",
     [clientId],
   );
   const row = clientRows[0];
@@ -77,12 +83,23 @@ async function loadClient(connection: PoolConnection, clientId: string): Promise
     "SELECT user_id AS id, name, email, role, status, permissions_json AS permissionsJson, password_hash AS passwordHash FROM megadesk_domain_client_users WHERE client_id = ? ORDER BY created_at, user_id",
     [clientId],
   );
+  let parsedEnabledModules = null;
+  if (row.enabledModules) {
+    try {
+      parsedEnabledModules = typeof row.enabledModules === "string" ? JSON.parse(row.enabledModules) : row.enabledModules;
+    } catch {
+      parsedEnabledModules = null;
+    }
+  }
   return {
     id: row.id, clientId: row.clientId, tenantDatabaseName: row.tenantDatabaseName,
     company: row.company, contact: row.contact, email: row.email ?? "", phone: row.phone,
     cnpj: row.cnpj ?? "", plan: row.plan, maxUsers: row.maxUsers, statusType: row.statusType,
     status: row.status, accessReleased: Boolean(row.accessReleased), apiToken: row.apiToken,
-    modules: parseStringArray(row.modulesJson), integrations: parseObject(row.integrationsJson),
+    modules: parseStringArray(row.modulesJson),
+    nicheProfile: row.nicheProfile ?? "personalizado",
+    enabledModules: resolveTenantEnabledModules(row.nicheProfile, parsedEnabledModules as any),
+    integrations: parseObject(row.integrationsJson),
     users: userRows.map((user) => ({
       id: user.id, name: user.name, email: user.email, role: "admin", status: user.status,
       permissions: parseStringArray(user.permissionsJson), ...(user.passwordHash ? { passwordHash: user.passwordHash } : {}),
@@ -111,17 +128,23 @@ async function executeProvisioning(connection: PoolConnection, input: ProvisionC
   }
 
   const clientId = `cliente-${randomUUID()}`;
+  const nicheProfile = input.nicheProfile || "personalizado";
+  const enabledModules = input.enabledModules && input.enabledModules.length > 0
+    ? input.enabledModules
+    : resolveTenantEnabledModules(nicheProfile, null);
   const client: ProvisionedClient = {
     id: `client-${randomUUID()}`, clientId, tenantDatabaseName: `tenant_${clientId.replaceAll("-", "_")}`,
     company: input.company, contact: input.contact, email: input.email, phone: input.phone, cnpj: input.cnpj,
     plan: input.plan, maxUsers: input.maxUsers, statusType: input.statusType, status: "provisioning",
     accessReleased: false, apiToken: `mdsk_live_${randomUUID()}`, modules: [], integrations: {},
+    nicheProfile,
+    enabledModules,
     users: [{ id: `user-${randomUUID()}`, name: input.contact, email: input.email, role: "admin",
       status: "blocked", permissions: input.permissions, passwordHash: input.passwordHash }],
   };
   await connection.execute(
-    "INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
-    [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email, client.phone, client.cnpj || null, client.plan, client.maxUsers, client.status, client.statusType, client.apiToken, "[]", "{}"],
+    "INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json, niche_profile, enabled_modules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+    [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email, client.phone, client.cnpj || null, client.plan, client.maxUsers, client.status, client.statusType, client.apiToken, "[]", "{}", nicheProfile, JSON.stringify(enabledModules)],
   );
   const user = client.users[0];
   await connection.execute(

@@ -8,6 +8,7 @@ import { decodeConversationMediaDataUrl, removeConversationMedia } from "./conve
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
 import { CONFIGURABLE_MODULES as CANONICAL_CONFIGURABLE_MODULES, COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
+import { resolveTenantEnabledModules } from "../shared/tenant-modules";
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, persistMegaDeskClientUser, MegaDeskClientUserPersistenceError, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
 import bcrypt from "bcryptjs";
 import { megaadminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
@@ -120,6 +121,8 @@ type MegaClient = {
   accessReleased: boolean;
   apiToken: string;
   modules: string[];
+  nicheProfile?: string;
+  enabledModules?: string[];
   integrations: ClientIntegrations;
   users: Array<{ id: string; name: string; email: string; role: "admin" | "manager" | "agent" | "viewer"; status: "active" | "blocked"; permissions?: string[]; passwordHash?: string }>;
 };
@@ -536,7 +539,14 @@ async function emitConversationEventBestEffort(clientId: string, event: string, 
 }
 
 export function sanitizeClient(client: MegaClient) {
-  return { ...client, apiToken: undefined, tokenHint: tokenHint(client.apiToken), users: client.users.map((user) => sanitizeMegaAdminUser({ ...user, permissions: resolveUserPermissions(user, client.modules) })) };
+  return {
+    ...client,
+    apiToken: undefined,
+    tokenHint: tokenHint(client.apiToken),
+    nicheProfile: client.nicheProfile ?? "personalizado",
+    enabledModules: resolveTenantEnabledModules(client.nicheProfile, client.enabledModules),
+    users: client.users.map((user) => sanitizeMegaAdminUser({ ...user, permissions: resolveUserPermissions(user, client.modules) })),
+  };
 }
 
 export const appRouter = router({
@@ -722,6 +732,8 @@ export const appRouter = router({
       plan: z.string().min(2),
       maxUsers: z.number().int().min(1).max(25).default(5),
       statusType: z.enum(["active", "test"]).default("test"),
+      nicheProfile: z.enum(["restaurante", "prestacao_servicos", "ecommerce", "personalizado"]).optional(),
+      enabledModules: z.array(z.string()).optional(),
       idempotencyKey: z.string().trim().min(16).max(120),
     })).mutation(async ({ input, ctx }) => {
       if (process.env.NODE_ENV !== "test") enforceAdministrativeRateLimit(String(ctx.user.id));
@@ -730,6 +742,8 @@ export const appRouter = router({
         const defaultPasswordHash = await bcrypt.hash(`${randomUUID()}${randomUUID()}`, 12);
         const result = await provisionClientAtomically(getPool(), {
           ...normalizedInput,
+          nicheProfile: input.nicheProfile,
+          enabledModules: input.enabledModules,
           passwordHash: defaultPasswordHash,
           permissions: rolePermissions("admin"),
           actorId: String(ctx.user.id),
@@ -759,6 +773,8 @@ export const appRouter = router({
       plan: z.string().min(2).optional(),
       maxUsers: z.number().int().min(1).optional(),
       statusType: z.enum(["active", "test"]).optional(),
+      nicheProfile: z.enum(["restaurante", "prestacao_servicos", "ecommerce", "personalizado"]).optional(),
+      enabledModules: z.array(z.string()).optional(),
     })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
@@ -770,6 +786,8 @@ export const appRouter = router({
       if (input.plan) client.plan = input.plan;
       if (input.maxUsers !== undefined) client.maxUsers = input.maxUsers;
       if (input.statusType) client.statusType = input.statusType;
+      if (input.nicheProfile !== undefined) client.nicheProfile = input.nicheProfile;
+      if (input.enabledModules !== undefined) client.enabledModules = input.enabledModules;
       audit("MegaAdmin", `Informações do cliente atualizadas: ${client.company}`, client.clientId);
       await persistSyncState();
       return { ok: true, client: sanitizeClient(client) };
@@ -1972,6 +1990,8 @@ export const appRouter = router({
             company: client.company,
             plan: client.plan,
             modules: client.modules,
+            nicheProfile: client.nicheProfile ?? "personalizado",
+            enabledModules: resolveTenantEnabledModules(client.nicheProfile, client.enabledModules),
             expiresAt: expiresAt.getTime(),
           },
         };
@@ -1998,6 +2018,8 @@ export const appRouter = router({
             company: client.company,
             plan: client.plan,
             modules: client.modules,
+            nicheProfile: client.nicheProfile ?? "personalizado",
+            enabledModules: resolveTenantEnabledModules(client.nicheProfile, client.enabledModules),
           },
         };
       }),
