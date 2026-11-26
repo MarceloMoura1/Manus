@@ -34,6 +34,7 @@ import {
   TenantModuleKey,
   resolveTenantEnabledModules,
   ALL_MODULE_KEYS,
+  isUserPermissionAllowedByTenant,
 } from "@shared/tenant-modules";
 
 function cn(...classes: Array<string | false | undefined | null>) {
@@ -661,8 +662,9 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
                 const rawPermissions = editingPermissions[expandedUser] ?? user?.permissions ?? [];
                 const currentPermissions = normalizeModuleNamesToAdmin(rawPermissions);
                 const hasPermission = currentPermissions.includes(mod) || (mod === "conversas" && currentPermissions.includes("atendimento_ativo"));
+                const blockedByCompany = !isUserPermissionAllowedByTenant(mod, enabledModules);
                 return (
-                  <label key={mod} className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 cursor-pointer transition border border-slate-700 hover:border-blue-500">
+                  <label key={mod} className={`flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 cursor-pointer transition border ${blockedByCompany ? "border-amber-500/40 opacity-80" : "border-slate-700 hover:border-blue-500"}`} title={blockedByCompany ? "Módulo desabilitado no nível da empresa: o usuário não verá este item no MegaDesk." : undefined}>
                     <input
                       type="checkbox"
                       checked={hasPermission}
@@ -680,6 +682,11 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
                       className="rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500/50"
                     />
                     <span className="text-sm text-slate-300">{(MODULE_LABELS as Record<string, string>)[mod] ?? mod}</span>
+                    {blockedByCompany && (
+                      <span className="ml-auto rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                        Bloqueado pela empresa
+                      </span>
+                    )}
                   </label>
                 );
               })}

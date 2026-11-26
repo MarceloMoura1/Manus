@@ -2,7 +2,7 @@ import React from "react";
 import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
 import { ClientesPage } from "../ClientesPage";
 import type { CrmWhatsAppIntent } from "../../../../shared/crm";
-import { isModuleEnabled, type TenantModuleKey } from "@shared/tenant-modules";
+import { isModuleEnabled, getFirstEnabledCrmSection, isCrmSectionEnabled, type TenantModuleKey } from "@shared/tenant-modules";
 import { CrmSummaryPage } from "./CrmSummaryPage";
 import { ActivitiesPage } from "./ActivitiesPage";
 import { ProposalsPage } from "./ProposalsPage";
@@ -40,7 +40,7 @@ export function getCrmTopbarItems({
 }): ModuleTopbarItem[] {
   const isEnabled = (key: TenantModuleKey) => isModuleEnabled(enabledModules, key);
   const items: ModuleTopbarItem[] = [
-    { id: "summary" as const, label: "Resumo", icon: LayoutDashboard, onSelect: () => onNavigate("summary") },
+    { id: "summary" as const, label: "Resumo", icon: LayoutDashboard, hidden: !isEnabled("crm.resumo"), onSelect: () => onNavigate("summary") },
     { id: "clients" as const, label: "Clientes", icon: Users, hidden: !isEnabled("crm.clientes"), onSelect: () => onNavigate("clients") },
     { id: "proposals" as const, label: "Propostas", icon: FileText, hidden: !isEnabled("crm.propostas"), onSelect: () => onNavigate("proposals") },
     { id: "leads" as const, label: "Leads", icon: UserPlus, hidden: !isEnabled("crm.leads"), onSelect: () => onNavigate("leads") },
@@ -49,7 +49,7 @@ export function getCrmTopbarItems({
       id: "automations" as const,
       label: "Automações e IA",
       icon: SlidersHorizontal,
-      hidden: !isEnabled("assistente_ia"),
+      hidden: !isEnabled("crm.automacoes"),
       badge: (
         <span className="ml-1 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/20 px-1 text-[10px] font-bold text-blue-400">
           IA
@@ -57,8 +57,8 @@ export function getCrmTopbarItems({
       ),
       onSelect: () => onNavigate("automations"),
     },
-    { id: "activities" as const, label: "Atividades", icon: Calendar, onSelect: () => onNavigate("activities") },
-    { id: "reports" as const, label: "Relatórios", icon: BarChart3, onSelect: () => onNavigate("reports") },
+    { id: "activities" as const, label: "Atividades", icon: Calendar, hidden: !isEnabled("crm.atividades"), onSelect: () => onNavigate("activities") },
+    { id: "reports" as const, label: "Relatórios", icon: BarChart3, hidden: !isEnabled("crm.relatorios"), onSelect: () => onNavigate("reports") },
   ];
 
   return items;
@@ -103,9 +103,13 @@ export function CRMWorkspace({
 
   let content: React.ReactNode;
 
-  switch (section) {
+  // Se a aba pedida foi desabilitada no MegaAdmin, abre a primeira aba habilitada (sem tela branca).
+  const fallbackSection = isCrmSectionEnabled(enabledModules, section) ? null : getFirstEnabledCrmSection(enabledModules);
+  const activeSection: CrmSection = (fallbackSection as CrmSection | null) ?? section;
+
+  switch (activeSection) {
     case "summary":
-      content = <CrmSummaryPage onNavigate={onNavigate} />;
+      content = isEnabled("crm.resumo") ? <CrmSummaryPage onNavigate={onNavigate} /> : denied;
       break;
 
     case "pipeline":
@@ -145,14 +149,14 @@ export function CRMWorkspace({
       break;
 
     case "activities":
-      content = (
+      content = isEnabled("crm.atividades") ? (
         <ActivitiesPage
           onNavigate={onNavigate}
           onClientNavigate={onClientNavigate}
           whatsappConnected={whatsappConnected}
           canStartConversation={canStartConversation}
         />
-      );
+      ) : denied;
       break;
 
     case "proposals":
@@ -170,15 +174,15 @@ export function CRMWorkspace({
       break;
 
     case "automations":
-      content = isEnabled("assistente_ia") ? <AutomationsPage /> : denied;
+      content = isEnabled("crm.automacoes") ? <AutomationsPage /> : denied;
       break;
 
     case "reports":
-      content = <ReportsPage />;
+      content = isEnabled("crm.relatorios") ? <ReportsPage /> : denied;
       break;
 
     default:
-      content = <CrmSummaryPage onNavigate={onNavigate} />;
+      content = isEnabled("crm.resumo") ? <CrmSummaryPage onNavigate={onNavigate} /> : denied;
   }
 
   return (

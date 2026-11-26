@@ -1,7 +1,16 @@
+import { normalizeModuleNameToAdmin, normalizeModuleNameToBackend } from './const';
 export type TenantNicheProfile = 'restaurante' | 'prestacao_servicos' | 'ecommerce' | 'personalizado';
 
 export type OperationModuleKey = 'atendimento' | 'chamados' | 'rastreamento' | 'assistente_ia';
-export type CrmModuleKey = 'crm.pipeline' | 'crm.leads' | 'crm.propostas' | 'crm.clientes';
+export type CrmModuleKey =
+  | 'crm.resumo'
+  | 'crm.clientes'
+  | 'crm.propostas'
+  | 'crm.leads'
+  | 'crm.pipeline'
+  | 'crm.automacoes'
+  | 'crm.atividades'
+  | 'crm.relatorios';
 export type ErpModuleKey =
   | 'erp.resumo'
   | 'erp.produtos'
@@ -31,10 +40,14 @@ export const MODULE_CATALOG: ModuleDefinition[] = [
   { key: 'assistente_ia', label: 'Assistente & Bot de IA', description: 'Roteamento e automação inteligente', group: 'operacao' },
 
   // CRM
-  { key: 'crm.pipeline', label: 'Funil de Vendas (Pipeline)', description: 'Gestão de oportunidades e fases', group: 'crm' },
-  { key: 'crm.leads', label: 'Base de Leads', description: 'Prospecção e qualificação de contatos', group: 'crm' },
-  { key: 'crm.propostas', label: 'Propostas Comerciais', description: 'Emissão e envio de orçamentos em PDF', group: 'crm' },
+  { key: 'crm.resumo', label: 'Resumo do CRM', description: 'Painel com indicadores e atalhos do CRM', group: 'crm' },
   { key: 'crm.clientes', label: 'Carteira de Clientes', description: 'Cadastro e histórico de clientes', group: 'crm' },
+  { key: 'crm.propostas', label: 'Propostas Comerciais', description: 'Emissão e envio de orçamentos em PDF', group: 'crm' },
+  { key: 'crm.leads', label: 'Base de Leads', description: 'Prospecção e qualificação de contatos', group: 'crm' },
+  { key: 'crm.pipeline', label: 'Funil de Vendas (Pipeline)', description: 'Gestão de oportunidades e fases', group: 'crm' },
+  { key: 'crm.automacoes', label: 'Automações e IA', description: 'Regras e automações inteligentes do CRM', group: 'crm' },
+  { key: 'crm.atividades', label: 'Atividades e Agenda', description: 'Tarefas, follow-ups e compromissos comerciais', group: 'crm' },
+  { key: 'crm.relatorios', label: 'Relatórios do CRM', description: 'Métricas de funil, conversão e desempenho', group: 'crm' },
 
   // ERP
   { key: 'erp.resumo', label: 'Resumo Executivo (Cockpit)', description: 'KPIs, saúde financeira e atalhos rápidos', group: 'erp' },
@@ -56,8 +69,10 @@ export const NICHE_PRESETS: Record<TenantNicheProfile, TenantModuleKey[]> = {
     'atendimento',
     'chamados',
     'assistente_ia',
+    'crm.resumo',
     'crm.clientes',
     'crm.propostas',
+    'crm.atividades',
     'erp.resumo',
     'erp.produtos',
     'erp.vendas',
@@ -69,10 +84,14 @@ export const NICHE_PRESETS: Record<TenantNicheProfile, TenantModuleKey[]> = {
     'atendimento',
     'chamados',
     'assistente_ia',
-    'crm.pipeline',
-    'crm.leads',
-    'crm.propostas',
+    'crm.resumo',
     'crm.clientes',
+    'crm.propostas',
+    'crm.leads',
+    'crm.pipeline',
+    'crm.automacoes',
+    'crm.atividades',
+    'crm.relatorios',
     'erp.resumo',
     'erp.servicos',
     'erp.vendas',
@@ -158,6 +177,22 @@ export function normalizeTenantModules(modules: unknown): TenantModuleKey[] | nu
 }
 
 /**
+ * Retrocompatibilidade: listas salvas antes da separação das abas Resumo, Atividades,
+ * Automações e Relatórios do CRM só tinham crm.pipeline/leads/propostas/clientes.
+ * Essas abas eram sempre visíveis (Automações dependia de assistente_ia). Se a lista tem
+ * algum crm.* legado e nenhuma das chaves novas, elas são liberadas para não quebrar o acesso.
+ */
+const NEW_CRM_KEYS: TenantModuleKey[] = ['crm.resumo', 'crm.atividades', 'crm.automacoes', 'crm.relatorios'];
+
+export function expandLegacyCrmModules(modules: TenantModuleKey[]): TenantModuleKey[] {
+  const hasCrm = modules.some((k) => k.startsWith('crm.'));
+  const hasNewCrmKey = modules.some((k) => NEW_CRM_KEYS.includes(k));
+  if (!hasCrm || hasNewCrmKey) return modules;
+  const extra: TenantModuleKey[] = ['crm.resumo', 'crm.atividades', 'crm.relatorios'];
+  if (modules.includes('assistente_ia')) extra.push('crm.automacoes');
+  return [...modules, ...extra];
+}
+/**
  * Resolve os módulos habilitados para um tenant.
  * Se customModules for informado (array não nulo/vazio ou string JSON válida com itens), usa-o diretamente.
  * Se não for informado ou for nulo:
@@ -170,7 +205,7 @@ export function resolveTenantEnabledModules(
 ): TenantModuleKey[] {
   const normalized = normalizeTenantModules(customModules);
   if (normalized && normalized.length > 0) {
-    return normalized;
+    return expandLegacyCrmModules(normalized);
   }
 
   const normalizedProfile = (nicheProfile || 'personalizado') as TenantNicheProfile;
@@ -194,7 +229,7 @@ export function isModuleEnabled(
   if (enabledModules == null) return true;
   const normalized = normalizeTenantModules(enabledModules);
   if (normalized == null) return true;
-  return normalized.includes(key);
+  return expandLegacyCrmModules(normalized).includes(key);
 }
 
 export function hasAnyCrmEnabled(enabledModules: unknown): boolean {
@@ -209,4 +244,82 @@ export function hasAnyErpEnabled(enabledModules: unknown): boolean {
   const normalized = normalizeTenantModules(enabledModules);
   if (normalized == null) return true;
   return normalized.some((k) => k.startsWith('erp.'));
+}
+
+// ─── Abas reais do CRM/ERP ↔ módulos (ordem = ordem da topbar) ─────────────────
+
+export const CRM_SECTION_MODULES = [
+  { section: 'summary', key: 'crm.resumo' },
+  { section: 'clients', key: 'crm.clientes' },
+  { section: 'proposals', key: 'crm.propostas' },
+  { section: 'leads', key: 'crm.leads' },
+  { section: 'pipeline', key: 'crm.pipeline' },
+  { section: 'automations', key: 'crm.automacoes' },
+  { section: 'activities', key: 'crm.atividades' },
+  { section: 'reports', key: 'crm.relatorios' },
+] as const satisfies ReadonlyArray<{ section: string; key: CrmModuleKey }>;
+
+export const ERP_SECTION_MODULES = [
+  { section: 'summary', key: 'erp.resumo' },
+  { section: 'products', key: 'erp.produtos' },
+  { section: 'services', key: 'erp.servicos' },
+  { section: 'stock', key: 'erp.estoque' },
+  { section: 'sales', key: 'erp.vendas' },
+  { section: 'purchases', key: 'erp.compras' },
+  { section: 'finance', key: 'erp.financeiro' },
+  { section: 'fiscal', key: 'erp.fiscal' },
+  { section: 'reports', key: 'erp.relatorios' },
+  { section: 'suppliers', key: 'erp.fornecedores' },
+  { section: 'clients', key: 'crm.clientes' },
+] as const satisfies ReadonlyArray<{ section: string; key: TenantModuleKey }>;
+
+export type CrmSectionId = (typeof CRM_SECTION_MODULES)[number]['section'];
+export type ErpSectionId = (typeof ERP_SECTION_MODULES)[number]['section'];
+
+export function isCrmSectionEnabled(enabledModules: unknown, section: string): boolean {
+  const entry = CRM_SECTION_MODULES.find((s) => s.section === section);
+  return entry ? isModuleEnabled(enabledModules, entry.key) : true;
+}
+
+export function isErpSectionEnabled(enabledModules: unknown, section: string): boolean {
+  const entry = ERP_SECTION_MODULES.find((s) => s.section === section);
+  return entry ? isModuleEnabled(enabledModules, entry.key) : true;
+}
+
+export function getFirstEnabledCrmSection(enabledModules: unknown): CrmSectionId | null {
+  return CRM_SECTION_MODULES.find((s) => isModuleEnabled(enabledModules, s.key))?.section ?? null;
+}
+
+export function getFirstEnabledErpSection(enabledModules: unknown): ErpSectionId | null {
+  return ERP_SECTION_MODULES.find((s) => isModuleEnabled(enabledModules, s.key))?.section ?? null;
+}
+
+// ─── Permissões de usuário (MegaAdmin/backend) ↔ módulos do tenant ───────────────
+
+/** Verifica permissão aceitando tanto o nome do MegaAdmin (conversas) quanto do backend (conversations). */
+export function hasUserPermission(permissions: readonly string[] | null | undefined, name: string): boolean {
+  if (!permissions) return false;
+  const candidates = new Set<string>([name, normalizeModuleNameToBackend(name), normalizeModuleNameToAdmin(name)]);
+  return permissions.some((p) => candidates.has(p));
+}
+
+/** Módulo do tenant que bloqueia uma permissão de usuário (retorna true se a empresa liberou). */
+export function isUserPermissionAllowedByTenant(permission: string, enabledModules: unknown): boolean {
+  switch (normalizeModuleNameToBackend(permission)) {
+    case 'conversations':
+    case 'active-attendance':
+      return isModuleEnabled(enabledModules, 'atendimento');
+    case 'tickets':
+      return isModuleEnabled(enabledModules, 'chamados');
+    case 'tracking':
+      return isModuleEnabled(enabledModules, 'rastreamento');
+    case 'ai-assistant':
+      return isModuleEnabled(enabledModules, 'assistente_ia');
+    case 'crm':
+      return hasAnyCrmEnabled(enabledModules);
+    case 'erp':
+      return hasAnyErpEnabled(enabledModules);
+    default:
+      return true;
+  }
 }

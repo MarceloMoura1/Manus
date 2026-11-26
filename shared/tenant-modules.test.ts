@@ -7,6 +7,13 @@ import {
   isModuleEnabled,
   hasAnyCrmEnabled,
   hasAnyErpEnabled,
+  MODULE_CATALOG,
+  CRM_SECTION_MODULES,
+  ERP_SECTION_MODULES,
+  getFirstEnabledCrmSection,
+  getFirstEnabledErpSection,
+  hasUserPermission,
+  isUserPermissionAllowedByTenant,
 } from './tenant-modules';
 
 describe('shared/tenant-modules', () => {
@@ -71,6 +78,48 @@ describe('shared/tenant-modules', () => {
     expect(hasAnyCrmEnabled(['atendimento', 'erp.vendas'])).toBe(false);
     expect(hasAnyErpEnabled(['atendimento', 'erp.vendas'])).toBe(true);
     expect(hasAnyErpEnabled(['atendimento', 'crm.leads'])).toBe(false);
+  });
+
+  it('catálogo contém todas as abas reais do CRM e ERP e módulos de operação', () => {
+    const keys = MODULE_CATALOG.map((m) => m.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const k of ['atendimento', 'chamados', 'rastreamento', 'assistente_ia']) expect(keys).toContain(k);
+    for (const { key } of CRM_SECTION_MODULES) expect(keys).toContain(key);
+    for (const { key } of ERP_SECTION_MODULES) expect(keys).toContain(key);
+    expect(MODULE_CATALOG.filter((m) => m.group === 'crm')).toHaveLength(8);
+    expect(MODULE_CATALOG.filter((m) => m.group === 'erp')).toHaveLength(10);
+    for (const preset of Object.values(NICHE_PRESETS)) {
+      for (const k of preset) expect(keys).toContain(k);
+      expect(preset).toContain('atendimento');
+    }
+  });
+
+  it('retrocompatibilidade: listas legadas com crm.* liberam resumo, atividades e relatórios', () => {
+    const legacy = ['atendimento', 'assistente_ia', 'crm.pipeline', 'crm.clientes'];
+    const resolved = resolveTenantEnabledModules('personalizado', legacy);
+    expect(resolved).toEqual(expect.arrayContaining(['crm.resumo', 'crm.atividades', 'crm.relatorios', 'crm.automacoes']));
+    expect(isModuleEnabled(legacy, 'crm.relatorios')).toBe(true);
+    expect(isModuleEnabled(['atendimento', 'crm.pipeline'], 'crm.automacoes')).toBe(false);
+    // lista nova explícita não é expandida
+    expect(isModuleEnabled(['atendimento', 'crm.pipeline', 'crm.resumo'], 'crm.relatorios')).toBe(false);
+  });
+
+  it('abre na primeira aba habilitada', () => {
+    expect(getFirstEnabledCrmSection(['atendimento', 'crm.leads', 'crm.resumo'])).toBe('summary');
+    expect(getFirstEnabledCrmSection(['atendimento', 'crm.leads', 'crm.relatorios'])).toBe('leads');
+    expect(getFirstEnabledCrmSection(['atendimento', 'erp.vendas'])).toBeNull();
+    expect(getFirstEnabledErpSection(['atendimento', 'erp.vendas', 'erp.fiscal'])).toBe('sales');
+  });
+
+  it('permissões de usuário aceitam nomes do MegaAdmin e do backend e respeitam bloqueio da empresa', () => {
+    expect(hasUserPermission(['conversations'], 'conversas')).toBe(true);
+    expect(hasUserPermission(['conversas'], 'conversations')).toBe(true);
+    expect(hasUserPermission(['tracking'], 'rastreio')).toBe(true);
+    expect(hasUserPermission(['tickets'], 'conversations')).toBe(false);
+    expect(isUserPermissionAllowedByTenant('conversas', ['chamados'])).toBe(false);
+    expect(isUserPermissionAllowedByTenant('conversations', ['atendimento'])).toBe(true);
+    expect(isUserPermissionAllowedByTenant('crm', ['atendimento'])).toBe(false);
+    expect(isUserPermissionAllowedByTenant('erp', ['erp.vendas'])).toBe(true);
   });
 
   describe('normalização robusta (strings, JSON duplamente escapado, nulos e tipos inválidos)', () => {

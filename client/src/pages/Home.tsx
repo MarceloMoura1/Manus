@@ -19,7 +19,7 @@ import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorks
 import { Users } from "lucide-react";
 import { buildSalesPath, readSalesRoute } from "./erp/sales-navigation";
 import { NotificationsModernPage } from "./NotificationsModernPage";
-import { isModuleEnabled, hasAnyCrmEnabled, hasAnyErpEnabled, type TenantNicheProfile, type TenantModuleKey } from "@shared/tenant-modules";
+import { isModuleEnabled, hasAnyCrmEnabled, hasAnyErpEnabled, hasUserPermission, isCrmSectionEnabled, isErpSectionEnabled, getFirstEnabledCrmSection, getFirstEnabledErpSection, type TenantNicheProfile, type TenantModuleKey } from "@shared/tenant-modules";
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { ConversationMedia } from "@/components/ConversationMedia";
@@ -6137,36 +6137,31 @@ export function AuthenticatedShell({
       return;
     }
 
-    if (active.startsWith("crm-") && !hasAnyCrmEnabled(enabledModules)) {
-      navigateToRoute("home", { replace: true });
-      return;
-    }
-
-    if (active.startsWith("erp-") && !hasAnyErpEnabled(enabledModules)) {
-      navigateToRoute("home", { replace: true });
-      return;
-    }
-
-    if (active === "erp-summary" && !isModuleEnabled(enabledModules, "erp.resumo")) {
-      const firstEnabledErp = [
-        { key: "erp.produtos" as const, route: "erp-products" as const },
-        { key: "erp.servicos" as const, route: "erp-services" as const },
-        { key: "erp.vendas" as const, route: "erp-sales" as const },
-        { key: "erp.estoque" as const, route: "erp-stock" as const },
-        { key: "erp.financeiro" as const, route: "erp-finance" as const },
-        { key: "erp.fiscal" as const, route: "erp-fiscal" as const },
-        { key: "erp.relatorios" as const, route: "erp-reports" as const },
-        { key: "erp.compras" as const, route: "erp-purchases" as const },
-        { key: "erp.fornecedores" as const, route: "erp-suppliers" as const },
-      ].find(item => isModuleEnabled(enabledModules, item.key));
-
-      if (firstEnabledErp) {
-        navigateToRoute(firstEnabledErp.route, { replace: true });
-      } else {
+    if (active.startsWith("crm-")) {
+      const section = active.slice(4);
+      if (!hasAnyCrmEnabled(enabledModules)) {
         navigateToRoute("home", { replace: true });
+        return;
+      }
+      if (!isCrmSectionEnabled(enabledModules, section)) {
+        const first = getFirstEnabledCrmSection(enabledModules);
+        navigateToRoute(first ? (`crm-${first}` as RouteId) : "home", { replace: true });
+        return;
       }
     }
-  }, [session, enabledModules, active, navigateToRoute]);
+
+    if (active.startsWith("erp-")) {
+      const section = active.slice(4);
+      if (!hasAnyErpEnabled(enabledModules)) {
+        navigateToRoute("home", { replace: true });
+        return;
+      }
+      if (!isErpSectionEnabled(enabledModules, section)) {
+        const first = getFirstEnabledErpSection(enabledModules);
+        navigateToRoute(first ? (`erp-${first}` as RouteId) : "home", { replace: true });
+        return;
+      }
+    }  }, [session, enabledModules, active, navigateToRoute]);
 
   const doLogout = async () => {
     try {
@@ -6212,16 +6207,16 @@ export function AuthenticatedShell({
 
     // Granular module checks
     if (item.id === "conversations") {
-      return isModuleEnabled(enabledModules, "atendimento") && session.permissions.includes("conversas");
+      return isModuleEnabled(enabledModules, "atendimento") && (hasUserPermission(session.permissions, "conversations") || hasUserPermission(session.permissions, "active-attendance"));
     }
     if (item.id === "tickets") {
-      return isModuleEnabled(enabledModules, "chamados") && session.permissions.includes("tickets");
+      return isModuleEnabled(enabledModules, "chamados") && hasUserPermission(session.permissions, "tickets");
     }
     if (item.id === "tracking") {
-      return isModuleEnabled(enabledModules, "rastreamento") && session.permissions.includes("tracking");
+      return isModuleEnabled(enabledModules, "rastreamento") && hasUserPermission(session.permissions, "tracking");
     }
     if (item.id === "ai-assistant") {
-      return isModuleEnabled(enabledModules, "assistente_ia") && session.permissions.includes("ai-assistant");
+      return isModuleEnabled(enabledModules, "assistente_ia") && hasUserPermission(session.permissions, "ai-assistant");
     }
     if (item.id.startsWith("crm-")) {
       return hasAnyCrmEnabled(enabledModules) && session.permissions.includes("crm");
