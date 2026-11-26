@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   NICHE_PRESETS,
   ALL_MODULE_KEYS,
+  normalizeTenantModules,
   resolveTenantEnabledModules,
   isModuleEnabled,
   hasAnyCrmEnabled,
@@ -70,5 +71,54 @@ describe('shared/tenant-modules', () => {
     expect(hasAnyCrmEnabled(['atendimento', 'erp.vendas'])).toBe(false);
     expect(hasAnyErpEnabled(['atendimento', 'erp.vendas'])).toBe(true);
     expect(hasAnyErpEnabled(['atendimento', 'crm.leads'])).toBe(false);
+  });
+
+  describe('normalização robusta (strings, JSON duplamente escapado, nulos e tipos inválidos)', () => {
+    it('deve normalizar arrays válidos', () => {
+      expect(normalizeTenantModules(['atendimento', 'crm.leads'])).toEqual(['atendimento', 'crm.leads']);
+      expect(normalizeTenantModules(['atendimento', 'modulo_invalido_xyz'])).toEqual(['atendimento']);
+    });
+
+    it('deve normalizar strings JSON simples', () => {
+      expect(normalizeTenantModules('["atendimento", "crm.leads"]')).toEqual(['atendimento', 'crm.leads']);
+    });
+
+    it('deve normalizar strings JSON duplamente escapadas', () => {
+      const doubleEncoded = JSON.stringify(JSON.stringify(['atendimento', 'erp.vendas']));
+      expect(normalizeTenantModules(doubleEncoded)).toEqual(['atendimento', 'erp.vendas']);
+    });
+
+    it('deve retornar null para valores vazios ou inválidos', () => {
+      expect(normalizeTenantModules(null)).toBeNull();
+      expect(normalizeTenantModules(undefined)).toBeNull();
+      expect(normalizeTenantModules('')).toBeNull();
+      expect(normalizeTenantModules('   ')).toBeNull();
+      expect(normalizeTenantModules('null')).toBeNull();
+      expect(normalizeTenantModules('undefined')).toBeNull();
+      expect(normalizeTenantModules('{ "invalid": 123 }')).toBeNull();
+      expect(normalizeTenantModules(12345)).toBeNull();
+      expect(normalizeTenantModules(true)).toBeNull();
+      expect(normalizeTenantModules({})).toBeNull();
+    });
+
+    it('resolveTenantEnabledModules deve aceitar customModules como string JSON', () => {
+      const resolved = resolveTenantEnabledModules('personalizado', '["atendimento", "erp.fiscal"]');
+      expect(resolved).toEqual(['atendimento', 'erp.fiscal']);
+    });
+
+    it('isModuleEnabled, hasAnyCrmEnabled e hasAnyErpEnabled não devem lançar exceções com string ou tipos anômalos', () => {
+      // Testes com string JSON
+      expect(isModuleEnabled('["atendimento", "crm.propostas"]', 'atendimento')).toBe(true);
+      expect(isModuleEnabled('["atendimento", "crm.propostas"]', 'rastreamento')).toBe(false);
+      expect(hasAnyCrmEnabled('["atendimento", "crm.propostas"]')).toBe(true);
+      expect(hasAnyCrmEnabled('["atendimento", "erp.fiscal"]')).toBe(false);
+      expect(hasAnyErpEnabled('["atendimento", "erp.fiscal"]')).toBe(true);
+      expect(hasAnyErpEnabled('["atendimento", "crm.propostas"]')).toBe(false);
+
+      // Testes com tipos inválidos (fallback seguro para true)
+      expect(isModuleEnabled('texto-invalido-nao-json', 'atendimento')).toBe(true);
+      expect(hasAnyCrmEnabled('texto-invalido-nao-json')).toBe(true);
+      expect(hasAnyErpEnabled({ invalid: true })).toBe(true);
+    });
   });
 });

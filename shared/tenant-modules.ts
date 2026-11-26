@@ -124,22 +124,53 @@ export const NICHE_PROFILES: NicheProfileInfo[] = [
 ];
 
 /**
+ * Normaliza uma lista arbitrária de módulos de tenant (que pode vir como Array,
+ * string JSON simples ou duplamente escapada, ou valores nulos/indefinidos).
+ * Retorna uma lista de chaves válidas ou null se não houver módulos configurados.
+ */
+export function normalizeTenantModules(modules: unknown): TenantModuleKey[] | null {
+  if (modules == null) return null;
+
+  let raw = modules;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null;
+    try {
+      raw = JSON.parse(trimmed);
+      if (typeof raw === 'string') {
+        try {
+          raw = JSON.parse(raw);
+        } catch {
+          // Mantém o valor anterior se a segunda decodificação falhar
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  if (!Array.isArray(raw)) {
+    return null;
+  }
+
+  const validKeys = new Set<string>(ALL_MODULE_KEYS);
+  return raw.filter((k): k is TenantModuleKey => typeof k === 'string' && validKeys.has(k));
+}
+
+/**
  * Resolve os módulos habilitados para um tenant.
- * Se customModules for informado (array não nulo/vazio), usa-o diretamente.
+ * Se customModules for informado (array não nulo/vazio ou string JSON válida com itens), usa-o diretamente.
  * Se não for informado ou for nulo:
  * - Se nicheProfile for fornecido e diferente de 'personalizado', usa o preset do nicho.
  * - Caso contrário (retrocompatibilidade com tenants legados), retorna TODOS os módulos habilitados.
  */
 export function resolveTenantEnabledModules(
   nicheProfile?: TenantNicheProfile | string | null,
-  customModules?: string[] | null
+  customModules?: unknown
 ): TenantModuleKey[] {
-  if (Array.isArray(customModules) && customModules.length > 0) {
-    const validKeys = new Set<string>(ALL_MODULE_KEYS);
-    const filtered = customModules.filter((k): k is TenantModuleKey => validKeys.has(k));
-    if (filtered.length > 0) {
-      return filtered;
-    }
+  const normalized = normalizeTenantModules(customModules);
+  if (normalized && normalized.length > 0) {
+    return normalized;
   }
 
   const normalizedProfile = (nicheProfile || 'personalizado') as TenantNicheProfile;
@@ -153,23 +184,29 @@ export function resolveTenantEnabledModules(
 
 /**
  * Verifica se um módulo específico está habilitado na lista do tenant.
- * Se enabledModules for undefined (ex: usuário recém logado ou estado transitório),
+ * Se enabledModules for undefined/null ou inválido,
  * assume true para não quebrar a experiência do usuário.
  */
 export function isModuleEnabled(
-  enabledModules: string[] | readonly string[] | undefined | null,
+  enabledModules: unknown,
   key: TenantModuleKey
 ): boolean {
-  if (!enabledModules) return true;
-  return enabledModules.includes(key);
+  if (enabledModules == null) return true;
+  const normalized = normalizeTenantModules(enabledModules);
+  if (normalized == null) return true;
+  return normalized.includes(key);
 }
 
-export function hasAnyCrmEnabled(enabledModules: string[] | readonly string[] | undefined | null): boolean {
-  if (!enabledModules) return true;
-  return enabledModules.some((k) => k.startsWith('crm.'));
+export function hasAnyCrmEnabled(enabledModules: unknown): boolean {
+  if (enabledModules == null) return true;
+  const normalized = normalizeTenantModules(enabledModules);
+  if (normalized == null) return true;
+  return normalized.some((k) => k.startsWith('crm.'));
 }
 
-export function hasAnyErpEnabled(enabledModules: string[] | readonly string[] | undefined | null): boolean {
-  if (!enabledModules) return true;
-  return enabledModules.some((k) => k.startsWith('erp.'));
+export function hasAnyErpEnabled(enabledModules: unknown): boolean {
+  if (enabledModules == null) return true;
+  const normalized = normalizeTenantModules(enabledModules);
+  if (normalized == null) return true;
+  return normalized.some((k) => k.startsWith('erp.'));
 }

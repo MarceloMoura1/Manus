@@ -135,15 +135,15 @@ function loadSession(): MegaDeskSession | null {
   try {
     const raw = localStorage.getItem(MEGADESK_SESSION_KEY) ?? sessionStorage.getItem(MEGADESK_SESSION_KEY);
     if (!raw) return null;
-    
+
     const session = JSON.parse(raw) as MegaDeskSession;
-    
+
     // Se a sessão expirou, limpar e retornar null
     if (isSessionExpired(session)) {
       clearSession();
       return null;
     }
-    
+
     return session;
   } catch {
     clearSession();
@@ -457,7 +457,7 @@ function DashboardPage({
         const parsed = JSON.parse(saved);
         return { ...DEFAULT_COCKPIT_WIDGETS, ...parsed };
       }
-    } catch {}
+    } catch { }
     return DEFAULT_COCKPIT_WIDGETS;
   });
 
@@ -466,7 +466,7 @@ function DashboardPage({
       const next = { ...prev, [key]: visible };
       try {
         localStorage.setItem(widgetsStorageKey, JSON.stringify(next));
-      } catch {}
+      } catch { }
       return next;
     });
   };
@@ -475,7 +475,7 @@ function DashboardPage({
     setWidgets(DEFAULT_COCKPIT_WIDGETS);
     try {
       localStorage.setItem(widgetsStorageKey, JSON.stringify(DEFAULT_COCKPIT_WIDGETS));
-    } catch {}
+    } catch { }
   };
 
   // Consulta do Cockpit Operacional em Tempo Real com Período Unificado
@@ -525,10 +525,10 @@ function DashboardPage({
     selectedPeriod === "today"
       ? "Hoje"
       : selectedPeriod === "7d"
-      ? "7 dias"
-      : selectedPeriod === "30d"
-      ? "30 dias"
-      : "Mês";
+        ? "7 dias"
+        : selectedPeriod === "30d"
+          ? "30 dias"
+          : "Mês";
 
   const formatCurrency = (val?: number) => {
     return (val || 0).toLocaleString("pt-BR", {
@@ -632,7 +632,7 @@ function DashboardPage({
         "megadesk:assistant:prefill-context",
         JSON.stringify({ prompt, autoSend, timestamp: Date.now() })
       );
-    } catch {}
+    } catch { }
     setActive("ai-assistant");
   };
 
@@ -687,7 +687,7 @@ function DashboardPage({
       const next = { ...prev, [taskId]: !prev[taskId] };
       try {
         localStorage.setItem(todayKey, JSON.stringify(next));
-      } catch {}
+      } catch { }
       return next;
     });
   };
@@ -916,10 +916,10 @@ function DashboardPage({
     visibleCardsCount === 4
       ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
       : visibleCardsCount === 3
-      ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-      : visibleCardsCount === 2
-      ? "grid-cols-1 sm:grid-cols-2"
-      : "grid-cols-1 max-w-xl";
+        ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+        : visibleCardsCount === 2
+          ? "grid-cols-1 sm:grid-cols-2"
+          : "grid-cols-1 max-w-xl";
 
   const allWidgetsHidden =
     !widgets.heroBanner &&
@@ -1366,8 +1366,8 @@ function DashboardPage({
                             (cockpitData?.iaTokens?.percent_used ?? 0) > 85
                               ? "bg-red-500"
                               : (cockpitData?.iaTokens?.percent_used ?? 0) > 60
-                              ? "bg-amber-500"
-                              : "bg-indigo-600"
+                                ? "bg-amber-500"
+                                : "bg-indigo-600"
                           )}
                           style={{ width: `${Math.min(100, Math.max(3, cockpitData?.iaTokens?.percent_used ?? 0))}%` }}
                         />
@@ -1433,7 +1433,7 @@ function DashboardPage({
                           onClick={async () => {
                             try {
                               await suggestDailyPlanMutation.mutateAsync();
-                            } catch {}
+                            } catch { }
                           }}
                           disabled={suggestDailyPlanMutation.isPending}
                           className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-all cursor-pointer disabled:opacity-50 shadow-2xs"
@@ -1471,8 +1471,8 @@ function DashboardPage({
                               isChecked
                                 ? "bg-slate-50/70 dark:bg-slate-800/30 border-slate-200/60 dark:border-slate-800/60 opacity-70"
                                 : task.urgent
-                                ? "bg-red-50/40 dark:bg-red-950/20 border-red-200/60 dark:border-red-900/40 hover:border-red-300"
-                                : "bg-slate-50/50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                                  ? "bg-red-50/40 dark:bg-red-950/20 border-red-200/60 dark:border-red-900/40 hover:border-red-300"
+                                  : "bg-slate-50/50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
                             )}
                           >
                             <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -1920,11 +1920,10 @@ function ConversationMessageItem({
         <div
           data-testid="conversation-message-bubble"
           style={style || conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)}
-          className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${
-            isAgent
-              ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
-              : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'
-          }`}
+          className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${isAgent
+            ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
+            : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'
+            }`}
         >
           {msg.replyTo && (
             <button
@@ -2263,17 +2262,17 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       rowsById.set(conversation.id, conversation);
     }
     return [...rowsById.values()].map((conversation: any) => ({
-    ...conversation,
-    name: conversation.customerName,
-    phone: conversation.customerPhone,
-    company: conversation.companyName,
-    companyText: conversation.companyText,
-    companyName: conversation.companyName,
-    timestamp: conversation.lastMessageAt,
-    createdAt: conversation.attendanceStartedAt ?? conversation.openedAt ?? conversation.createdAt,
-    status: conversation.status === 'pending' ? 'bot' : conversation.status,
-    assignedTo: conversation.assignedUserName,
-    isUnread: Number(conversation.unreadCount ?? 0) > 0 && conversation.lastMessageFrom === 'customer',
+      ...conversation,
+      name: conversation.customerName,
+      phone: conversation.customerPhone,
+      company: conversation.companyName,
+      companyText: conversation.companyText,
+      companyName: conversation.companyName,
+      timestamp: conversation.lastMessageAt,
+      createdAt: conversation.attendanceStartedAt ?? conversation.openedAt ?? conversation.createdAt,
+      status: conversation.status === 'pending' ? 'bot' : conversation.status,
+      assignedTo: conversation.assignedUserName,
+      isUnread: Number(conversation.unreadCount ?? 0) > 0 && conversation.lastMessageFrom === 'customer',
     }));
   }, [closedSearchRows, conversationRows, shouldSearchClosedConversations]);
   const crmCustomerQuery = trpc.crm.getById.useQuery(
@@ -2742,7 +2741,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
   const getAvatarColor = (id: string) => avatarColors[id?.charCodeAt(0) % avatarColors.length] || 'bg-slate-500';
 
   return (
-      <div data-testid="attendance-workspace" data-theme={theme} className="group relative flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white data-[theme=dark]:border-slate-800 data-[theme=dark]:bg-slate-950 data-[theme=dark]:shadow-black/30 md:rounded-2xl md:border md:border-slate-200 md:shadow-xl">
+    <div data-testid="attendance-workspace" data-theme={theme} className="group relative flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white data-[theme=dark]:border-slate-800 data-[theme=dark]:bg-slate-950 data-[theme=dark]:shadow-black/30 md:rounded-2xl md:border md:border-slate-200 md:shadow-xl">
 
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
       <div className={cn(
@@ -2892,7 +2891,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                 className={cn(
                   'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
                   index > 0 && 'border-l border-slate-200 group-data-[theme=dark]:border-slate-700',
-                   inboxView === 'open' && attendantScope === scope ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
+                  inboxView === 'open' && attendantScope === scope ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
                 )}
               >
                 {scope === 'all' ? <MessageCircle className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
@@ -2905,8 +2904,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
               aria-pressed={inboxView === 'bot'}
               onClick={() => selectInboxView('bot')}
               className={cn(
-                    'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 group-data-[theme=dark]:border-slate-700 sm:gap-1.5 sm:px-3',
-                    inboxView === 'bot' ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
+                'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 group-data-[theme=dark]:border-slate-700 sm:gap-1.5 sm:px-3',
+                inboxView === 'bot' ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
               )}
             >
               <Bot className="h-3.5 w-3.5" />
@@ -3041,8 +3040,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                     <span className={cn(
                       'hidden flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium sm:inline',
                       selectedConv.status === 'open' ? 'bg-emerald-100 text-emerald-700 group-data-[theme=dark]:bg-emerald-500/20 group-data-[theme=dark]:text-emerald-300' :
-                      selectedConv.status === 'bot' ? 'bg-purple-100 text-purple-700 font-semibold border border-purple-200 group-data-[theme=dark]:bg-purple-500/20 group-data-[theme=dark]:text-purple-200' :
-                      'bg-slate-100 text-slate-600 group-data-[theme=dark]:bg-slate-800 group-data-[theme=dark]:text-slate-300'
+                        selectedConv.status === 'bot' ? 'bg-purple-100 text-purple-700 font-semibold border border-purple-200 group-data-[theme=dark]:bg-purple-500/20 group-data-[theme=dark]:text-purple-200' :
+                          'bg-slate-100 text-slate-600 group-data-[theme=dark]:bg-slate-800 group-data-[theme=dark]:text-slate-300'
                     )}>
                       {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'Em Atendimento pelo Bot' : 'Fechada'}
                     </span>
@@ -3116,59 +3115,59 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
             {/* Área de Mensagens */}
             <ConversationBackground preference={conversationBackground} className="min-h-0 flex-1 overflow-hidden">
               <div ref={messageScrollRef} onScroll={handleMessageScroll} data-testid="conversation-message-scroll-region" aria-label="Mensagens da conversa" className="h-full space-y-3 overflow-y-auto px-3 py-4 md:px-6">
-              {(() => {
-                const msgs: any[] = timelineMessages;
-                const indeterminate: any[] = indeterminateConversationHistory;
-                if (msgs.length === 0 && indeterminate.length === 0) {
-                  return (
-                    <div className="flex justify-start">
-                      <div className="min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md">
-                        <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm border border-slate-100">
-                          <p className="text-sm text-slate-800">{selectedConv.lastMessage || 'Conversa iniciada'}</p>
-                          <p className="text-xs text-slate-400 mt-1 text-right">{formatTime(selectedConv.timestamp)}</p>
+                {(() => {
+                  const msgs: any[] = timelineMessages;
+                  const indeterminate: any[] = indeterminateConversationHistory;
+                  if (msgs.length === 0 && indeterminate.length === 0) {
+                    return (
+                      <div className="flex justify-start">
+                        <div className="min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md">
+                          <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm border border-slate-100">
+                            <p className="text-sm text-slate-800">{selectedConv.lastMessage || 'Conversa iniciada'}</p>
+                            <p className="text-xs text-slate-400 mt-1 text-right">{formatTime(selectedConv.timestamp)}</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                }
-                return <>
-                  {msgs.map((msg: any, idx: number) => {
-                    if (msg.kind === 'activity') {
-                      return <ConversationActivityEvent key={msg.id ?? `activity-${idx}`} event={msg} />;
-                    }
-                    const isAgent = msg.sender === 'agent' || msg.from === 'agent' || msg.direction === 'outbound' || msg.sender === 'operator' || msg.from === 'operator';
-                    return (
-                      <ConversationMessageItem
-                        key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`}
-                        msg={msg}
-                        idx={idx}
-                        isAgent={isAgent}
-                        highlightedMessageId={highlightedMessageId}
-                        messageElementRefs={messageElementRefs}
-                        jumpToQuotedMessage={jumpToQuotedMessage}
-                        conversationBackground={conversationBackground}
-                        style={conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)}
-                        selectedConvId={selectedConv.id}
-                        selectReplyTarget={selectReplyTarget}
-                      />
                     );
-                  })}
-                  {indeterminate.length > 0 && <section data-testid="conversation-indeterminate-history" aria-label="Histórico anterior sem horário confirmado" className="space-y-3 border-t border-dashed border-slate-300 pt-4">
-                    <h3 className="text-center text-xs font-semibold text-slate-500">Histórico anterior sem horário confirmado</h3>
-                    {indeterminate.map((item: any, idx: number) => {
-                      if (item.kind === 'activity') return <ConversationActivityEvent key={item.id ?? `indeterminate-activity-${idx}`} event={item} />;
-                      const isAgent = item.sender === 'agent' || item.from === 'agent' || item.direction === 'outbound';
-                      const text = item.text || item.message || '';
-                      const type = item.type || 'text';
-                      return <div key={item.id ?? `indeterminate-${idx}`} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                        <div className={cn("min-w-0 max-w-[85%] rounded-2xl px-4 py-3", isAgent ? "rounded-tr-sm bg-slate-600 text-white" : "rounded-tl-sm border border-slate-200 bg-white text-slate-800")}>
-                          {type === 'text' ? <p className="text-sm">{text}</p> : <ConversationMedia conversationId={selectedConv.id} message={item} caption={text} fallback={<span className="text-sm">{text || 'Mídia indisponível'}</span>} />}
-                        </div>
-                      </div>;
+                  }
+                  return <>
+                    {msgs.map((msg: any, idx: number) => {
+                      if (msg.kind === 'activity') {
+                        return <ConversationActivityEvent key={msg.id ?? `activity-${idx}`} event={msg} />;
+                      }
+                      const isAgent = msg.sender === 'agent' || msg.from === 'agent' || msg.direction === 'outbound' || msg.sender === 'operator' || msg.from === 'operator';
+                      return (
+                        <ConversationMessageItem
+                          key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`}
+                          msg={msg}
+                          idx={idx}
+                          isAgent={isAgent}
+                          highlightedMessageId={highlightedMessageId}
+                          messageElementRefs={messageElementRefs}
+                          jumpToQuotedMessage={jumpToQuotedMessage}
+                          conversationBackground={conversationBackground}
+                          style={conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)}
+                          selectedConvId={selectedConv.id}
+                          selectReplyTarget={selectReplyTarget}
+                        />
+                      );
                     })}
-                  </section>}
-                </>;
-              })()}
+                    {indeterminate.length > 0 && <section data-testid="conversation-indeterminate-history" aria-label="Histórico anterior sem horário confirmado" className="space-y-3 border-t border-dashed border-slate-300 pt-4">
+                      <h3 className="text-center text-xs font-semibold text-slate-500">Histórico anterior sem horário confirmado</h3>
+                      {indeterminate.map((item: any, idx: number) => {
+                        if (item.kind === 'activity') return <ConversationActivityEvent key={item.id ?? `indeterminate-activity-${idx}`} event={item} />;
+                        const isAgent = item.sender === 'agent' || item.from === 'agent' || item.direction === 'outbound';
+                        const text = item.text || item.message || '';
+                        const type = item.type || 'text';
+                        return <div key={item.id ?? `indeterminate-${idx}`} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                          <div className={cn("min-w-0 max-w-[85%] rounded-2xl px-4 py-3", isAgent ? "rounded-tr-sm bg-slate-600 text-white" : "rounded-tl-sm border border-slate-200 bg-white text-slate-800")}>
+                            {type === 'text' ? <p className="text-sm">{text}</p> : <ConversationMedia conversationId={selectedConv.id} message={item} caption={text} fallback={<span className="text-sm">{text || 'Mídia indisponível'}</span>} />}
+                          </div>
+                        </div>;
+                      })}
+                    </section>}
+                  </>;
+                })()}
               </div>
             </ConversationBackground>
 
@@ -3230,8 +3229,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                       }
                     }}
                     className={cn(
-                       'w-full rounded-2xl border bg-slate-50 px-4 py-3 pr-12 text-sm transition-all placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 group-data-[theme=dark]:bg-slate-800 group-data-[theme=dark]:text-slate-100 group-data-[theme=dark]:placeholder:text-slate-500 group-data-[theme=dark]:focus:bg-slate-800',
-                       waConnected === false ? 'border-red-200 bg-red-50 cursor-not-allowed opacity-60 group-data-[theme=dark]:border-red-500/40 group-data-[theme=dark]:bg-red-500/15' : 'border-slate-200 group-data-[theme=dark]:border-slate-700'
+                      'w-full rounded-2xl border bg-slate-50 px-4 py-3 pr-12 text-sm transition-all placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 group-data-[theme=dark]:bg-slate-800 group-data-[theme=dark]:text-slate-100 group-data-[theme=dark]:placeholder:text-slate-500 group-data-[theme=dark]:focus:bg-slate-800',
+                      waConnected === false ? 'border-red-200 bg-red-50 cursor-not-allowed opacity-60 group-data-[theme=dark]:border-red-500/40 group-data-[theme=dark]:bg-red-500/15' : 'border-slate-200 group-data-[theme=dark]:border-slate-700'
                     )}
                   />
                 </div>
@@ -3485,7 +3484,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       sortBy: ticketSort.key,
       sortDirection: ticketSort.direction,
     },
-        { enabled: !!clientId }
+    { enabled: !!clientId }
   );
   const chamadoDetailQuery = trpc.chamados.getDetail.useQuery(
     { chamadoId: selectedChamado?.id || '' },
@@ -4178,13 +4177,11 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               key={card.id}
               onClick={() => setSelectedFilter(card.id)}
               style={cardStyle}
-              className={`group relative overflow-hidden rounded-2xl ${
-                card.customColor ? '' : `bg-gradient-to-br ${card.bgGradient}`
-              } p-5 transition-all duration-300 border-2 min-w-[140px] flex-1 ${
-                isSelected
+              className={`group relative overflow-hidden rounded-2xl ${card.customColor ? '' : `bg-gradient-to-br ${card.bgGradient}`
+                } p-5 transition-all duration-300 border-2 min-w-[140px] flex-1 ${isSelected
                   ? `${card.customColor ? '' : 'border-current'} shadow-xl scale-105`
                   : `border-transparent hover:shadow-lg hover:scale-102 hover:-translate-y-1`
-              }`}
+                }`}
             >
               {!card.customColor && (
                 <div className={`absolute -top-8 -right-8 w-32 h-32 bg-gradient-to-br ${card.gradient} rounded-full blur-2xl opacity-10 group-hover:opacity-20 transition-all duration-300`} />
@@ -4193,9 +4190,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               <div className="relative z-10">
                 <div className="flex items-center justify-between mb-3">
                   <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      card.customColor ? '' : `bg-gradient-to-br ${card.gradient}`
-                    }`}
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${card.customColor ? '' : `bg-gradient-to-br ${card.gradient}`
+                      }`}
                     style={card.customColor ? { backgroundColor: card.customColor } : {}}
                   >
                     <Icon className="w-5 h-5 text-white" />
@@ -4207,9 +4203,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 </div>
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">{card.label}</p>
                 <p
-                  className={`text-3xl font-black group-hover:scale-110 transition-transform duration-300 origin-left ${
-                    card.customColor ? '' : `bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent`
-                  }`}
+                  className={`text-3xl font-black group-hover:scale-110 transition-transform duration-300 origin-left ${card.customColor ? '' : `bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent`
+                    }`}
                   style={card.customColor ? { color: card.customColor } : {}}
                 >
                   {card.value}
@@ -4272,101 +4267,101 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       {/* Tabela de Chamados */}
       <div className="overflow-hidden rounded-[14px] border border-slate-200/80 bg-white">
         <div className="overflow-x-auto w-full touch-pan-x">
-        <table className="w-full min-w-[1080px] table-fixed">
-          <colgroup>
-            <col className="w-[6%]" />
-            <col className="w-[10%]" />
-            <col className="w-[21%]" />
-            <col className="w-[30%]" />
-            <col className="w-[16%]" />
-            <col className="w-[8%]" />
-            <col className="w-[9%]" />
-          </colgroup>
-          <thead className="border-b border-slate-200/80 bg-slate-50/70">
-            <tr>
-              {ticketSortHeaders.map(header => {
-                const isActive = ticketSort.key === header.key;
-                const ariaSort = isActive ? (ticketSort.direction === 'asc' ? 'ascending' : 'descending') : 'none';
-                const SortIcon = ticketSort.direction === 'asc' ? ChevronUp : ChevronDown;
-                return (
-                  <th key={header.key} aria-sort={ariaSort} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                    <button
-                      type="button"
-                      onClick={() => requestTicketSort(header.key)}
-                      className={`inline-flex items-center gap-1 transition-colors hover:text-slate-700 focus-visible:outline-none focus-visible:text-slate-800 ${isActive ? 'font-semibold text-slate-700' : ''}`}
-                      aria-label={`Ordenar por ${header.label}`}
-                    >
-                      {header.label}
-                      {isActive && <SortIcon className="h-3 w-3 text-blue-600" aria-hidden="true" />}
-                    </button>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredChamados.length === 0 ? (
+          <table className="w-full min-w-[1080px] table-fixed">
+            <colgroup>
+              <col className="w-[6%]" />
+              <col className="w-[10%]" />
+              <col className="w-[21%]" />
+              <col className="w-[30%]" />
+              <col className="w-[16%]" />
+              <col className="w-[8%]" />
+              <col className="w-[9%]" />
+            </colgroup>
+            <thead className="border-b border-slate-200/80 bg-slate-50/70">
               <tr>
-                <td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-500">
-                  Nenhum chamado encontrado
-                </td>
+                {ticketSortHeaders.map(header => {
+                  const isActive = ticketSort.key === header.key;
+                  const ariaSort = isActive ? (ticketSort.direction === 'asc' ? 'ascending' : 'descending') : 'none';
+                  const SortIcon = ticketSort.direction === 'asc' ? ChevronUp : ChevronDown;
+                  return (
+                    <th key={header.key} aria-sort={ariaSort} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                      <button
+                        type="button"
+                        onClick={() => requestTicketSort(header.key)}
+                        className={`inline-flex items-center gap-1 transition-colors hover:text-slate-700 focus-visible:outline-none focus-visible:text-slate-800 ${isActive ? 'font-semibold text-slate-700' : ''}`}
+                        aria-label={`Ordenar por ${header.label}`}
+                      >
+                        {header.label}
+                        {isActive && <SortIcon className="h-3 w-3 text-blue-600" aria-hidden="true" />}
+                      </button>
+                    </th>
+                  );
+                })}
               </tr>
-            ) : (
-              filteredChamados.map(chamado => {
-                const assignees = getTicketAssignees(chamado);
-                const assigneeNames = assignees.map(assignee => assignee.userName);
-                return (
-                <tr
-                  key={chamado.id}
-                  onClick={() => setSelectedChamado(chamado)}
-                  className="cursor-pointer border-b border-slate-100 transition-colors duration-150 last:border-b-0 hover:bg-slate-50/70"
-                >
-                  <td className="whitespace-nowrap px-5 py-3.5 text-xs font-mono font-medium text-slate-500">#{String(chamado.number).padStart(4, '0')}</td>
-                  <td className="whitespace-nowrap px-5 py-3.5">
-                    <div className="text-sm font-medium text-slate-700">{formatDate(chamado.createdAt) || '—'}</div>
-                    {formatTime(chamado.createdAt) && <div className="mt-0.5 text-xs text-slate-400">{formatTime(chamado.createdAt)}</div>}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600" aria-hidden="true">{getInitials(chamado.customerName)}</span>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-800">{chamado.customerName || '—'}</div>
-                        {chamado.company && <div className="mt-0.5 truncate text-xs text-slate-500">{chamado.company}</div>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="max-w-sm truncate text-sm font-medium text-slate-800" title={chamado.title}>{chamado.title}</div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {assignees.length > 0 ? (
-                      <div className="flex min-w-0 items-center gap-2.5" title={assigneeNames.join(', ')}>
-                        <div className="flex shrink-0 -space-x-1.5" aria-hidden="true">
-                          {assignees.slice(0, 2).map(assignee => (
-                            <span key={`${assignee.userId}-${assignee.userName}`} className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600">
-                              {getInitials(assignee.userName)}
-                            </span>
-                          ))}
-                          {assignees.length > 2 && <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">+{assignees.length - 2}</span>}
-                        </div>
-                        <span className="truncate text-sm text-slate-700">{assignees[0].userName}{assignees.length > 1 ? ` +${assignees.length - 1}` : ''}</span>
-                      </div>
-                    ) : <span className="text-sm text-slate-400">—</span>}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`text-sm font-medium ${getPriorityColor(chamado.priority)}`}>{getPriorityLabel(chamado.priority)}</span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getStatusBadgeColor(chamado.status)}`}>
-                      {getStatusLabel(chamado.status)}
-                    </span>
+            </thead>
+            <tbody>
+              {filteredChamados.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-500">
+                    Nenhum chamado encontrado
                   </td>
                 </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+              ) : (
+                filteredChamados.map(chamado => {
+                  const assignees = getTicketAssignees(chamado);
+                  const assigneeNames = assignees.map(assignee => assignee.userName);
+                  return (
+                    <tr
+                      key={chamado.id}
+                      onClick={() => setSelectedChamado(chamado)}
+                      className="cursor-pointer border-b border-slate-100 transition-colors duration-150 last:border-b-0 hover:bg-slate-50/70"
+                    >
+                      <td className="whitespace-nowrap px-5 py-3.5 text-xs font-mono font-medium text-slate-500">#{String(chamado.number).padStart(4, '0')}</td>
+                      <td className="whitespace-nowrap px-5 py-3.5">
+                        <div className="text-sm font-medium text-slate-700">{formatDate(chamado.createdAt) || '—'}</div>
+                        {formatTime(chamado.createdAt) && <div className="mt-0.5 text-xs text-slate-400">{formatTime(chamado.createdAt)}</div>}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600" aria-hidden="true">{getInitials(chamado.customerName)}</span>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-800">{chamado.customerName || '—'}</div>
+                            {chamado.company && <div className="mt-0.5 truncate text-xs text-slate-500">{chamado.company}</div>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="max-w-sm truncate text-sm font-medium text-slate-800" title={chamado.title}>{chamado.title}</div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {assignees.length > 0 ? (
+                          <div className="flex min-w-0 items-center gap-2.5" title={assigneeNames.join(', ')}>
+                            <div className="flex shrink-0 -space-x-1.5" aria-hidden="true">
+                              {assignees.slice(0, 2).map(assignee => (
+                                <span key={`${assignee.userId}-${assignee.userName}`} className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600">
+                                  {getInitials(assignee.userName)}
+                                </span>
+                              ))}
+                              {assignees.length > 2 && <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">+{assignees.length - 2}</span>}
+                            </div>
+                            <span className="truncate text-sm text-slate-700">{assignees[0].userName}{assignees.length > 1 ? ` +${assignees.length - 1}` : ''}</span>
+                          </div>
+                        ) : <span className="text-sm text-slate-400">—</span>}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className={`text-sm font-medium ${getPriorityColor(chamado.priority)}`}>{getPriorityLabel(chamado.priority)}</span>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getStatusBadgeColor(chamado.status)}`}>
+                          {getStatusLabel(chamado.status)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -4380,7 +4375,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             </span>{' '}
             de <span className="font-semibold">{totalChamados}</span> chamados
           </div>
-          
+
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
@@ -4389,7 +4384,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             >
               ← Anterior
             </button>
-            
+
             <div className="flex items-center gap-1">
               {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                 let pageNum;
@@ -4406,18 +4401,17 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                   <button
                     key={pageNum}
                     onClick={() => setCurrentPage(pageNum)}
-                    className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                      currentPage === pageNum
-                        ? 'bg-blue-500 text-white'
-                        : 'text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600'
-                    }`}
+                    className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${currentPage === pageNum
+                      ? 'bg-blue-500 text-white'
+                      : 'text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600'
+                      }`}
                   >
                     {pageNum}
                   </button>
                 );
               })}
             </div>
-            
+
             <button
               onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
               disabled={currentPage === totalPages}
@@ -4440,133 +4434,131 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             </h2>
           </div>
           <div className="p-6">
-          <div className="space-y-4">
-            {/* Cliente canônico do ERP */}
-            <div className="relative">
-              <label htmlFor="new-ticket-customer" className="text-sm font-semibold text-black block mb-2">
-                Cliente <span className="text-red-500">*</span>
-              </label>
+            <div className="space-y-4">
+              {/* Cliente canônico do ERP */}
               <div className="relative">
-                <Input
-                  id="new-ticket-customer"
-                  role="combobox"
-                  aria-autocomplete="list"
-                  aria-expanded={showCustomerDropdown}
-                  aria-controls="new-ticket-customer-options"
-                  placeholder="Buscar cliente por nome, CPF/CNPJ, telefone..."
-                  value={customerSearch}
-                  onChange={e => handleCustomerSearch(e.target.value)}
-                  onFocus={() => customerSearch.trim().length >= 2 && !selectedCrmCustomer && setShowCustomerDropdown(true)}
-                  onBlur={() => window.setTimeout(() => setShowCustomerDropdown(false), 200)}
-                  autoComplete="off"
-                  className={`bg-white border-2 transition-colors pr-8 text-black ${
-                    validationErrors.find(e => e.field === 'customerId')
+                <label htmlFor="new-ticket-customer" className="text-sm font-semibold text-black block mb-2">
+                  Cliente <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Input
+                    id="new-ticket-customer"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={showCustomerDropdown}
+                    aria-controls="new-ticket-customer-options"
+                    placeholder="Buscar cliente por nome, CPF/CNPJ, telefone..."
+                    value={customerSearch}
+                    onChange={e => handleCustomerSearch(e.target.value)}
+                    onFocus={() => customerSearch.trim().length >= 2 && !selectedCrmCustomer && setShowCustomerDropdown(true)}
+                    onBlur={() => window.setTimeout(() => setShowCustomerDropdown(false), 200)}
+                    autoComplete="off"
+                    className={`bg-white border-2 transition-colors pr-8 text-black ${validationErrors.find(e => e.field === 'customerId')
                       ? 'border-red-500'
                       : selectedCrmCustomer ? 'border-green-500' : 'border-slate-400 focus:border-blue-500'
-                  }`}
-                />
-                {(customerSearchQuery.isLoading || customerSearchQuery.isFetching || customerSearch.trim() !== debouncedCustomerSearch) && customerSearch.trim().length >= 2 && !selectedCrmCustomer && (
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                      }`}
+                  />
+                  {(customerSearchQuery.isLoading || customerSearchQuery.isFetching || customerSearch.trim() !== debouncedCustomerSearch) && customerSearch.trim().length >= 2 && !selectedCrmCustomer && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                  {selectedCrmCustomer && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500">✓</div>
+                  )}
+                </div>
+                {showCustomerDropdown && (customerSearchQuery.data?.customers.length ?? 0) > 0 && (
+                  <div id="new-ticket-customer-options" role="listbox" className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                    {customerSearchQuery.data?.customers.map((customer: any) => (
+                      <button
+                        key={customer.id}
+                        type="button"
+                        role="option"
+                        aria-selected={selectedCrmCustomer?.id === customer.id}
+                        onMouseDown={() => handleSelectCustomer(customer)}
+                        className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border-b border-slate-200 last:border-0 text-black"
+                      >
+                        <div className="font-semibold text-black text-sm">{customer.name}</div>
+                        {(customer.document || customer.phone) && (
+                          <div className="text-xs text-slate-600">
+                            {[customer.document, customer.phone].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
+                      </button>
+                    ))}
                   </div>
                 )}
-                {selectedCrmCustomer && (
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500">✓</div>
+                {showCustomerDropdown && customerSearchQuery.data && customerSearchQuery.data.customers.length === 0 && !customerSearchQuery.isFetching && customerSearch.trim() === debouncedCustomerSearch && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg px-4 py-3 text-sm text-slate-600">
+                    Nenhum cliente encontrado. Cadastre o cliente em ERP &gt; Clientes para abrir o chamado.
+                  </div>
+                )}
+                {customerSearchQuery.isError && showCustomerDropdown && (
+                  <p className="text-xs text-red-600 mt-1 font-medium">Não foi possível buscar os clientes. Tente novamente.</p>
+                )}
+                {validationErrors.find(e => e.field === 'customerId') && (
+                  <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'customerId')?.message}</p>
                 )}
               </div>
-              {showCustomerDropdown && (customerSearchQuery.data?.customers.length ?? 0) > 0 && (
-                <div id="new-ticket-customer-options" role="listbox" className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-56 overflow-y-auto">
-                  {customerSearchQuery.data?.customers.map((customer: any) => (
-                    <button
-                      key={customer.id}
-                      type="button"
-                      role="option"
-                      aria-selected={selectedCrmCustomer?.id === customer.id}
-                      onMouseDown={() => handleSelectCustomer(customer)}
-                      className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border-b border-slate-200 last:border-0 text-black"
-                    >
-                      <div className="font-semibold text-black text-sm">{customer.name}</div>
-                      {(customer.document || customer.phone) && (
-                        <div className="text-xs text-slate-600">
-                          {[customer.document, customer.phone].filter(Boolean).join(' · ')}
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {showCustomerDropdown && customerSearchQuery.data && customerSearchQuery.data.customers.length === 0 && !customerSearchQuery.isFetching && customerSearch.trim() === debouncedCustomerSearch && (
-                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg px-4 py-3 text-sm text-slate-600">
-                  Nenhum cliente encontrado. Cadastre o cliente em ERP &gt; Clientes para abrir o chamado.
-                </div>
-              )}
-              {customerSearchQuery.isError && showCustomerDropdown && (
-                <p className="text-xs text-red-600 mt-1 font-medium">Não foi possível buscar os clientes. Tente novamente.</p>
-              )}
-              {validationErrors.find(e => e.field === 'customerId') && (
-                <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'customerId')?.message}</p>
-              )}
-            </div>
 
-            <div>
-              <label className="text-sm font-semibold text-black block mb-2">Título</label>
-              <Input
-                placeholder=""
-                value={newChamadoForm.title}
-                onChange={e => setNewChamadoForm({...newChamadoForm, title: e.target.value})}
-                className={`bg-white border-2 transition-colors text-black ${
-                  validationErrors.find(e => e.field === 'title')
+              <div>
+                <label className="text-sm font-semibold text-black block mb-2">Título</label>
+                <Input
+                  placeholder=""
+                  value={newChamadoForm.title}
+                  onChange={e => setNewChamadoForm({ ...newChamadoForm, title: e.target.value })}
+                  className={`bg-white border-2 transition-colors text-black ${validationErrors.find(e => e.field === 'title')
                     ? 'border-red-500'
                     : 'border-slate-400 focus:border-blue-500'
-                }`}
-              />
-              {validationErrors.find(e => e.field === 'title') && (
-                <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'title')?.message}</p>
-              )}
-            </div>
+                    }`}
+                />
+                {validationErrors.find(e => e.field === 'title') && (
+                  <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'title')?.message}</p>
+                )}
+              </div>
 
-            <div>
-              <label className="text-sm font-semibold text-black block mb-2">Observações</label>
-              <Input
-                placeholder="Detalhes adicionais..."
-                value={newChamadoForm.observations}
-                onChange={e => setNewChamadoForm({...newChamadoForm, observations: e.target.value})}
-                className="bg-white border-2 border-slate-400 focus:border-blue-500 transition-colors text-black"
-              />
-            </div>
+              <div>
+                <label className="text-sm font-semibold text-black block mb-2">Observações</label>
+                <Input
+                  placeholder="Detalhes adicionais..."
+                  value={newChamadoForm.observations}
+                  onChange={e => setNewChamadoForm({ ...newChamadoForm, observations: e.target.value })}
+                  className="bg-white border-2 border-slate-400 focus:border-blue-500 transition-colors text-black"
+                />
+              </div>
 
-            <div>
-              <label className="text-sm font-semibold text-black block mb-2">Prioridade</label>
-              <Select value={newChamadoForm.priority} onValueChange={priority => setNewChamadoForm({...newChamadoForm, priority: priority as 'media' | 'baixa' | 'alta' | 'critica'})}>
-                <SelectTrigger className="bg-white border-2 border-slate-400 focus:border-blue-500 transition-colors text-black">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-white border border-slate-300">
-                  <SelectItem value="baixa">🟢 Baixa</SelectItem>
-                  <SelectItem value="media">🟡 Média</SelectItem>
-                  <SelectItem value="alta">🔴 Alta</SelectItem>
-                  <SelectItem value="critica">🔴 Crítica</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              <div>
+                <label className="text-sm font-semibold text-black block mb-2">Prioridade</label>
+                <Select value={newChamadoForm.priority} onValueChange={priority => setNewChamadoForm({ ...newChamadoForm, priority: priority as 'media' | 'baixa' | 'alta' | 'critica' })}>
+                  <SelectTrigger className="bg-white border-2 border-slate-400 focus:border-blue-500 transition-colors text-black">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border border-slate-300">
+                    <SelectItem value="baixa">🟢 Baixa</SelectItem>
+                    <SelectItem value="media">🟡 Média</SelectItem>
+                    <SelectItem value="alta">🔴 Alta</SelectItem>
+                    <SelectItem value="critica">🔴 Crítica</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="flex gap-3 pt-4 border-t border-slate-300 mt-4">
-              <Button
-                onClick={handleCreateChamado}
-                disabled={createChamadoMutation.isPending || !newChamadoForm.customerId}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
-              >
-                {createChamadoMutation.isPending ? '⏳ Criando...' : '✅ Criar Chamado'}
-              </Button>
-              <Button
-                onClick={() => setShowNewChamadoModal(false)}
-                variant="outline"
-                className="flex-1 border-2 border-slate-400 text-black hover:bg-slate-100 font-semibold transition-colors"
-              >
-                ✕ Cancelar
-              </Button>
+              <div className="flex gap-3 pt-4 border-t border-slate-300 mt-4">
+                <Button
+                  onClick={handleCreateChamado}
+                  disabled={createChamadoMutation.isPending || !newChamadoForm.customerId}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
+                >
+                  {createChamadoMutation.isPending ? '⏳ Criando...' : '✅ Criar Chamado'}
+                </Button>
+                <Button
+                  onClick={() => setShowNewChamadoModal(false)}
+                  variant="outline"
+                  className="flex-1 border-2 border-slate-400 text-black hover:bg-slate-100 font-semibold transition-colors"
+                >
+                  ✕ Cancelar
+                </Button>
+              </div>
             </div>
-          </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -4574,9 +4566,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       {/* Toast */}
       {toastMessage && (
         <div
-          className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg text-white font-medium shadow-lg z-50 ${
-            toastMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
-          }`}
+          className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg text-white font-medium shadow-lg z-50 ${toastMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+            }`}
         >
           {toastMessage.message}
         </div>
@@ -4601,7 +4592,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 #{String(selectedChamado.number).padStart(4, '0')} · {detailCustomer.name || 'Cliente não informado'}
               </h1>
             </div>
-            
+
             {/* Status e Botao Encerrar */}
             <div className="flex flex-wrap items-center gap-2 md:justify-end">
               <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value as 'open' | 'in_progress' | 'waiting' | 'closed')}>
@@ -4765,8 +4756,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Prioridade</dt>
-                  <dd data-testid="ticket-detail-priority" className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getPriorityBadgeColor(selectedChamado.priority)}`}>{getPriorityLabel(selectedChamado.priority)}</dd>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Prioridade</dt>
+                    <dd data-testid="ticket-detail-priority" className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getPriorityBadgeColor(selectedChamado.priority)}`}>{getPriorityLabel(selectedChamado.priority)}</dd>
                   </div>
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</dt>
@@ -5052,138 +5043,138 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           {/* Card Suspenso de Editar Chamado */}
           {showEditCard && selectedChamado && (
             <div data-testid="ticket-edit-backdrop" className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[1px]">
-            <div data-testid="ticket-edit-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-edit-title" className="w-full max-w-[600px] max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8">
-              <div className="flex items-center justify-between mb-4">
-                <h3 id="ticket-edit-title" className="text-lg font-bold text-slate-900">Editar Chamado</h3>
-                <button
-                  type="button"
-                  aria-label="Fechar edição do chamado"
-                  onClick={() => setShowEditCard(false)}
-                  className="text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+              <div data-testid="ticket-edit-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-edit-title" className="w-full max-w-[600px] max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 id="ticket-edit-title" className="text-lg font-bold text-slate-900">Editar Chamado</h3>
+                  <button
+                    type="button"
+                    aria-label="Fechar edição do chamado"
+                    onClick={() => setShowEditCard(false)}
+                    className="text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
 
-              <div className="space-y-4">
-                {/* Cliente */}
-                <div className="relative">
-                  <label htmlFor="edit-ticket-customer" className="block text-sm font-medium text-slate-700 mb-2">Cliente</label>
+                <div className="space-y-4">
+                  {/* Cliente */}
                   <div className="relative">
-                    <Input
-                      id="edit-ticket-customer"
-                      role="combobox"
-                      aria-autocomplete="list"
-                      aria-expanded={showEditCustomerDropdown}
-                      aria-controls="edit-ticket-customer-options"
-                      value={editCustomerSearch}
-                      onChange={(e) => handleEditCustomerSearch(e.target.value)}
-                      onFocus={() => editCustomerSearch.trim().length >= 2 && !selectedEditCrmCustomer && setShowEditCustomerDropdown(true)}
-                      onBlur={() => window.setTimeout(() => setShowEditCustomerDropdown(false), 200)}
-                      placeholder="Buscar cliente por nome, CPF/CNPJ, telefone..."
-                      autoComplete="off"
-                      className={`w-full bg-white pr-8 text-slate-900 ${editCustomerError ? 'border-red-500' : selectedEditCrmCustomer ? 'border-green-500' : 'border-slate-300 focus:border-blue-500'}`}
-                    />
-                    {(editCustomerSearchQuery.isLoading || editCustomerSearchQuery.isFetching || editCustomerSearch.trim() !== debouncedEditCustomerSearch) && editCustomerSearch.trim().length >= 2 && !selectedEditCrmCustomer && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                    <label htmlFor="edit-ticket-customer" className="block text-sm font-medium text-slate-700 mb-2">Cliente</label>
+                    <div className="relative">
+                      <Input
+                        id="edit-ticket-customer"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={showEditCustomerDropdown}
+                        aria-controls="edit-ticket-customer-options"
+                        value={editCustomerSearch}
+                        onChange={(e) => handleEditCustomerSearch(e.target.value)}
+                        onFocus={() => editCustomerSearch.trim().length >= 2 && !selectedEditCrmCustomer && setShowEditCustomerDropdown(true)}
+                        onBlur={() => window.setTimeout(() => setShowEditCustomerDropdown(false), 200)}
+                        placeholder="Buscar cliente por nome, CPF/CNPJ, telefone..."
+                        autoComplete="off"
+                        className={`w-full bg-white pr-8 text-slate-900 ${editCustomerError ? 'border-red-500' : selectedEditCrmCustomer ? 'border-green-500' : 'border-slate-300 focus:border-blue-500'}`}
+                      />
+                      {(editCustomerSearchQuery.isLoading || editCustomerSearchQuery.isFetching || editCustomerSearch.trim() !== debouncedEditCustomerSearch) && editCustomerSearch.trim().length >= 2 && !selectedEditCrmCustomer && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                        </div>
+                      )}
+                      {selectedEditCrmCustomer && <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-600">✓</div>}
+                    </div>
+                    {showEditCustomerDropdown && (editCustomerSearchQuery.data?.customers.length ?? 0) > 0 && (
+                      <div id="edit-ticket-customer-options" role="listbox" className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-300 bg-white shadow-lg">
+                        {editCustomerSearchQuery.data?.customers.map((customer: any) => (
+                          <button
+                            key={customer.id}
+                            type="button"
+                            role="option"
+                            aria-selected={selectedEditCrmCustomer?.id === customer.id}
+                            onMouseDown={() => handleSelectEditCustomer(customer)}
+                            className="w-full border-b border-slate-200 px-4 py-3 text-left text-slate-900 transition-colors last:border-0 hover:bg-blue-50"
+                          >
+                            <div className="text-sm font-semibold">{customer.name}</div>
+                            {(customer.document || customer.phone) && (
+                              <div className="text-xs text-slate-600">{[customer.document, customer.phone].filter(Boolean).join(' · ')}</div>
+                            )}
+                          </button>
+                        ))}
                       </div>
                     )}
-                    {selectedEditCrmCustomer && <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-600">✓</div>}
+                    {showEditCustomerDropdown && editCustomerSearchQuery.data?.customers.length === 0 && !editCustomerSearchQuery.isFetching && editCustomerSearch.trim() === debouncedEditCustomerSearch && (
+                      <div className="absolute z-50 mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-lg">
+                        Nenhum cliente encontrado em ERP &gt; Clientes.
+                      </div>
+                    )}
+                    {editCustomerSearchQuery.isError && showEditCustomerDropdown && (
+                      <p className="mt-1 text-xs font-medium text-red-600">Não foi possível buscar os clientes. Tente novamente.</p>
+                    )}
+                    {editCustomerError && <p className="mt-1 text-xs font-medium text-red-600">{editCustomerError}</p>}
                   </div>
-                  {showEditCustomerDropdown && (editCustomerSearchQuery.data?.customers.length ?? 0) > 0 && (
-                    <div id="edit-ticket-customer-options" role="listbox" className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-300 bg-white shadow-lg">
-                      {editCustomerSearchQuery.data?.customers.map((customer: any) => (
-                        <button
-                          key={customer.id}
-                          type="button"
-                          role="option"
-                          aria-selected={selectedEditCrmCustomer?.id === customer.id}
-                          onMouseDown={() => handleSelectEditCustomer(customer)}
-                          className="w-full border-b border-slate-200 px-4 py-3 text-left text-slate-900 transition-colors last:border-0 hover:bg-blue-50"
-                        >
-                          <div className="text-sm font-semibold">{customer.name}</div>
-                          {(customer.document || customer.phone) && (
-                            <div className="text-xs text-slate-600">{[customer.document, customer.phone].filter(Boolean).join(' · ')}</div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {showEditCustomerDropdown && editCustomerSearchQuery.data?.customers.length === 0 && !editCustomerSearchQuery.isFetching && editCustomerSearch.trim() === debouncedEditCustomerSearch && (
-                    <div className="absolute z-50 mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-lg">
-                      Nenhum cliente encontrado em ERP &gt; Clientes.
-                    </div>
-                  )}
-                  {editCustomerSearchQuery.isError && showEditCustomerDropdown && (
-                    <p className="mt-1 text-xs font-medium text-red-600">Não foi possível buscar os clientes. Tente novamente.</p>
-                  )}
-                  {editCustomerError && <p className="mt-1 text-xs font-medium text-red-600">{editCustomerError}</p>}
-                </div>
 
-                {/* Título */}
-                <div>
-                  <label htmlFor="edit-ticket-title" className="block text-sm font-medium text-slate-700 mb-2">Título</label>
-                  <Input
-                    id="edit-ticket-title"
-                    type="text"
-                    value={editForm.title}
-                    onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                    placeholder="Título do chamado"
-                    className="w-full"
-                  />
-                </div>
+                  {/* Título */}
+                  <div>
+                    <label htmlFor="edit-ticket-title" className="block text-sm font-medium text-slate-700 mb-2">Título</label>
+                    <Input
+                      id="edit-ticket-title"
+                      type="text"
+                      value={editForm.title}
+                      onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                      placeholder="Título do chamado"
+                      className="w-full"
+                    />
+                  </div>
 
-                {/* Observações */}
-                <div>
-                  <label htmlFor="edit-ticket-observations" className="block text-sm font-medium text-slate-700 mb-2">Observações</label>
-                  <textarea
-                    id="edit-ticket-observations"
-                    value={editForm.observations}
-                    onChange={(e) => setEditForm({ ...editForm, observations: e.target.value })}
-                    placeholder="Observações iniciais"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    rows={3}
-                  />
-                </div>
+                  {/* Observações */}
+                  <div>
+                    <label htmlFor="edit-ticket-observations" className="block text-sm font-medium text-slate-700 mb-2">Observações</label>
+                    <textarea
+                      id="edit-ticket-observations"
+                      value={editForm.observations}
+                      onChange={(e) => setEditForm({ ...editForm, observations: e.target.value })}
+                      placeholder="Observações iniciais"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      rows={3}
+                    />
+                  </div>
 
-                {/* Prioridade */}
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Prioridade</label>
-                  <Select value={editForm.priority} onValueChange={(value) => setEditForm({ ...editForm, priority: value as 'media' | 'baixa' | 'alta' | 'critica' })}>
-                    <SelectTrigger className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors">
-                      <SelectValue placeholder="Selecione a prioridade" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600">
-                      <SelectItem value="baixa">🟢 Baixa</SelectItem>
-                      <SelectItem value="media">🟡 Média</SelectItem>
-                      <SelectItem value="alta">🔴 Alta</SelectItem>
-                      <SelectItem value="critica">🔴 Crítica</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                  {/* Prioridade */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Prioridade</label>
+                    <Select value={editForm.priority} onValueChange={(value) => setEditForm({ ...editForm, priority: value as 'media' | 'baixa' | 'alta' | 'critica' })}>
+                      <SelectTrigger className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors">
+                        <SelectValue placeholder="Selecione a prioridade" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600">
+                        <SelectItem value="baixa">🟢 Baixa</SelectItem>
+                        <SelectItem value="media">🟡 Média</SelectItem>
+                        <SelectItem value="alta">🔴 Alta</SelectItem>
+                        <SelectItem value="critica">🔴 Crítica</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                {/* Botões */}
-                <div className="flex gap-3 pt-4 border-t border-slate-200">
-                  <Button
-                    type="button"
-                    onClick={handleSaveEditedChamado}
-                    disabled={updateChamadoMutation.isPending}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-                  >
-                    ✅ Salvar
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={() => setShowEditCard(false)}
-                    variant="outline"
-                    className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
-                  >
-                    ✗ Cancelar
-                  </Button>
+                  {/* Botões */}
+                  <div className="flex gap-3 pt-4 border-t border-slate-200">
+                    <Button
+                      type="button"
+                      onClick={handleSaveEditedChamado}
+                      disabled={updateChamadoMutation.isPending}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                    >
+                      ✅ Salvar
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => setShowEditCard(false)}
+                      variant="outline"
+                      className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
+                    >
+                      ✗ Cancelar
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
             </div>
           )}
 
@@ -5662,13 +5653,12 @@ function LegacyAIAssistantPage() {
             )}
             <div className={`max-w-[75%] ${msg.role === "user" ? "order-first" : ""}`}>
               <div
-                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-emerald-600 text-white rounded-tr-sm"
-                    : msg.content === HERMES_TYPING_CONTENT
+                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user"
+                  ? "bg-emerald-600 text-white rounded-tr-sm"
+                  : msg.content === HERMES_TYPING_CONTENT
                     ? "bg-white border border-slate-200 text-slate-400 rounded-tl-sm"
                     : "bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm"
-                }`}
+                  }`}
               >
                 {msg.content === HERMES_TYPING_CONTENT ? (
                   <span className="flex items-center gap-2" aria-live="polite">
@@ -5768,43 +5758,43 @@ function LegacyAIAssistantPage() {
                       )}
                     </div>
                   ) : (
-                  <>
-                  <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-700/80 bg-slate-950/60 p-2.5 text-slate-300">
-                    {Object.entries(msg.pendingActionRequest.args).map(([key, value]) => (
-                      <div key={key} className="flex items-start justify-between gap-3">
-                        <dt className="capitalize text-slate-500">{key.replace(/([A-Z])/g, " $1")}</dt>
-                        <dd className="max-w-[60%] break-words text-right text-slate-200">{typeof value === "boolean" ? (value ? "Sim" : "Não") : Array.isArray(value) ? `${value.length} item(ns)` : typeof value === "object" && value ? "Dados estruturados" : String(value)}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  {Array.isArray(msg.pendingActionRequest.args.items) && (
-                    <table className="mt-2 w-full rounded-lg border border-slate-700/80 text-left text-slate-300">
-                      <thead><tr className="text-slate-500"><th className="p-1.5">Item</th><th className="p-1.5">Qtd</th><th className="p-1.5">Unit.</th></tr></thead>
-                      <tbody>
-                        {(msg.pendingActionRequest.args.items as Array<Record<string, unknown>>).map((item, itemIndex) => (
-                          <tr key={itemIndex}><td className="p-1.5">{String(item.productName ?? item.description ?? item.productId ?? "")}</td><td className="p-1.5">{String(item.quantity ?? "")}</td><td className="p-1.5">R$ {Number(item.unitPrice ?? 0).toFixed(2).replace(".", ",")}</td></tr>
+                    <>
+                      <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-700/80 bg-slate-950/60 p-2.5 text-slate-300">
+                        {Object.entries(msg.pendingActionRequest.args).map(([key, value]) => (
+                          <div key={key} className="flex items-start justify-between gap-3">
+                            <dt className="capitalize text-slate-500">{key.replace(/([A-Z])/g, " $1")}</dt>
+                            <dd className="max-w-[60%] break-words text-right text-slate-200">{typeof value === "boolean" ? (value ? "Sim" : "Não") : Array.isArray(value) ? `${value.length} item(ns)` : typeof value === "object" && value ? "Dados estruturados" : String(value)}</dd>
+                          </div>
                         ))}
-                      </tbody>
-                      <tfoot><tr className="font-semibold text-slate-100"><td className="p-1.5" colSpan={2}>Valor total</td><td className="p-1.5">R$ {(msg.pendingActionRequest.args.items as Array<Record<string, unknown>>).reduce((sum, item) => sum + Number(item.quantity ?? 0) * Number(item.unitPrice ?? 0), 0).toFixed(2).replace(".", ",")}</td></tr></tfoot>
-                    </table>
-                  )}
-                  {msg.actionState === "EXECUTED" && (
-                    <span className="mt-3 inline-block rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-semibold text-emerald-300">✓ Concluído com sucesso{msg.actionEntityId ? ` · registro ${msg.actionEntityId}` : ""}</span>
-                  )}
-                  {msg.actionMessage && (
-                    <p className={`mt-3 ${msg.actionState === "FAILED" ? "text-rose-300" : msg.actionState === "EXECUTED" ? "text-emerald-300" : "text-slate-300"}`}>{msg.actionMessage}</p>
-                  )}
-                  {!msg.actionState && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button size="sm" className="bg-sky-600 text-white hover:bg-sky-500" onClick={() => void confirmPendingAction(msg.pendingActionRequest!)}>
-                        Confirmar e Criar no Sistema
-                      </Button>
-                      <Button size="sm" variant="outline" className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-800" onClick={() => void cancelPendingAction(msg.pendingActionRequest!)}>
-                        Rejeitar/Cancelar
-                      </Button>
-                    </div>
-                  )}
-                  </>
+                      </dl>
+                      {Array.isArray(msg.pendingActionRequest.args.items) && (
+                        <table className="mt-2 w-full rounded-lg border border-slate-700/80 text-left text-slate-300">
+                          <thead><tr className="text-slate-500"><th className="p-1.5">Item</th><th className="p-1.5">Qtd</th><th className="p-1.5">Unit.</th></tr></thead>
+                          <tbody>
+                            {(msg.pendingActionRequest.args.items as Array<Record<string, unknown>>).map((item, itemIndex) => (
+                              <tr key={itemIndex}><td className="p-1.5">{String(item.productName ?? item.description ?? item.productId ?? "")}</td><td className="p-1.5">{String(item.quantity ?? "")}</td><td className="p-1.5">R$ {Number(item.unitPrice ?? 0).toFixed(2).replace(".", ",")}</td></tr>
+                            ))}
+                          </tbody>
+                          <tfoot><tr className="font-semibold text-slate-100"><td className="p-1.5" colSpan={2}>Valor total</td><td className="p-1.5">R$ {(msg.pendingActionRequest.args.items as Array<Record<string, unknown>>).reduce((sum, item) => sum + Number(item.quantity ?? 0) * Number(item.unitPrice ?? 0), 0).toFixed(2).replace(".", ",")}</td></tr></tfoot>
+                        </table>
+                      )}
+                      {msg.actionState === "EXECUTED" && (
+                        <span className="mt-3 inline-block rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-semibold text-emerald-300">✓ Concluído com sucesso{msg.actionEntityId ? ` · registro ${msg.actionEntityId}` : ""}</span>
+                      )}
+                      {msg.actionMessage && (
+                        <p className={`mt-3 ${msg.actionState === "FAILED" ? "text-rose-300" : msg.actionState === "EXECUTED" ? "text-emerald-300" : "text-slate-300"}`}>{msg.actionMessage}</p>
+                      )}
+                      {!msg.actionState && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button size="sm" className="bg-sky-600 text-white hover:bg-sky-500" onClick={() => void confirmPendingAction(msg.pendingActionRequest!)}>
+                            Confirmar e Criar no Sistema
+                          </Button>
+                          <Button size="sm" variant="outline" className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-800" onClick={() => void cancelPendingAction(msg.pendingActionRequest!)}>
+                            Rejeitar/Cancelar
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -5977,40 +5967,40 @@ function Shell() {
         ? "/erp/produtos"
         : targetRoute === "erp-services"
           ? "/erp/servicos"
-        : targetRoute === "erp-stock"
-          ? "/erp/estoque"
-          : targetRoute === "erp-suppliers"
+          : targetRoute === "erp-stock"
+            ? "/erp/estoque"
+            : targetRoute === "erp-suppliers"
               ? "/erp/fornecedores"
-            : targetRoute === "erp-sales"
-              ? buildSalesPath(
+              : targetRoute === "erp-sales"
+                ? buildSalesPath(
                   options?.salePublicId,
                   readSalesRoute(window.location.pathname).matches ? window.location.search : ""
                 )
-            : targetRoute === "erp-finance"
-              ? "/erp/financeiro"
-            : targetRoute === "erp-fiscal"
-              ? "/erp/fiscal"
-            : targetRoute === "erp-reports"
-              ? "/erp/relatorios"
-            : targetRoute === "erp-purchases"
-              ? "/erp/compras"
-            : targetRoute === "erp-summary"
-              ? "/erp"
-            : targetRoute === "crm-pipeline"
-              ? "/crm/funil"
-            : targetRoute === "crm-leads"
-              ? "/crm/leads"
-            : targetRoute === "crm-activities"
-              ? "/crm/atividades"
-            : targetRoute === "crm-proposals"
-              ? `/crm/propostas${options?.salePublicId ? `?salePublicId=${encodeURIComponent(options.salePublicId)}` : ""}`
-            : targetRoute === "crm-automations"
-              ? "/crm/automacoes"
-            : targetRoute === "crm-reports"
-              ? "/crm/relatorios"
-            : targetRoute === "crm-summary"
-              ? "/crm"
-              : "/";
+                : targetRoute === "erp-finance"
+                  ? "/erp/financeiro"
+                  : targetRoute === "erp-fiscal"
+                    ? "/erp/fiscal"
+                    : targetRoute === "erp-reports"
+                      ? "/erp/relatorios"
+                      : targetRoute === "erp-purchases"
+                        ? "/erp/compras"
+                        : targetRoute === "erp-summary"
+                          ? "/erp"
+                          : targetRoute === "crm-pipeline"
+                            ? "/crm/funil"
+                            : targetRoute === "crm-leads"
+                              ? "/crm/leads"
+                              : targetRoute === "crm-activities"
+                                ? "/crm/atividades"
+                                : targetRoute === "crm-proposals"
+                                  ? `/crm/propostas${options?.salePublicId ? `?salePublicId=${encodeURIComponent(options.salePublicId)}` : ""}`
+                                  : targetRoute === "crm-automations"
+                                    ? "/crm/automacoes"
+                                    : targetRoute === "crm-reports"
+                                      ? "/crm/relatorios"
+                                      : targetRoute === "crm-summary"
+                                        ? "/crm"
+                                        : "/";
     window.history[options?.replace ? "replaceState" : "pushState"](null, "", path);
     setActiveCrmClientId(targetRoute === "crm-clients" ? options?.crmClientId ?? null : null);
     setActiveSalePublicId(targetRoute === "erp-sales" || targetRoute === "crm-proposals" ? options?.salePublicId ?? null : null);
@@ -6077,7 +6067,7 @@ function Shell() {
       setActiveCrmClientId(path === "/erp/clientes" || path === "/crm/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
       const salesRoute = readSalesRoute(path);
       setActiveSalePublicId(salesRoute.matches ? salesRoute.salePublicId : null);
-        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/servicos" ? "erp-services" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : salesRoute.matches ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : path === "/crm/clientes" ? "crm-clients" : path === "/crm/funil" ? "crm-pipeline" : path === "/crm/leads" ? "crm-leads" : path === "/crm/atividades" ? "crm-activities" : path === "/crm/propostas" ? "crm-proposals" : path === "/crm/automacoes" ? "crm-automations" : path === "/crm/relatorios" ? "crm-reports" : path === "/crm" ? "crm-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
+      setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/servicos" ? "erp-services" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : salesRoute.matches ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : path === "/crm/clientes" ? "crm-clients" : path === "/crm/funil" ? "crm-pipeline" : path === "/crm/leads" ? "crm-leads" : path === "/crm/atividades" ? "crm-activities" : path === "/crm/propostas" ? "crm-proposals" : path === "/crm/automacoes" ? "crm-automations" : path === "/crm/relatorios" ? "crm-reports" : path === "/crm" ? "crm-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     };
     window.addEventListener("popstate", restoreFromHistory);
@@ -6166,7 +6156,7 @@ function Shell() {
 
   // Itens que são sempre visíveis independente de permissões
   const alwaysVisibleItems = ["home", "settings", "help", "notifications"];
-  
+
   const enabledModules = session.enabledModules;
 
   // Proteção e redirecionamento de rotas desabilitadas
@@ -6252,7 +6242,7 @@ function Shell() {
     enabledModules,
     onNavigate: navigateToErpSection,
   });
-    const crmSection = (active === "crm-pipeline" ? "pipeline" : active === "crm-leads" ? "leads" : active === "crm-clients" ? "clients" : active === "crm-activities" ? "activities" : active === "crm-proposals" ? "proposals" : active === "crm-automations" ? "automations" : active === "crm-reports" ? "reports" : "summary") as CrmSection;
+  const crmSection = (active === "crm-pipeline" ? "pipeline" : active === "crm-leads" ? "leads" : active === "crm-clients" ? "clients" : active === "crm-activities" ? "activities" : active === "crm-proposals" ? "proposals" : active === "crm-automations" ? "automations" : active === "crm-reports" ? "reports" : "summary") as CrmSection;
   const navigateToCrmSection = (section: CrmSection) => navigateToRoute(section === "pipeline" ? "crm-pipeline" : section === "leads" ? "crm-leads" : section === "clients" ? "crm-clients" : section === "activities" ? "crm-activities" : section === "proposals" ? "crm-proposals" : section === "automations" ? "crm-automations" : section === "reports" ? "crm-reports" : "crm-summary");
   const crmTopbarItems = getCrmTopbarItems({
     enabledModules,
@@ -6281,7 +6271,7 @@ function Shell() {
                 </span>
               </div>
               <button
-                 onClick={() => closeMobileSidebar()}
+                onClick={() => closeMobileSidebar()}
                 className="text-slate-400 hover:text-white transition-colors flex-shrink-0"
                 title="Fechar menu"
               >
@@ -6317,9 +6307,9 @@ function Shell() {
               const openErpWorkspace = () => {
                 navigateToRoute("erp-summary");
               };
-              return <button key="erp" type="button" onClick={openErpWorkspace} className={cn("flex items-center rounded-lg py-3 transition-all duration-300 relative px-3 mx-2",active.startsWith("erp-")?"bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl":"text-slate-300 hover:text-white hover:bg-slate-800/50")} style={active.startsWith("erp-")&&sidebarOpen?{width:"215px"}:{}} title="ERP"><PackageSearch className="h-5 w-5 flex-shrink-0"/>{sidebarOpen&&<span className="ml-3 overflow-hidden whitespace-nowrap text-base font-medium">ERP</span>}</button>;
+              return <button key="erp" type="button" onClick={openErpWorkspace} className={cn("flex items-center rounded-lg py-3 transition-all duration-300 relative px-3 mx-2", active.startsWith("erp-") ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl" : "text-slate-300 hover:text-white hover:bg-slate-800/50")} style={active.startsWith("erp-") && sidebarOpen ? { width: "215px" } : {}} title="ERP"><PackageSearch className="h-5 w-5 flex-shrink-0" />{sidebarOpen && <span className="ml-3 overflow-hidden whitespace-nowrap text-base font-medium">ERP</span>}</button>;
             }
-            
+
             return (
               <button
                 key={item.id}
@@ -6366,7 +6356,7 @@ function Shell() {
           {settingsNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
-            
+
             return (
               <button
                 key={item.id}
@@ -6410,7 +6400,7 @@ function Shell() {
             {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
             {sidebarOpen && <span className="text-base font-medium ml-3">{theme === 'light' ? 'Modo Escuro' : 'Modo Claro'}</span>}
           </button>
-          
+
           {/* Logout Button */}
           <button
             onClick={async () => {
@@ -6482,12 +6472,12 @@ function Shell() {
         </header>
 
         <ShellTopbarBoundary active={active} mode={shellLayout.moduleTopbar}>
-            <ModuleTopbar
+          <ModuleTopbar
             ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : active.startsWith("crm-") ? "Módulos do CRM" : "Ações da página"}
             activeItemId={active.startsWith("erp-") ? erpSection : active.startsWith("crm-") ? crmSection : undefined}
             items={active.startsWith("erp-") ? erpTopbarItems : active.startsWith("crm-") ? crmTopbarItems : []}
             leading={<button ref={sidebarTriggerRef} type="button" onClick={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
-            />
+          />
         </ShellTopbarBoundary>
 
         {/* Content */}
@@ -6498,25 +6488,25 @@ function Shell() {
             : shellLayout.mainContentClassName,
         )}>
           <ErrorBoundary key={active}>
-          {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} session={session} />}
-          {active === "conversations" && <ConversationsPage
-            attendanceLaunch={attendanceIntent.activeToken}
-            attendancePhone={attendanceIntent.phone}
-            onAttendanceLaunchConsumed={(launch) => {
-              setAttendanceIntent(current => consumeAttendanceLaunchIntent(current, launch));
-            }}
-          />}
-          {active === "tickets" && <TicketsPage onOpenMobileMenu={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} />}
-          {active === "tracking" && <TrackingPage />}
-           {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} enabledModules={enabledModules} />}
-           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} enabledModules={enabledModules} />}
-           {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
-          {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
-          {active === "bot-config" && <BotConfigPage />}
-          {active === "whatsapp-config" && <WhatsAppConfigPage />}
-          {active === "ai-assistant" && <AIAssistantPage />}
-          {active === "ai-token-usage" && (session.role === "admin" || session.userRole === "admin") && <AITokenUsagePage />}
-          {active === "notifications" && <NotificationsModernPage />}
+            {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} session={session} />}
+            {active === "conversations" && <ConversationsPage
+              attendanceLaunch={attendanceIntent.activeToken}
+              attendancePhone={attendanceIntent.phone}
+              onAttendanceLaunchConsumed={(launch) => {
+                setAttendanceIntent(current => consumeAttendanceLaunchIntent(current, launch));
+              }}
+            />}
+            {active === "tickets" && <TicketsPage onOpenMobileMenu={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} />}
+            {active === "tracking" && <TrackingPage />}
+            {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} enabledModules={enabledModules} />}
+            {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} enabledModules={enabledModules} />}
+            {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
+            {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
+            {active === "bot-config" && <BotConfigPage />}
+            {active === "whatsapp-config" && <WhatsAppConfigPage />}
+            {active === "ai-assistant" && <AIAssistantPage />}
+            {active === "ai-token-usage" && (session.role === "admin" || session.userRole === "admin") && <AITokenUsagePage />}
+            {active === "notifications" && <NotificationsModernPage />}
           </ErrorBoundary>
         </main>
       </div>
@@ -6950,7 +6940,7 @@ export function Home() {
   const [isValidating, setIsValidating] = useState(true);
   const refreshMutation = trpc.megadesk.refreshSession.useMutation();
   const validationStartedRef = React.useRef(false);
-  
+
   // Validar e renovar sessão ao carregar a página
   React.useEffect(() => {
     if (validationStartedRef.current) return;
@@ -6958,12 +6948,12 @@ export function Home() {
     const validateAndRefreshSession = async () => {
       try {
         const loadedSession = loadSession();
-        
+
         if (!loadedSession) {
           setIsValidating(false);
           return;
         }
-        
+
         // Browser storage is display-only; the opaque cookie is authoritative.
         {
           try {
@@ -6990,16 +6980,16 @@ export function Home() {
         setIsValidating(false);
       }
     };
-    
+
     validateAndRefreshSession();
   }, []);
-  
+
   useSessionRefresh(session, setSession);
 
   if (isValidating) {
     return <LoadingSpinner />;
   }
-  
+
   if (!session) {
     return <MegaDeskLoginGate onLogin={setSession} />;
   }
