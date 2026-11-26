@@ -25,7 +25,7 @@ const IS_ADMIN_SUBDOMAIN = hostname === "admin.megadesk.online";
 function isAdminRoute() {
   if (IS_ADMIN_SUBDOMAIN) return true;
   const pathname = window.location.pathname.toLowerCase();
-  return pathname === "/admin" || pathname.startsWith("/admin/");
+  return pathname === "/admin" || pathname.startsWith("/admin/") || pathname === "/megaadmin" || pathname.startsWith("/megaadmin/");
 }
 
 function isSettingsRoute() {

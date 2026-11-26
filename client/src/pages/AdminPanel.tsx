@@ -256,7 +256,7 @@ function LoginScreen() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,.22),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,.20),transparent_40%),#020617] text-white">
+    <main className="min-h-screen overflow-y-auto overflow-x-hidden bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,.22),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,.20),transparent_40%),#020617] text-white">
       <div className="grid min-h-screen lg:grid-cols-[1.05fr_.95fr]">
         {/* Left panel */}
         <section className="relative flex flex-col justify-between p-8 lg:p-12">
@@ -432,40 +432,42 @@ function Sidebar({
   onLogout: () => void;
 }) {
   return (
-    <aside className="sticky top-0 hidden h-screen w-80 shrink-0 border-r border-white/10 bg-slate-950/95 p-5 shadow-2xl shadow-black/30 backdrop-blur xl:block">
-      <div className="flex items-center gap-3 rounded-3xl border border-white/10 bg-white/[.03] p-4">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-400 text-slate-950">
-          <Radar className="h-7 w-7" />
+    <aside className="sticky top-0 hidden h-full w-80 shrink-0 border-r border-white/10 bg-slate-950/95 p-5 shadow-2xl shadow-black/30 backdrop-blur xl:flex xl:flex-col justify-between overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+        <div className="flex items-center gap-3 rounded-3xl border border-white/10 bg-white/[.03] p-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-400 text-slate-950">
+            <Radar className="h-7 w-7" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold text-white">MegaAdmin</h1>
+            <p className="text-xs text-slate-400">Admin Center</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-semibold text-white">MegaAdmin</h1>
-          <p className="text-xs text-slate-400">Admin Center</p>
-        </div>
+
+        <nav className="mt-8 space-y-2">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const selected = active === item.key;
+            return (
+              <button
+                key={item.key}
+                onClick={() => setActive(item.key)}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm transition",
+                  selected
+                    ? "bg-gradient-to-r from-emerald-400/20 to-cyan-400/10 text-emerald-100 ring-1 ring-emerald-400/30"
+                    : "text-slate-400 hover:bg-white/[.04] hover:text-white",
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
-      <nav className="mt-8 space-y-2">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const selected = active === item.key;
-          return (
-            <button
-              key={item.key}
-              onClick={() => setActive(item.key)}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm transition",
-                selected
-                  ? "bg-gradient-to-r from-emerald-400/20 to-cyan-400/10 text-emerald-100 ring-1 ring-emerald-400/30"
-                  : "text-slate-400 hover:bg-white/[.04] hover:text-white",
-              )}
-            >
-              <Icon className="h-5 w-5" />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="absolute inset-x-5 bottom-5 rounded-3xl border border-white/10 bg-white/[.03] p-4">
+      <div className="mt-4 pt-4 border-t border-white/10 shrink-0 rounded-3xl border border-white/10 bg-white/[.03] p-4">
         <p className="text-sm font-medium text-white">{userName}</p>
         <p className="mt-1 truncate text-xs text-slate-400">{userEmail}</p>
         <button
@@ -557,8 +559,8 @@ function ClientWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur">
-      <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur overflow-y-auto">
+      <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-2xl my-auto">
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
             <h3 className="text-2xl font-semibold text-white">Cadastrar novo cliente</h3>
@@ -692,8 +694,8 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
   const isActive = client.status === "active" && client.accessReleased;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/70 p-4 backdrop-blur">
-      <div className="my-8 w-full max-w-4xl rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur">
+      <div className="my-8 w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-[2rem] border border-white/10 bg-slate-950 p-6 shadow-2xl">
         {/* Header */}
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
@@ -1192,9 +1194,9 @@ export default function AdminPanel() {
   return (
     <DarkModeWrapper>
       <Toaster richColors position="top-right" />
-      <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="flex h-screen h-[100dvh] w-full overflow-hidden bg-slate-950 text-slate-100 flex-col">
         <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,.16),transparent_30%),radial-gradient(circle_at_top_right,rgba(14,165,233,.14),transparent_28%)]" />
-        <div className="relative flex min-h-screen">
+        <div className="relative flex flex-1 min-h-0 h-full w-full overflow-hidden">
           <Sidebar
             active={active}
             setActive={handleSetActive}
@@ -1203,7 +1205,7 @@ export default function AdminPanel() {
             onLogout={logout}
           />
 
-          <main className="min-w-0 flex-1 p-4 md:p-8">
+          <main className="min-w-0 flex-1 min-h-0 h-full overflow-y-auto overflow-x-hidden p-4 md:p-8">
             {/* Header comum (oculto quando no Escritório do Hermes, que tem header próprio) */}
             {active !== "hermes" ? (
               <header className="mb-8 flex flex-col gap-4 rounded-[2rem] border border-white/10 bg-white/[.03] p-5 backdrop-blur lg:flex-row lg:items-center lg:justify-between">

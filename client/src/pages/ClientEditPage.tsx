@@ -108,7 +108,7 @@ function DadosTab({ client, onSaved }: { client: any; onSaved: () => void }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-h-0 w-full pb-16">
       <div className="grid gap-5 md:grid-cols-2">
         <label className="block text-sm text-slate-300">
           Empresa *
@@ -950,7 +950,7 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-h-0 w-full pb-16">
       {/* Gemini IA */}
       <div className="rounded-2xl border border-white/10 bg-white/[.02] p-5 space-y-4">
         <div className="flex items-center justify-between">
@@ -1278,7 +1278,7 @@ export function ClientEditPage({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-h-0 w-full pb-16">
       {/* Header */}
       <div className="flex items-start gap-4">
         <button
