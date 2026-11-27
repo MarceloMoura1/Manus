@@ -663,6 +663,27 @@ export async function syncDeliveryOrderToErpSale(
       )
       .catch(() => {});
 
+    // Cria título financeiro a receber e quita automaticamente se o pedido já foi pago online
+    const paidOnline = isDeliveryPaymentOnlinePaid(input.orderSource, input.paymentMethod);
+    await syncErpSaleFinancialSettlement(
+      {
+        clientId: input.clientId,
+        saleOrderId,
+        salePublicId,
+        orderNumber,
+        crmClientId: input.customerId,
+        customerName: input.customerName.trim(),
+        totalCents,
+        settleNow: paidOnline,
+        reason: paidOnline
+          ? `Pagamento online confirmado (${input.paymentMethod.trim()})`
+          : "Título gerado automaticamente na criação do pedido delivery",
+        actorUserId,
+        actorUserName,
+      },
+      pool
+    );
+
     try {
       emitOperationalTenantEvent(input.clientId, "erp:sale.changed", {
         publicId: salePublicId,
@@ -678,8 +699,394 @@ export async function syncDeliveryOrderToErpSale(
   }
 }
 
+export function isDeliveryPaymentOnlinePaid(
+  orderSource: DeliveryOrderSource | string,
+  paymentMethod?: string | null
+): boolean {
+  const normalized = String(paymentMethod || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (
+    normalized.includes("pago") ||
+    normalized.includes("online") ||
+    normalized.includes("quitado") ||
+    normalized.includes("aprovado")
+  ) {
+    return true;
+  }
+  return orderSource === "site" && !normalized.includes("entrega") && !normalized.includes("combinar") && !normalized.includes("dinheiro");
+}
+
+async function ensureDefaultErpFinanceRefs(
+  clientId: string,
+  actorUserId: string,
+  pool: NicheQueryExecutor
+): Promise<{ categoryId: number; accountId: number; currentBalanceCents: number } | null> {
+  try {
+    let categoryId = 0;
+    const [catRows] = (await pool.execute(
+      `SELECT id FROM erp_financial_categories
+       WHERE client_id = ? AND active = 1 AND direction IN ('receivable', 'both')
+       ORDER BY id ASC LIMIT 1`,
+      [clientId]
+    )) as any[];
+    if (catRows?.[0]?.id) {
+      categoryId = Number(catRows[0].id);
+    } else {
+      const [insCat] = (await pool.execute(
+        `INSERT INTO erp_financial_categories (public_id, client_id, name, direction, active)
+         VALUES (?, ?, 'Vendas Delivery', 'receivable', 1)`,
+        [randomUUID(), clientId]
+      )) as any[];
+      categoryId = Number(insCat?.insertId ?? 0);
+      if (!categoryId) {
+        const [reCat] = (await pool.execute(
+          "SELECT id FROM erp_financial_categories WHERE client_id = ? ORDER BY id ASC LIMIT 1",
+          [clientId]
+        )) as any[];
+        categoryId = Number(reCat?.[0]?.id ?? 0);
+      }
+    }
+
+    let accountId = 0;
+    let currentBalanceCents = 0;
+    const [accRows] = (await pool.execute(
+      `SELECT id, current_balance_cents FROM erp_financial_accounts
+       WHERE client_id = ? AND active = 1
+       ORDER BY id ASC LIMIT 1`,
+      [clientId]
+    )) as any[];
+    if (accRows?.[0]?.id) {
+      accountId = Number(accRows[0].id);
+      currentBalanceCents = Number(accRows[0].current_balance_cents ?? 0);
+    } else {
+      const [insAcc] = (await pool.execute(
+        `INSERT INTO erp_financial_accounts
+         (public_id, client_id, name, type, initial_balance_cents, current_balance_cents, allow_negative, active, created_by)
+         VALUES (?, ?, 'Caixa Delivery', 'cash', 0, 0, 1, 1, ?)`,
+        [randomUUID(), clientId, actorUserId]
+      )) as any[];
+      accountId = Number(insAcc?.insertId ?? 0);
+      if (!accountId) {
+        const [reAcc] = (await pool.execute(
+          "SELECT id, current_balance_cents FROM erp_financial_accounts WHERE client_id = ? ORDER BY id ASC LIMIT 1",
+          [clientId]
+        )) as any[];
+        accountId = Number(reAcc?.[0]?.id ?? 0);
+        currentBalanceCents = Number(reAcc?.[0]?.current_balance_cents ?? 0);
+      }
+    }
+
+    if (!categoryId || !accountId) return null;
+    return { categoryId, accountId, currentBalanceCents };
+  } catch (err) {
+    console.warn("[DeliveryService] Falha ao resolver categoria/conta financeira ERP:", err);
+    return null;
+  }
+}
+
+/**
+ * Garante o título financeiro (`erp_financial_entries`) da venda do delivery e,
+ * quando `settleNow === true`, efetua a baixa total (`erp_financial_settlements` +
+ * `erp_financial_ledger` + `erp_sale_order_events`), deixando `Recebido = Total`,
+ * `Saldo a receber = R$ 0,00` e badge **Pago** em `ERP > Vendas`.
+ */
+export async function syncErpSaleFinancialSettlement(
+  input: {
+    clientId: string;
+    saleOrderId: number;
+    salePublicId: string;
+    orderNumber: string;
+    crmClientId: string;
+    customerName: string;
+    totalCents: number;
+    settleNow: boolean;
+    reason: string;
+    actorUserId?: string | null;
+    actorUserName?: string | null;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{ settled: boolean; paidCents: number }> {
+  if (!input.salePublicId || input.totalCents <= 0) {
+    return { settled: false, paidCents: 0 };
+  }
+  const actorId = String(input.actorUserId || "delivery-auto").slice(0, 80);
+  const actorName = String(input.actorUserName || "Delivery Automático").slice(0, 180);
+
+  try {
+    const refs = await ensureDefaultErpFinanceRefs(input.clientId, actorId, pool);
+    if (!refs) return { settled: false, paidCents: 0 };
+
+    const todayIso = new Date().toISOString().slice(0, 10);
+
+    // 1. Garante título a receber vinculado à venda
+    const [existingEntries] = (await pool.execute(
+      `SELECT id, amount_cents, status FROM erp_financial_entries
+       WHERE client_id = ? AND source_type = 'sales_order' AND source_public_id = ? AND status <> 'cancelled'
+       ORDER BY id ASC LIMIT 1`,
+      [input.clientId, input.salePublicId]
+    )) as any[];
+
+    let entryId = Number(existingEntries?.[0]?.id ?? 0);
+    if (!entryId) {
+      const [entryRes] = (await pool.execute(
+        `INSERT INTO erp_financial_entries
+         (public_id, client_id, document_number, direction, status, description, amount_cents, due_date, issue_date,
+          category_id, financial_account_id, crm_client_id, source_type, source_public_id, source_installment,
+          party_name_snapshot, created_by)
+         VALUES (?, ?, ?, 'receivable', 'open', ?, ?, ?, CURRENT_DATE, ?, ?, ?, 'sales_order', ?, 1, ?, ?)`,
+        [
+          randomUUID(),
+          input.clientId,
+          `${input.orderNumber}-01/01`,
+          `Venda ${input.orderNumber} · Delivery`,
+          input.totalCents,
+          todayIso,
+          refs.categoryId,
+          refs.accountId,
+          input.crmClientId,
+          input.salePublicId,
+          input.customerName.slice(0, 255),
+          actorId,
+        ]
+      )) as any[];
+      entryId = Number(entryRes?.insertId ?? 0);
+      if (!entryId) {
+        const [reEntry] = (await pool.execute(
+          `SELECT id FROM erp_financial_entries
+           WHERE client_id = ? AND source_type = 'sales_order' AND source_public_id = ?
+           ORDER BY id ASC LIMIT 1`,
+          [input.clientId, input.salePublicId]
+        )) as any[];
+        entryId = Number(reEntry?.[0]?.id ?? 0);
+      }
+    }
+
+    if (!entryId) return { settled: false, paidCents: 0 };
+    if (!input.settleNow) return { settled: false, paidCents: 0 };
+
+    // 2. Verifica quanto já foi liquidado (idempotência)
+    const [paidRows] = (await pool.execute(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS paid_cents
+       FROM erp_financial_settlements
+       WHERE client_id = ? AND financial_entry_id = ?`,
+      [input.clientId, entryId]
+    )) as any[];
+    const alreadyPaidCents = Number(paidRows?.[0]?.paid_cents ?? 0);
+    const remainingCents = Math.max(0, input.totalCents - alreadyPaidCents);
+
+    if (remainingCents > 0) {
+      const idempotencyKey = `delivery-settle:${input.salePublicId}:${entryId}`;
+      const [settleRes] = (await pool.execute(
+        `INSERT INTO erp_financial_settlements
+         (public_id, client_id, financial_entry_id, financial_account_id, idempotency_key, amount_cents, settled_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          randomUUID(),
+          input.clientId,
+          entryId,
+          refs.accountId,
+          idempotencyKey.slice(0, 100),
+          remainingCents,
+          actorId,
+        ]
+      )) as any[];
+      const settlementId = Number(settleRes?.insertId ?? 0);
+      const resultingBalance = refs.currentBalanceCents + remainingCents;
+
+      await pool
+        .execute(
+          `INSERT INTO erp_financial_ledger
+           (public_id, client_id, financial_account_id, financial_entry_id, settlement_id, type, amount_cents,
+            previous_balance_cents, resulting_balance_cents, occurred_at, created_by, metadata)
+           VALUES (?, ?, ?, ?, ?, 'receivable_settlement', ?, ?, ?, NOW(), ?, ?)`,
+          [
+            randomUUID(),
+            input.clientId,
+            refs.accountId,
+            entryId,
+            settlementId || null,
+            remainingCents,
+            refs.currentBalanceCents,
+            resultingBalance,
+            actorId,
+            JSON.stringify({ kind: "delivery_auto_settlement", reason: input.reason }),
+          ]
+        )
+        .catch(() => {});
+
+      await pool
+        .execute(
+          "UPDATE erp_financial_accounts SET current_balance_cents = ? WHERE client_id = ? AND id = ?",
+          [resultingBalance, input.clientId, refs.accountId]
+        )
+        .catch(() => {});
+
+      await pool.execute(
+        `UPDATE erp_financial_entries
+         SET status = 'settled', settled_at = COALESCE(settled_at, NOW()), settled_by = ?
+         WHERE client_id = ? AND id = ?`,
+        [actorId, input.clientId, entryId]
+      );
+
+      if (input.saleOrderId > 0) {
+        await pool
+          .execute(
+            `INSERT INTO erp_sale_order_events
+             (public_id, client_id, sale_order_id, event_type, from_stage, to_stage, reason,
+              before_json, after_json, idempotency_key, payload_hash, changed_by, changed_by_name_snapshot)
+             VALUES (?, ?, ?, 'payment_registered', NULL, NULL, ?, ?, ?, ?, NULL, ?, ?)`,
+            [
+              randomUUID(),
+              input.clientId,
+              input.saleOrderId,
+              input.reason.slice(0, 500),
+              JSON.stringify({ paidCents: alreadyPaidCents, paymentStatus: alreadyPaidCents > 0 ? "partial" : "pending" }),
+              JSON.stringify({ paidCents: input.totalCents, paymentStatus: "paid" }),
+              `delivery-pay-evt:${input.salePublicId}`.slice(0, 100),
+              actorId,
+              actorName,
+            ]
+          )
+          .catch(() => {});
+      }
+
+      try {
+        const occurredAt = new Date().toISOString();
+        emitOperationalTenantEvent(input.clientId, "erp:finance.entry.changed", {
+          publicId: input.salePublicId,
+          operation: "sale_titles_changed",
+          occurredAt,
+        });
+        emitOperationalTenantEvent(input.clientId, "erp:sale.changed", {
+          publicId: input.salePublicId,
+          operation: "payment_changed",
+          occurredAt,
+        });
+      } catch {}
+    }
+
+    return { settled: true, paidCents: input.totalCents };
+  } catch (err) {
+    console.warn("[DeliveryService] Falha na baixa financeira automática da venda ERP:", err);
+    return { settled: false, paidCents: 0 };
+  }
+}
+
+/**
+ * Grava a mensagem automática disparada pelo Delivery diretamente na conversa
+ * do cliente em **Atendimento** (`megadesk_domain_conversations` + `megadesk_domain_conversations_messages`)
+ * e notifica o painel em tempo real via Socket.IO.
+ */
+export async function recordDeliveryOutboundMessageInAttendance(
+  input: {
+    clientId: string;
+    customerName: string;
+    customerPhone: string;
+    message: string;
+    externalMessageId?: string | null;
+    senderName?: string;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{ conversationId: string; messageId: string } | null> {
+  const cleanText = String(input.message || "").trim();
+  const digits = String(input.customerPhone || "").replace(/\D/g, "");
+  if (!cleanText || digits.length < 8) return null;
+
+  const tail8 = digits.slice(-8);
+  const now = new Date();
+  const timeLabel = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const integrationId = instanceNameFor(input.clientId);
+  const senderLabel = input.senderName || "Delivery Automático";
+
+  try {
+    const [convRows] = (await pool.execute(
+      `SELECT conversation_id, status
+       FROM megadesk_domain_conversations
+       WHERE client_id = ?
+         AND REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), '-', ''), ' ', ''), '(', ''), ')', '') LIKE ?
+       ORDER BY CASE WHEN status <> 'closed' THEN 0 ELSE 1 END ASC, updated_at DESC
+       LIMIT 1`,
+      [input.clientId, `%${tail8}`]
+    )) as any[];
+
+    let conversationId = convRows?.[0]?.conversation_id ? String(convRows[0].conversation_id) : "";
+    const normalizedPhone = digits.length === 10 || digits.length === 11 ? `55${digits}` : digits;
+
+    if (!conversationId) {
+      conversationId = `conv-dlv-${randomUUID()}`;
+      const displayName = String(input.customerName || "Cliente").trim().slice(0, 180) || "Cliente";
+      await pool.execute(
+        `INSERT INTO megadesk_domain_conversations (
+          conversation_id, client_id, origin, channel, provider, integration_id,
+          customer_name, phone, company, status, last_message, last_message_from,
+          time_label, messages_json, unread_count, ia_active, opened_at, updated_at
+        ) VALUES (?, ?, 'outbound', 'whatsapp', 'evolution', ?, ?, ?, ?, 'open', ?, 'bot', ?, '[]', 0, 0, NOW(), NOW())`,
+        [
+          conversationId,
+          input.clientId,
+          integrationId,
+          displayName,
+          normalizedPhone,
+          displayName,
+          cleanText.substring(0, 255),
+          timeLabel,
+        ]
+      );
+    } else {
+      await pool.execute(
+        `UPDATE megadesk_domain_conversations
+         SET last_message = ?, last_message_from = 'bot', time_label = ?, updated_at = NOW()
+         WHERE conversation_id = ? AND client_id = ?`,
+        [cleanText.substring(0, 255), timeLabel, conversationId, input.clientId]
+      );
+    }
+
+    const messageId = `msg-dlv-${randomUUID()}`;
+    await pool.execute(
+      `INSERT INTO megadesk_domain_conversations_messages
+       (message_id, conversation_id, client_id, provider, integration_id, external_message_id,
+        direction, message_type, sender, sender_name_snapshot, message, status, timestamp, updated_at)
+       VALUES (?, ?, ?, 'evolution', ?, ?, 'outbound', 'text', 'bot', ?, ?, 'sent', NOW(), NOW())`,
+      [
+        messageId,
+        conversationId,
+        input.clientId,
+        integrationId,
+        input.externalMessageId || null,
+        senderLabel.slice(0, 180),
+        cleanText,
+      ]
+    );
+
+    try {
+      emitOperationalTenantEvent(input.clientId, "conversation:message", {
+        conversationId,
+        clientId: input.clientId,
+        message: {
+          id: messageId,
+          from: "bot",
+          sender: "bot",
+          senderName: senderLabel,
+          direction: "outbound",
+          text: cleanText,
+          time: timeLabel,
+          timestamp: now.toISOString(),
+        },
+      });
+    } catch {}
+
+    return { conversationId, messageId };
+  } catch (err) {
+    console.warn("[DeliveryService] Falha ao sincronizar mensagem automática no Atendimento:", err);
+    return null;
+  }
+}
+
 /**
  * Atualiza o status da venda vinculada em `ERP > Vendas` quando o delivery é concluído ou cancelado.
+ * Quando concluído (`completed`), também efetua a baixa financeira automática (`Recebido = Total`, badge **Pago**).
  */
 export async function updateErpSaleStatusForDelivery(
   input: {
@@ -687,11 +1094,14 @@ export async function updateErpSaleStatusForDelivery(
     erpSalePublicId: string | null | undefined;
     targetStatus: "completed" | "cancelled";
     actorUserId?: string | null;
+    actorUserName?: string | null;
+    reason?: string;
   },
   pool: NicheQueryExecutor = getPool()
 ): Promise<void> {
   if (!input.erpSalePublicId) return;
   const actorId = String(input.actorUserId || "delivery-auto").slice(0, 80);
+  const actorName = String(input.actorUserName || "Motoboy").slice(0, 180);
   try {
     if (input.targetStatus === "completed") {
       await pool.execute(
@@ -704,6 +1114,33 @@ export async function updateErpSaleStatusForDelivery(
          WHERE client_id = ? AND public_id = ? AND status <> 'cancelled'`,
         [actorId, input.clientId, input.erpSalePublicId]
       );
+
+      // Carrega dados da venda para efetuar baixa financeira automática (Recebido = Total, Saldo = 0)
+      const [saleRows] = (await pool.execute(
+        `SELECT id, order_number, crm_client_id, customer_name_snapshot, total_cents
+         FROM erp_sale_orders
+         WHERE client_id = ? AND public_id = ? LIMIT 1`,
+        [input.clientId, input.erpSalePublicId]
+      )) as any[];
+      const sale = saleRows?.[0];
+      if (sale && Number(sale.total_cents ?? 0) > 0) {
+        await syncErpSaleFinancialSettlement(
+          {
+            clientId: input.clientId,
+            saleOrderId: Number(sale.id ?? 0),
+            salePublicId: input.erpSalePublicId,
+            orderNumber: String(sale.order_number || "V-0"),
+            crmClientId: String(sale.crm_client_id || ""),
+            customerName: String(sale.customer_name_snapshot || "Cliente"),
+            totalCents: Number(sale.total_cents),
+            settleNow: true,
+            reason: input.reason || "Pagamento quitado automaticamente na conclusão da entrega (código 4 dígitos)",
+            actorUserId: actorId,
+            actorUserName: actorName,
+          },
+          pool
+        );
+      }
     } else {
       await pool.execute(
         `UPDATE erp_sale_orders
@@ -715,6 +1152,14 @@ export async function updateErpSaleStatusForDelivery(
          WHERE client_id = ? AND public_id = ?`,
         [actorId, input.clientId, input.erpSalePublicId]
       );
+      await pool
+        .execute(
+          `UPDATE erp_financial_entries
+           SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = ?, cancellation_reason = 'Pedido de delivery cancelado'
+           WHERE client_id = ? AND source_type = 'sales_order' AND source_public_id = ? AND status = 'open'`,
+          [actorId, input.clientId, input.erpSalePublicId]
+        )
+        .catch(() => {});
     }
 
     try {
@@ -1328,16 +1773,34 @@ export async function startDeliveryRoute(
 
   let whatsappSent = false;
   let whatsappError: string | undefined;
+  let externalMessageId: string | null = null;
   try {
-    await sendFn({
+    const sendResult: any = await sendFn({
       clientId: input.clientId,
       phone: updated.customerPhone,
       message: whatsappMessage,
     });
     whatsappSent = true;
+    externalMessageId =
+      sendResult?.key?.id || sendResult?.messageId || sendResult?.externalMessageId || null;
   } catch (err: any) {
     whatsappError = err?.message || "Falha ao enviar notificação via WhatsApp.";
     console.warn("[DeliveryService] Falha no disparo WhatsApp de início de rota:", whatsappError);
+  }
+
+  // Persiste a mensagem automática enviada no chat de Atendimento > Cliente X
+  if (whatsappSent) {
+    await recordDeliveryOutboundMessageInAttendance(
+      {
+        clientId: input.clientId,
+        customerName: updated.customerName,
+        customerPhone: updated.customerPhone,
+        message: whatsappMessage,
+        externalMessageId,
+        senderName: "Delivery Automático",
+      },
+      pool
+    );
   }
 
   const actorLabel = input.actorUserName || "Motoboy";
@@ -1624,6 +2087,8 @@ export async function completeDeliveryOrder(
       erpSalePublicId: order.erpSalePublicId,
       targetStatus: "completed",
       actorUserId: input.motoboyUserId,
+      actorUserName: input.actorUserName || "Motoboy",
+      reason: "Entrega finalizada pelo motoboy com código de 4 dígitos — pagamento quitado automaticamente",
     },
     pool
   );

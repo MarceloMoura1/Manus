@@ -7,8 +7,10 @@ import {
   Clock,
   DollarSign,
   Home as HomeIcon,
+  LogOut,
   MapPin,
   MessageCircle,
+  Moon,
   Navigation,
   Package,
   Phone,
@@ -16,6 +18,7 @@ import {
   Radio,
   RefreshCw,
   ShieldCheck,
+  Sun,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,15 +31,24 @@ type HistoryPeriod = "today" | "week" | "month" | "custom";
 const formatBRL = (value: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
 
-function isAlreadyPaid(paymentMethod: string): boolean {
+function isAlreadyPaid(paymentMethod: string, orderSource?: string): boolean {
   const normalized = paymentMethod
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  return (
+  if (
     normalized.includes("pago") ||
     normalized.includes("online") ||
-    normalized.includes("quitado")
+    normalized.includes("quitado") ||
+    normalized.includes("aprovado")
+  ) {
+    return true;
+  }
+  return (
+    orderSource === "site" &&
+    !normalized.includes("entrega") &&
+    !normalized.includes("combinar") &&
+    !normalized.includes("dinheiro")
   );
 }
 
@@ -62,9 +74,9 @@ function buildWhatsAppLink(phone: string): string {
 
 const ADDRESS_TYPE_META: Record<string, { label: string; badgeClass: string }> = {
   casa: { label: "CASA", badgeClass: "bg-emerald-600 text-white" },
-  apartamento: { label: "APARTAMENTO", badgeClass: "bg-indigo-600 text-white" },
+  apartamento: { label: "APTO", badgeClass: "bg-indigo-600 text-white" },
   comercial: { label: "COMERCIAL", badgeClass: "bg-amber-600 text-white" },
-  outro: { label: "OUTRO", badgeClass: "bg-slate-700 text-white" },
+  outro: { label: "OUTRO", badgeClass: "bg-slate-600 text-white" },
 };
 
 export function MotoboyWorkspace({
@@ -72,11 +84,17 @@ export function MotoboyWorkspace({
   onSwitchView,
   userName,
   companyName,
+  theme = "light",
+  onToggleTheme,
+  onLogout,
 }: {
   activeView: MotoboyView;
   onSwitchView: (view: MotoboyView) => void;
   userName?: string;
   companyName?: string;
+  theme?: "light" | "dark";
+  onToggleTheme?: () => void;
+  onLogout?: () => void;
 }) {
   const utils = trpc.useUtils();
   const [period, setPeriod] = useState<HistoryPeriod>("today");
@@ -111,9 +129,10 @@ export function MotoboyWorkspace({
   );
 
   const updateLocationMutation = trpc.delivery.updateMotoboyLocation.useMutation();
+
   const acceptOrderMutation = trpc.delivery.acceptOrder.useMutation({
     onSuccess: async () => {
-      toast.success("Corrida aceita! Status atualizado automaticamente para Pronto p/ Motoboy.");
+      toast.success("Corrida aceita! Status atualizado para Pronto p/ Motoboy.");
       await utils.delivery.myQueue.invalidate();
     },
     onError: (err) => {
@@ -161,7 +180,6 @@ export function MotoboyWorkspace({
   const hasActiveRoute = Boolean(activeRouteOrder);
   const activeOrderId = activeRouteOrder?.id ?? null;
 
-  // Ticker de 1s para exibir "Atualizado há Xs"
   useEffect(() => {
     if (!lastGpsSentAt) return;
     const interval = window.setInterval(() => {
@@ -170,7 +188,6 @@ export function MotoboyWorkspace({
     return () => window.clearInterval(interval);
   }, [lastGpsSentAt]);
 
-  // Telemetria GPS ao vivo + Screen Wake Lock enquanto houver entrega em rota
   useEffect(() => {
     if (!hasActiveRoute) {
       setGpsStatus("idle");
@@ -184,7 +201,6 @@ export function MotoboyWorkspace({
     }
 
     let cancelled = false;
-
     const acquireWakeLock = async () => {
       try {
         const wl = (navigator as any)?.wakeLock;
@@ -270,136 +286,127 @@ export function MotoboyWorkspace({
   return (
     <div
       data-testid="motoboy-workspace"
-      className="min-h-full w-full bg-slate-950 text-slate-100 pb-20"
+      className="min-h-screen w-full bg-background text-foreground flex flex-col pb-24"
     >
-      {/* Cabeçalho Mobile de Alto Contraste */}
-      <div className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 backdrop-blur px-4 py-3 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                <Bike className="h-4 w-4" />
-              </span>
-              <div className="min-w-0">
-                <h1 className="text-base font-extrabold text-white truncate">
-                  {companyName || "Modo Motoboy"}
-                </h1>
-                <p className="text-xs text-slate-400 truncate">
-                  Entregador: {userName || "Motoboy"}
-                </p>
-              </div>
+      {/* Header Único, Compacto e Limpo (Modo Claro / Escuro + Sair) */}
+      <header className="sticky top-0 z-30 border-b border-border bg-card/95 backdrop-blur px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-xs">
+        <div className="mx-auto max-w-xl flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+              <Bike className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-base font-extrabold text-foreground truncate leading-tight">
+                {companyName || "Modo Motoboy"}
+              </h1>
+              <p className="text-xs text-muted-foreground truncate">
+                {userName || "Entregador"}
+              </p>
             </div>
           </div>
 
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              void queueQuery.refetch();
-              if (activeView === "earnings") void historyQuery.refetch();
-            }}
-            className="h-9 border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800 cursor-pointer"
-          >
-            <RefreshCw className={`h-4 w-4 ${queueQuery.isFetching ? "animate-spin" : ""}`} />
-          </Button>
-        </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                void queueQuery.refetch();
+                if (activeView === "earnings") void historyQuery.refetch();
+              }}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition cursor-pointer"
+              title="Atualizar fila"
+              aria-label="Atualizar fila"
+            >
+              <RefreshCw className={`h-4 w-4 ${queueQuery.isFetching ? "animate-spin" : ""}`} />
+            </button>
 
-        {/* Indicador Discreto de GPS Ao Vivo */}
-        {hasActiveRoute && (
-          <div
-            data-testid="motoboy-gps-banner"
-            className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-semibold ${
-              gpsStatus === "error"
-                ? "border-rose-500/40 bg-rose-950/50 text-rose-200"
-                : "border-emerald-500/40 bg-emerald-950/40 text-emerald-200"
-            }`}
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <Radio
-                className={`h-4 w-4 shrink-0 ${
-                  gpsStatus === "error" ? "text-rose-400" : "text-emerald-400 animate-pulse"
-                }`}
-              />
-              <span className="truncate">
-                {gpsStatus === "error"
-                  ? `GPS indisponível: ${gpsErrorMsg}`
-                  : lastGpsSentAt
-                    ? `GPS Ao Vivo • Atualizado há ${secondsSinceGps}s`
-                    : "GPS Ao Vivo • Obtendo sinal..."}
-              </span>
-            </div>
-            {wakeLockActive && (
-              <span className="shrink-0 rounded-md bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
-                Tela ativa
-              </span>
+            {onToggleTheme && (
+              <button
+                type="button"
+                data-testid="motoboy-theme-toggle"
+                onClick={onToggleTheme}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition cursor-pointer"
+                title={theme === "dark" ? "Mudar para Modo Claro" : "Mudar para Modo Escuro"}
+                aria-label="Alternar tema"
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
+              </button>
+            )}
+
+            {onLogout && (
+              <button
+                type="button"
+                data-testid="motoboy-logout-btn"
+                onClick={onLogout}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 px-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/70 transition cursor-pointer"
+                title="Sair da conta"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden xs:inline sm:inline">Sair</span>
+              </button>
             )}
           </div>
-        )}
+        </div>
 
-        {/* Abas Superiores Exclusivas do Motoboy */}
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            data-testid="motoboy-tab-deliveries"
-            onClick={() => onSwitchView("deliveries")}
-            className={`flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-bold transition cursor-pointer ${
-              activeView === "deliveries"
-                ? "bg-emerald-500 text-slate-950 shadow-md"
-                : "bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800"
-            }`}
-          >
-            <Bike className="h-4 w-4" />
-            <span>Minhas Entregas</span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-extrabold ${
-                activeView === "deliveries"
-                  ? "bg-slate-950/20 text-slate-950"
-                  : "bg-slate-800 text-emerald-400"
+        {/* Faixa Discreta de GPS Ativo */}
+        {hasActiveRoute && (
+          <div className="mx-auto max-w-xl mt-2.5">
+            <div
+              data-testid="motoboy-gps-banner"
+              className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold ${
+                gpsStatus === "error"
+                  ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
               }`}
             >
-              {orders.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            data-testid="motoboy-tab-earnings"
-            onClick={() => onSwitchView("earnings")}
-            className={`flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-bold transition cursor-pointer ${
-              activeView === "earnings"
-                ? "bg-emerald-500 text-slate-950 shadow-md"
-                : "bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800"
-            }`}
-          >
-            <Wallet className="h-4 w-4" />
-            <span>Corridas &amp; Ganhos</span>
-          </button>
-        </div>
-      </div>
+              <div className="flex items-center gap-2 min-w-0">
+                <Radio
+                  className={`h-3.5 w-3.5 shrink-0 ${
+                    gpsStatus === "error" ? "text-rose-500" : "text-emerald-500 animate-pulse"
+                  }`}
+                />
+                <span className="truncate">
+                  {gpsStatus === "error"
+                    ? `GPS indisponível: ${gpsErrorMsg}`
+                    : lastGpsSentAt
+                      ? `GPS Ao Vivo • Atualizado há ${secondsSinceGps}s`
+                      : "GPS Ao Vivo • Conectando satélite..."}
+                </span>
+              </div>
+              {wakeLockActive && (
+                <span className="shrink-0 rounded-md bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold">
+                  Tela ativa
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </header>
 
       {/* ─── VISÃO 1: MINHAS ENTREGAS ─────────────────────────────────────── */}
       {activeView === "deliveries" && (
-        <div className="mx-auto max-w-xl px-4 pt-4 space-y-4">
+        <main className="mx-auto w-full max-w-xl flex-1 px-4 pt-4 space-y-4">
           {queueQuery.isLoading ? (
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center text-sm text-slate-400">
+            <div className="rounded-3xl border border-border bg-card p-8 text-center text-sm text-muted-foreground shadow-xs">
               Carregando suas entregas...
             </div>
           ) : orders.length === 0 ? (
             <div
               data-testid="motoboy-queue-empty"
-              className="rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center space-y-3"
+              className="rounded-3xl border border-border bg-card p-10 text-center space-y-3 shadow-xs"
             >
-              <Bike className="h-10 w-10 text-emerald-500/70 mx-auto" />
-              <h2 className="text-lg font-bold text-white">Nenhuma entrega na sua fila</h2>
-              <p className="text-sm text-slate-400">
-                Assim que o restaurante atribuir um pedido para você, ele aparecerá automaticamente aqui.
+              <div className="mx-auto inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                <Bike className="h-7 w-7" />
+              </div>
+              <h2 className="text-lg font-extrabold text-foreground">Nenhuma entrega na sua fila</h2>
+              <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+                Assim que o restaurante despachar um pedido para você, ele aparecerá automaticamente aqui.
               </p>
             </div>
           ) : (
             orders.map((order, idx) => {
               const isInRoute = order.deliveryStatus === "in_route";
-              const paid = isAlreadyPaid(order.paymentMethod);
+              const isAccepted = Boolean(order.acceptedAt);
+              const paid = isAlreadyPaid(order.paymentMethod, order.orderSource);
               const addrMeta = ADDRESS_TYPE_META[order.addressType] ?? ADDRESS_TYPE_META.outro;
               const codeValue = codeByTicket[order.ticketId] ?? "";
 
@@ -407,56 +414,82 @@ export function MotoboyWorkspace({
                 <article
                   key={order.id}
                   data-testid={`motoboy-order-card-${order.ticketId}`}
-                  className={`rounded-2xl border-2 p-4 space-y-4 shadow-lg ${
+                  className={`rounded-3xl border-2 bg-card p-4 sm:p-5 space-y-4 shadow-sm transition ${
                     isInRoute
-                      ? "border-emerald-500 bg-slate-900"
-                      : "border-slate-800 bg-slate-900/80"
+                      ? "border-emerald-500 shadow-emerald-500/10"
+                      : isAccepted
+                        ? "border-sky-500/50"
+                        : "border-border"
                   }`}
                 >
-                  {/* Topo do Card: Ordem na Fila + Status + Taxa */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-xl bg-amber-400 px-2.5 text-sm font-black text-slate-950">
+                  {/* Topo do Card: Ordem (#1), Ticket (#0008), Status Vivo + GPS + Taxa */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-2xl bg-amber-400 px-2.5 text-sm font-black text-slate-950 shadow-xs">
                         #{order.routeSequence || idx + 1}
                       </span>
-                      <div>
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-extrabold ${
-                            isInRoute
-                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                              : "bg-sky-500/20 text-sky-300 border border-sky-500/40"
-                          }`}
-                        >
-                          {isInRoute ? "🛵 EM ROTA" : "⏳ AGUARDANDO SAÍDA"}
-                        </span>
-                        {order.ticketNumber && (
-                          <span className="ml-2 text-xs font-mono text-slate-400">
-                            Ticket #{String(order.ticketNumber).padStart(4, "0")}
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {order.ticketNumber && (
+                            <span className="text-xs font-mono font-extrabold text-muted-foreground">
+                              #{String(order.ticketNumber).padStart(4, "0")}
+                            </span>
+                          )}
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
+                              isInRoute
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                                : isAccepted
+                                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
+                                  : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                            }`}
+                          >
+                            {isInRoute ? (
+                              <>
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                EM ROTA
+                              </>
+                            ) : isAccepted ? (
+                              "PRONTO P/ SAIR"
+                            ) : (
+                              "NOVA CORRIDA"
+                            )}
+                          </span>
+                        </div>
+                        {isInRoute && gpsStatus === "active" && (
+                          <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                            <Radio className="h-3 w-3 animate-pulse" />
+                            GPS transmitindo ao vivo
                           </span>
                         )}
                       </div>
                     </div>
 
-                    <div className="text-right">
-                      <span className="block text-[10px] font-bold uppercase text-slate-400">
-                        Sua taxa
+                    <div className="text-right shrink-0 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5">
+                      <span className="block text-[10px] font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                        Taxa
                       </span>
-                      <span className="text-base font-black text-emerald-400">
+                      <span className="text-sm font-black text-emerald-700 dark:text-emerald-400">
                         {formatBRL(order.deliveryFee)}
                       </span>
                     </div>
                   </div>
 
-                  {/* Cliente + Botões Rápidos Ligar / WhatsApp */}
-                  <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-950/70 border border-slate-800 p-3">
+                  {/* Bloco Principal: Cliente + Botões Rápidos WhatsApp / Ligar */}
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-muted/40 p-3.5">
                     <div className="min-w-0">
-                      <p className="text-base font-bold text-white truncate">{order.customerName}</p>
-                      <p className="text-xs font-mono text-slate-400">{order.customerPhone}</p>
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Cliente
+                      </span>
+                      <p className="text-base font-extrabold text-foreground truncate">
+                        {order.customerName}
+                      </p>
+                      <p className="text-xs font-mono text-muted-foreground">{order.customerPhone}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <a
                         href={`tel:${order.customerPhone.replace(/\D/g, "")}`}
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-slate-800 text-slate-100 border border-slate-700 active:scale-95"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-card text-foreground shadow-xs hover:bg-muted active:scale-95 transition"
                         title="Ligar para o cliente"
                         aria-label="Ligar para o cliente"
                       >
@@ -466,7 +499,7 @@ export function MotoboyWorkspace({
                         href={buildWhatsAppLink(order.customerPhone)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-white active:scale-95"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 active:scale-95 transition"
                         title="Abrir WhatsApp do cliente"
                         aria-label="Abrir WhatsApp do cliente"
                       >
@@ -475,15 +508,15 @@ export function MotoboyWorkspace({
                     </div>
                   </div>
 
-                  {/* Endereço em Alto Contraste + Tipo Casa/Apto + Complemento */}
-                  <div className="rounded-xl border border-slate-700 bg-slate-950 p-3.5 space-y-2.5">
+                  {/* Endereço Grande & Legível + Badge CASA/APTO + Bloco/Apto/Referência */}
+                  <div className="rounded-2xl border border-border bg-muted/25 p-4 space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
-                        <MapPin className="h-4 w-4 text-rose-400" />
+                      <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted-foreground">
+                        <MapPin className="h-4 w-4 text-rose-500" />
                         Endereço de Entrega
                       </span>
                       <span
-                        className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-black tracking-wide ${addrMeta.badgeClass}`}
+                        className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-black tracking-wide ${addrMeta.badgeClass}`}
                       >
                         {order.addressType === "apartamento" ? (
                           <Building className="h-3.5 w-3.5" />
@@ -494,72 +527,93 @@ export function MotoboyWorkspace({
                       </span>
                     </div>
 
-                    <p className="text-base font-bold leading-snug text-white">
+                    <p className="text-base sm:text-lg font-extrabold leading-snug text-foreground">
                       {order.deliveryAddress}
                     </p>
 
                     {order.addressComplement && (
-                      <div className="rounded-xl border border-amber-400/50 bg-amber-500/15 px-3 py-2.5">
-                        <span className="block text-[11px] font-black uppercase tracking-wider text-amber-300">
+                      <div className="rounded-xl border-2 border-amber-400/60 bg-amber-500/15 px-3.5 py-2.5">
+                        <span className="block text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
                           Bloco / Apto / Referência
                         </span>
-                        <p className="text-sm font-bold text-amber-100 mt-0.5">
+                        <p className="text-sm font-extrabold text-amber-950 dark:text-amber-100 mt-0.5">
                           {order.addressComplement}
                         </p>
                       </div>
                     )}
                   </div>
 
-                  {/* Itens + Pagamento (Cobrar na Entrega vs Já Pago) */}
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2.5">
-                    <div className="flex items-start gap-2">
-                      <Package className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                      <p className="text-sm text-slate-200 whitespace-pre-wrap leading-snug">
-                        {order.itemsSummary || "Pedido sem resumo detalhado."}
-                      </p>
+                  {/* Resumo dos Itens + Selo Claro de Pagamento */}
+                  <div className="rounded-2xl border border-border bg-muted/25 p-4 space-y-3">
+                    <div className="flex items-start gap-2.5">
+                      <Package className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        {order.items && order.items.length > 0 ? (
+                          <ul className="space-y-1 text-sm text-foreground">
+                            {order.items.map((it: any, iIdx: number) => (
+                              <li key={`${it.productPublicId || it.name}-${iIdx}`} className="flex justify-between gap-2">
+                                <span className="font-medium">
+                                  <strong>{it.quantity}x</strong> {it.name}
+                                </span>
+                                <span className="text-xs font-semibold text-muted-foreground shrink-0">
+                                  {formatBRL(it.subtotal)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-sm font-medium text-foreground whitespace-pre-wrap leading-snug">
+                            {order.itemsSummary || "Pedido sem resumo detalhado."}
+                          </p>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                    <div
+                      className={`rounded-2xl border-2 p-3 flex flex-wrap items-center justify-between gap-2 ${
+                        paid
+                          ? "border-emerald-500/40 bg-emerald-500/10"
+                          : "border-amber-500/50 bg-amber-500/15"
+                      }`}
+                    >
                       <div>
-                        <span className="block text-[11px] text-slate-400">Valor do Pedido</span>
-                        <strong className="text-base font-extrabold text-white">
-                          {formatBRL(order.orderTotal)}
-                        </strong>
-                      </div>
-
-                      <div className="text-right">
                         <span
-                          className={`inline-flex items-center rounded-lg px-3 py-1 text-xs font-black uppercase ${
+                          className={`inline-flex items-center text-xs sm:text-sm font-black uppercase tracking-wide ${
                             paid
-                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                              : "bg-amber-500/20 text-amber-300 border border-amber-400/50"
+                              ? "text-emerald-700 dark:text-emerald-300"
+                              : "text-amber-800 dark:text-amber-200"
                           }`}
                         >
-                          {paid ? "✓ JÁ PAGO" : "💰 COBRAR NA ENTREGA"}
+                          {paid
+                            ? "✓ PAGO ONLINE"
+                            : `💰 COBRAR ${formatBRL(order.orderTotal)} NA ENTREGA`}
                         </span>
-                        <span className="block text-xs text-slate-300 mt-1 font-medium">
-                          {order.paymentMethod}
+                        <span className="block text-xs font-semibold text-muted-foreground mt-0.5">
+                          Forma: {order.paymentMethod}
                         </span>
                       </div>
+                      <strong className="text-base font-black text-foreground">
+                        {formatBRL(order.orderTotal)}
+                      </strong>
                     </div>
                   </div>
 
-                  {/* AÇÕES DA CORRIDA */}
+                  {/* AÇÕES GRANDES E ERGONÔMICAS (OPERAÇÃO COM 1 MÃO) */}
                   {!isInRoute ? (
-                    <div className="space-y-2.5">
-                      {!order.acceptedAt ? (
+                    <div className="space-y-2.5 pt-1">
+                      {!isAccepted ? (
                         <Button
                           type="button"
                           data-testid={`motoboy-accept-order-${order.ticketId}`}
                           disabled={acceptOrderMutation.isPending}
                           onClick={() => acceptOrderMutation.mutate({ ticketId: order.ticketId })}
-                          className="w-full h-14 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-base font-black gap-2 shadow-lg cursor-pointer"
+                          className="w-full h-14 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-base font-black gap-2 shadow-md cursor-pointer"
                         >
                           <CheckCircle2 className="h-5 w-5" />
                           {acceptOrderMutation.isPending ? "ACEITANDO CORRIDA..." : "ACEITAR CORRIDA"}
                         </Button>
                       ) : (
-                        <div className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-extrabold text-emerald-300">
+                        <div className="flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-extrabold text-emerald-700 dark:text-emerald-300">
                           <CheckCircle2 className="h-4 w-4" />
                           CORRIDA ACEITA • PRONTO PARA SAIR
                         </div>
@@ -569,15 +623,14 @@ export function MotoboyWorkspace({
                         data-testid={`motoboy-start-route-${order.ticketId}`}
                         disabled={startRouteMutation.isPending}
                         onClick={() => startRouteMutation.mutate({ ticketId: order.ticketId })}
-                        className="w-full h-14 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-base font-black gap-2 shadow-lg cursor-pointer"
+                        className="w-full h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-base font-black gap-2 shadow-md cursor-pointer"
                       >
                         <Play className="h-5 w-5 fill-current" />
                         {startRouteMutation.isPending ? "INICIANDO ROTA..." : "INICIAR ROTA"}
                       </Button>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {/* Botões grandes de Navegação Externa */}
+                    <div className="space-y-3 pt-1">
                       <div className="grid grid-cols-2 gap-2.5">
                         <a
                           href={buildWazeUrl(
@@ -587,10 +640,10 @@ export function MotoboyWorkspace({
                           )}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex h-13 items-center justify-center gap-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-sm font-black shadow-md active:scale-[0.98]"
+                          className="flex h-13 items-center justify-center gap-2 rounded-2xl bg-sky-500 hover:bg-sky-600 text-white text-sm font-black shadow-sm active:scale-[0.98] transition"
                         >
                           <Navigation className="h-4 w-4" />
-                          Abrir no Waze
+                          Abrir Waze
                         </a>
                         <a
                           href={buildGoogleMapsUrl(
@@ -600,18 +653,18 @@ export function MotoboyWorkspace({
                           )}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex h-13 items-center justify-center gap-2 rounded-xl bg-white hover:bg-slate-100 text-slate-950 text-sm font-black shadow-md active:scale-[0.98]"
+                          className="flex h-13 items-center justify-center gap-2 rounded-2xl border-2 border-border bg-background hover:bg-muted text-foreground text-sm font-black shadow-sm active:scale-[0.98] transition"
                         >
-                          <MapPin className="h-4 w-4 text-rose-600" />
+                          <MapPin className="h-4 w-4 text-rose-500" />
                           Google Maps
                         </a>
                       </div>
 
-                      {/* Confirmação por Código de 4 Dígitos */}
-                      <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 p-3.5 space-y-3">
-                        <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-emerald-300">
+                      {/* Campo Grande de 4 Dígitos + Finalizar Entrega */}
+                      <div className="rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/10 p-4 space-y-3">
+                        <label className="flex items-center justify-center gap-2 text-xs font-extrabold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
                           <ShieldCheck className="h-4 w-4" />
-                          Código de Confirmação do Cliente (4 dígitos)
+                          Código de Confirmação (4 dígitos)
                         </label>
                         <input
                           type="text"
@@ -625,7 +678,7 @@ export function MotoboyWorkspace({
                             const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
                             setCodeByTicket((prev) => ({ ...prev, [order.ticketId]: digits }));
                           }}
-                          className="w-full h-14 rounded-xl border-2 border-emerald-500/50 bg-slate-950 text-center font-mono text-3xl font-black tracking-[0.5em] text-white placeholder:text-slate-700 focus:border-emerald-400 focus:outline-none"
+                          className="w-full h-15 rounded-2xl border-2 border-emerald-500/50 bg-card text-center font-mono text-3xl font-black tracking-[0.5em] text-foreground placeholder:text-muted-foreground/40 focus:border-emerald-500 focus:outline-none"
                         />
                         <Button
                           type="button"
@@ -637,7 +690,7 @@ export function MotoboyWorkspace({
                               deliveryCode: codeValue,
                             })
                           }
-                          className="w-full h-14 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 text-base font-black gap-2 cursor-pointer"
+                          className="w-full h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-muted disabled:text-muted-foreground text-white text-base font-black gap-2 shadow-md cursor-pointer"
                         >
                           <CheckCircle2 className="h-5 w-5" />
                           {completeDeliveryMutation.isPending
@@ -651,14 +704,14 @@ export function MotoboyWorkspace({
               );
             })
           )}
-        </div>
+        </main>
       )}
 
-      {/* ─── VISÃO 2: MINHAS CORRIDAS & GANHOS ────────────────────────────── */}
+      {/* ─── VISÃO 2: GANHOS & EXTRATO ────────────────────────────────────── */}
       {activeView === "earnings" && (
-        <div className="mx-auto max-w-xl px-4 pt-4 space-y-4">
+        <main className="mx-auto w-full max-w-xl flex-1 px-4 pt-4 space-y-4">
           {/* Seletor de Período */}
-          <div className="grid grid-cols-4 gap-1.5 rounded-2xl border border-slate-800 bg-slate-900 p-1.5">
+          <div className="grid grid-cols-4 gap-1.5 rounded-2xl border border-border bg-card p-1.5 shadow-xs">
             {(
               [
                 { id: "today", label: "Hoje" },
@@ -673,8 +726,8 @@ export function MotoboyWorkspace({
                 onClick={() => setPeriod(opt.id)}
                 className={`h-10 rounded-xl text-xs font-extrabold transition cursor-pointer ${
                   period === opt.id
-                    ? "bg-emerald-500 text-slate-950"
-                    : "text-slate-300 hover:bg-slate-800"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 }`}
               >
                 {opt.label}
@@ -683,105 +736,150 @@ export function MotoboyWorkspace({
           </div>
 
           {period === "custom" && (
-            <div className="grid grid-cols-2 gap-2.5 rounded-2xl border border-slate-800 bg-slate-900 p-3">
+            <div className="grid grid-cols-2 gap-2.5 rounded-2xl border border-border bg-card p-3.5 shadow-xs">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
                   Data inicial
                 </label>
                 <input
                   type="date"
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
-                  className="w-full h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-white"
+                  className="w-full h-11 rounded-xl border border-border bg-background px-3 text-sm text-foreground"
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
                   Data final
                 </label>
                 <input
                   type="date"
                   value={customEnd}
                   onChange={(e) => setCustomEnd(e.target.value)}
-                  className="w-full h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-white"
+                  className="w-full h-11 rounded-xl border border-border bg-background px-3 text-sm text-foreground"
                 />
               </div>
             </div>
           )}
 
-          {/* KPIs de Entregas e Ganhos */}
+          {/* KPIs */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
-                <CheckCircle2 className="h-4 w-4 text-sky-400" />
+            <div className="rounded-3xl border border-border bg-card p-4 space-y-1 shadow-xs">
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase text-muted-foreground">
+                <CheckCircle2 className="h-4 w-4 text-sky-500" />
                 Entregas
               </div>
-              <p className="text-3xl font-black text-white">
+              <p className="text-3xl font-black text-foreground">
                 {historyData?.summary.totalDeliveries ?? 0}
               </p>
-              <span className="text-xs text-slate-400">concluídas no período</span>
+              <span className="text-xs text-muted-foreground">concluídas no período</span>
             </div>
 
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-4 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-bold uppercase text-emerald-300">
-                <DollarSign className="h-4 w-4 text-emerald-400" />
-                Total de Ganhos
+            <div className="rounded-3xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-1 shadow-xs">
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                Ganhos
               </div>
-              <p className="text-2xl sm:text-3xl font-black text-emerald-400">
+              <p className="text-2xl sm:text-3xl font-black text-emerald-700 dark:text-emerald-400">
                 {formatBRL(historyData?.summary.totalEarnings ?? 0)}
               </p>
-              <span className="text-xs text-emerald-200/70">soma das taxas de entrega</span>
+              <span className="text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                soma das taxas
+              </span>
             </div>
           </div>
 
           {/* Lista de Corridas Concluídas */}
           <div className="space-y-2.5">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 px-1">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 px-1">
               <Calendar className="h-3.5 w-3.5" />
               Extrato de Corridas Concluídas
             </h2>
 
             {historyQuery.isLoading ? (
-              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-center text-sm text-slate-400">
+              <div className="rounded-3xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
                 Carregando extrato...
               </div>
             ) : (historyData?.items.length ?? 0) === 0 ? (
-              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-center text-sm text-slate-400">
+              <div className="rounded-3xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
                 Nenhuma entrega concluída neste período.
               </div>
             ) : (
               historyData!.items.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-2xl border border-slate-800 bg-slate-900/90 p-3.5 flex items-center justify-between gap-3"
+                  className="rounded-2xl border border-border bg-card p-3.5 flex items-center justify-between gap-3 shadow-xs"
                 >
-                  <div className="min-w-0 space-y-1">
-                    <p className="text-sm font-bold text-white truncate">
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="text-sm font-bold text-foreground truncate">
                       {item.customerName}
                       {item.ticketNumber ? (
-                        <span className="ml-2 text-xs font-mono text-slate-400">
+                        <span className="ml-2 text-xs font-mono text-muted-foreground">
                           #{String(item.ticketNumber).padStart(4, "0")}
                         </span>
                       ) : null}
                     </p>
-                    <p className="text-xs text-slate-400 truncate">{item.deliveryAddress}</p>
-                    <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                    <p className="text-xs text-muted-foreground truncate">{item.deliveryAddress}</p>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <Clock className="h-3 w-3" />
                       {new Date(item.deliveredAt || item.createdAt).toLocaleString("pt-BR")}
                     </p>
                   </div>
-                  <div className="text-right shrink-0">
-                    <span className="inline-flex rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-sm font-black text-emerald-400">
-                      +{formatBRL(item.deliveryFee)}
-                    </span>
-                  </div>
+                  <span className="shrink-0 inline-flex rounded-xl bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-sm font-black text-emerald-700 dark:text-emerald-400">
+                    +{formatBRL(item.deliveryFee)}
+                  </span>
                 </div>
               ))
             )}
           </div>
-        </div>
+        </main>
       )}
+
+      {/* Barra Inferior Única Estilo App Nativo (2 Abas: Entregas | Ganhos) */}
+      <nav
+        data-testid="motoboy-bottom-nav"
+        aria-label="Navegação do Motoboy"
+        className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-card/95 backdrop-blur pb-[env(safe-area-inset-bottom)] shadow-lg"
+      >
+        <div className="mx-auto max-w-xl grid grid-cols-2 h-16 px-3 gap-2 items-center">
+          <button
+            type="button"
+            data-testid="motoboy-tab-deliveries"
+            onClick={() => onSwitchView("deliveries")}
+            className={`flex h-12 items-center justify-center gap-2 rounded-2xl text-sm font-extrabold transition cursor-pointer ${
+              activeView === "deliveries"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <Bike className="h-4 w-4" />
+            <span>Entregas</span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[11px] font-black ${
+                activeView === "deliveries"
+                  ? "bg-white/20 text-white"
+                  : "bg-muted text-foreground"
+              }`}
+            >
+              {orders.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="motoboy-tab-earnings"
+            onClick={() => onSwitchView("earnings")}
+            className={`flex h-12 items-center justify-center gap-2 rounded-2xl text-sm font-extrabold transition cursor-pointer ${
+              activeView === "earnings"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <Wallet className="h-4 w-4" />
+            <span>Ganhos</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }
-

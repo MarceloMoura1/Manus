@@ -6568,6 +6568,27 @@ export function AuthenticatedShell({
 
   const shellLayout = getShellWorkspaceLayout(active);
 
+  // Modo Motoboy (Restaurante): shell único estilo app nativo — sem sidebar desktop, sem cabeçalho redundante e sem barras duplicadas
+  if (isMotoboyMode) {
+    return (
+      <div className={cn("min-h-screen min-h-[100dvh] w-full bg-background text-foreground", theme === "dark" && "dark")}>
+        <ErrorBoundary key={active}>
+          <MotoboyWorkspace
+            activeView={active === "motoboy-earnings" ? "earnings" : "deliveries"}
+            onSwitchView={(view) =>
+              navigateToRoute(view === "earnings" ? "motoboy-earnings" : "motoboy-deliveries")
+            }
+            userName={session.userName}
+            companyName={session.company}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onLogout={() => void doLogout()}
+          />
+        </ErrorBoundary>
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex h-screen h-[100dvh] min-w-0 overflow-hidden bg-slate-50", theme === "dark" && "dark bg-slate-950")}>
       {sidebarOpen && active !== 'conversations' && <button type="button" aria-label="Fechar menu lateral" onClick={() => closeMobileSidebar()} className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" />}

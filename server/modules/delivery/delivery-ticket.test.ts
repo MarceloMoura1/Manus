@@ -150,6 +150,42 @@ function createFakeDeliveryPool(
   const crmClients: FakeCrmClientRow[] = [...(extras.crmClients ?? [])];
   const erpSales: FakeErpSaleRow[] = [];
   const erpSaleItems: FakeErpSaleItemRow[] = [];
+  const financialEntries: Array<{
+    id: number;
+    client_id: string;
+    source_public_id: string;
+    amount_cents: number;
+    status: string;
+  }> = [];
+  const financialSettlements: Array<{
+    id: number;
+    client_id: string;
+    financial_entry_id: number;
+    amount_cents: number;
+  }> = [];
+  const saleOrderEvents: Array<{
+    client_id: string;
+    sale_order_id: number;
+    event_type: string;
+    reason: string;
+  }> = [];
+  const conversations: Array<{
+    conversation_id: string;
+    client_id: string;
+    customer_name: string;
+    phone: string;
+    status: string;
+    last_message: string;
+    last_message_from: string;
+  }> = [];
+  const conversationMessages: Array<{
+    message_id: string;
+    conversation_id: string;
+    client_id: string;
+    direction: string;
+    sender: string;
+    message: string;
+  }> = [];
   let erpSaleSeq = 1;
 
   return {
@@ -162,6 +198,11 @@ function createFakeDeliveryPool(
     crmClients,
     erpSales,
     erpSaleItems,
+    financialEntries,
+    financialSettlements,
+    saleOrderEvents,
+    conversations,
+    conversationMessages,
     async execute(sql: string, params: unknown[] = []) {
       const q = sql.replace(/\s+/g, " ").trim();
 
@@ -394,6 +435,125 @@ function createFakeDeliveryPool(
           sale.commercial_status = "cancelled";
         }
         return [{ affectedRows: sale ? 1 : 0 }, []];
+      }
+
+      if (q.startsWith("SELECT id, order_number, crm_client_id, customer_name_snapshot, total_cents FROM erp_sale_orders")) {
+        const cid = String(params[0]);
+        const pubId = String(params[1]);
+        const sale = erpSales.find((s) => s.client_id === cid && s.public_id === pubId);
+        return [sale ? [sale] : [], []];
+      }
+
+      if (q.startsWith("SELECT id FROM erp_financial_categories")) {
+        return [[{ id: 1 }], []];
+      }
+
+      if (q.startsWith("SELECT id, current_balance_cents FROM erp_financial_accounts")) {
+        return [[{ id: 1, current_balance_cents: 0 }], []];
+      }
+
+      if (q.startsWith("SELECT id, amount_cents, status FROM erp_financial_entries")) {
+        const cid = String(params[0]);
+        const sourcePubId = String(params[1]);
+        const entry = financialEntries.find(
+          (e) => e.client_id === cid && e.source_public_id === sourcePubId && e.status !== "cancelled"
+        );
+        return [entry ? [entry] : [], []];
+      }
+
+      if (q.startsWith("INSERT INTO erp_financial_entries")) {
+        const newId = financialEntries.length + 1;
+        financialEntries.push({
+          id: newId,
+          client_id: String(params[1]),
+          source_public_id: String(params[9]),
+          amount_cents: Number(params[4]),
+          status: "open",
+        });
+        return [{ insertId: newId, affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("SELECT COALESCE(SUM(amount_cents), 0) AS paid_cents FROM erp_financial_settlements")) {
+        const cid = String(params[0]);
+        const entryId = Number(params[1]);
+        const paid = financialSettlements
+          .filter((s) => s.client_id === cid && s.financial_entry_id === entryId)
+          .reduce((acc, s) => acc + s.amount_cents, 0);
+        return [[{ paid_cents: paid }], []];
+      }
+
+      if (q.startsWith("INSERT INTO erp_financial_settlements")) {
+        const newId = financialSettlements.length + 1;
+        financialSettlements.push({
+          id: newId,
+          client_id: String(params[1]),
+          financial_entry_id: Number(params[2]),
+          amount_cents: Number(params[5]),
+        });
+        return [{ insertId: newId, affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("UPDATE erp_financial_entries SET status = 'settled'")) {
+        const cid = String(params[1]);
+        const entryId = Number(params[2]);
+        const entry = financialEntries.find((e) => e.client_id === cid && e.id === entryId);
+        if (entry) entry.status = "settled";
+        return [{ affectedRows: entry ? 1 : 0 }, []];
+      }
+
+      if (q.startsWith("INSERT INTO erp_sale_order_events")) {
+        saleOrderEvents.push({
+          client_id: String(params[1]),
+          sale_order_id: Number(params[2]),
+          event_type: "payment_registered",
+          reason: String(params[3]),
+        });
+        return [{ affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("SELECT conversation_id, status FROM megadesk_domain_conversations")) {
+        const cid = String(params[0]);
+        const tail = String(params[1]).replace(/^%|%$/g, "");
+        const match = conversations.find(
+          (c) => c.client_id === cid && c.phone.replace(/\D/g, "").endsWith(tail)
+        );
+        return [match ? [match] : [], []];
+      }
+
+      if (q.startsWith("INSERT INTO megadesk_domain_conversations (")) {
+        conversations.push({
+          conversation_id: String(params[0]),
+          client_id: String(params[1]),
+          customer_name: String(params[3]),
+          phone: String(params[4]),
+          status: "open",
+          last_message: String(params[6]),
+          last_message_from: "bot",
+        });
+        return [{ affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("UPDATE megadesk_domain_conversations SET last_message = ?")) {
+        const conv = conversations.find(
+          (c) => c.conversation_id === String(params[2]) && c.client_id === String(params[3])
+        );
+        if (conv) {
+          conv.last_message = String(params[0]);
+          conv.last_message_from = "bot";
+        }
+        return [{ affectedRows: conv ? 1 : 0 }, []];
+      }
+
+      if (q.startsWith("INSERT INTO megadesk_domain_conversations_messages")) {
+        conversationMessages.push({
+          message_id: String(params[0]),
+          conversation_id: String(params[1]),
+          client_id: String(params[2]),
+          direction: "outbound",
+          sender: "bot",
+          message: String(params[6]),
+        });
+        return [{ affectedRows: 1 }, []];
       }
 
       if (q.startsWith("UPDATE megadesk_delivery_orders SET erp_sale_public_id = ?")) {
@@ -1603,5 +1763,139 @@ describe("niche-guard & restaurant delivery tickets (Entregas 1 e 2)", () => {
     expect(historyDescriptions.some((d) => d.includes("aceitou a corrida"))).toBe(true);
     expect(historyDescriptions.some((d) => d.includes("iniciou a rota"))).toBe(true);
     expect(historyDescriptions.some((d) => d.includes("finalizou a entrega (Entregue)"))).toBe(true);
+  });
+
+  it("sincroniza mensagem automática no chat Atendimento, quita venda ERP (online e na entrega) e garante mapas sem API Key", async () => {
+    const pool = createFakeDeliveryPool(
+      [{ client_id: "tenant-rest", niche_profile: "restaurante", enabled_modules: null, company: "Pizzaria Central" }],
+      [
+        {
+          client_id: "tenant-rest",
+          user_id: "mb-1",
+          name: "Pedro Motoboy",
+          email: "pedro@pizza.com",
+          role: "agent",
+          status: "active",
+          permissions_json: JSON.stringify(["motoboy"]),
+        },
+      ],
+      {
+        products: [
+          {
+            id: 201,
+            public_id: "33333333-3333-4333-8333-333333333333",
+            client_id: "tenant-rest",
+            name: "Pizza Margherita",
+            sku: "PIZ-01",
+            category: "Pizzas",
+            sale_price_cents: 6000,
+            active: 1,
+          },
+        ],
+        crmClients: [
+          {
+            crm_client_id: "crm-cli-1",
+            client_id: "tenant-rest",
+            company_name: "Lucas Andrade",
+            responsible_name: "Lucas Andrade",
+            cpf_cnpj: null,
+            phone: "41991112222",
+            whatsapp: "5541991112222",
+            email: "lucas@teste.com",
+            address: "Rua XV, 100",
+            city: "Curitiba",
+            state: "PR",
+            cep: "80020-310",
+            lifecycle_state: "active",
+          },
+        ],
+      }
+    );
+
+    let seq = 0;
+    const createTicketMock = vi.fn().mockImplementation(async () => ({ id: `t-fin-${++seq}`, number: 800 + seq }));
+
+    // Caso A: Pedido pago online no Site -> já nasce QUITADO (Recebido = Total, status = settled)
+    const onlineOrder = await ingestExternalDeliveryOrder(
+      {
+        clientId: "tenant-rest",
+        orderSource: "site",
+        customerPhone: "41991112222",
+        paymentMethod: "Pago online (Cartão)",
+        deliveryFee: 10,
+        items: [{ productPublicId: "33333333-3333-4333-8333-333333333333", name: "Pizza Margherita", quantity: 1 }],
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    expect(pool.financialEntries).toHaveLength(1);
+    expect(pool.financialEntries[0].status).toBe("settled");
+    expect(pool.financialSettlements).toHaveLength(1);
+    expect(pool.financialSettlements[0].amount_cents).toBe(7000);
+    expect(pool.saleOrderEvents).toHaveLength(1);
+
+    // Caso B: Pedido com pagamento na entrega (WhatsApp) -> nasce open (pendente) e quita ao concluir entrega!
+    const codOrder = await ingestExternalDeliveryOrder(
+      {
+        clientId: "tenant-rest",
+        orderSource: "whatsapp",
+        customerPhone: "41991112222",
+        paymentMethod: "Cartão na entrega",
+        deliveryFee: 12,
+        items: [{ productPublicId: "33333333-3333-4333-8333-333333333333", name: "Pizza Margherita", quantity: 2 }],
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    expect(pool.financialEntries).toHaveLength(2);
+    expect(pool.financialEntries[1].status).toBe("open");
+    expect(pool.financialSettlements).toHaveLength(1); // ainda não liquidado
+
+    // Atribui motoboy e inicia rota -> grava mensagem automática no chat Atendimento > Cliente X
+    await assignMotoboyToOrder(
+      { clientId: "tenant-rest", ticketId: codOrder.ticket.id, motoboyUserId: "mb-1" },
+      pool
+    );
+    await startDeliveryRoute(
+      { clientId: "tenant-rest", ticketId: codOrder.ticket.id, actorUserId: "mb-1", actorUserName: "Pedro Motoboy" },
+      { pool, sendWhatsApp: vi.fn().mockResolvedValue({ key: { id: "evo-msg-123" } }) }
+    );
+
+    expect(pool.conversations).toHaveLength(1);
+    expect(pool.conversationMessages).toHaveLength(1);
+    expect(pool.conversationMessages[0].direction).toBe("outbound");
+    expect(pool.conversationMessages[0].message).toContain(codOrder.deliveryOrder.deliveryCode);
+    expect(pool.conversationMessages[0].message).toContain(`/r/${codOrder.deliveryOrder.trackingToken}`);
+    expect(pool.conversations[0].last_message).toContain("saiu para entrega");
+
+    // Motoboy conclui entrega com código 4D -> liquida automaticamente no ERP > Vendas!
+    await completeDeliveryOrder(
+      {
+        clientId: "tenant-rest",
+        ticketId: codOrder.ticket.id,
+        deliveryCode: codOrder.deliveryOrder.deliveryCode,
+        motoboyUserId: "mb-1",
+        actorUserName: "Pedro Motoboy",
+      },
+      pool
+    );
+
+    expect(pool.financialEntries[1].status).toBe("settled");
+    expect(pool.financialSettlements).toHaveLength(2);
+    expect(pool.financialSettlements[1].amount_cents).toBe(13200); // 2x 60 + 12 taxa = R$ 132,00
+    expect(pool.saleOrderEvents).toHaveLength(2);
+
+    // Garantia estática: nenhum mapa usa CARTO com API KEY REQUIRED
+    for (const filePath of [
+      "client/src/pages/PublicDeliveryTrackingPage.tsx",
+      "client/src/pages/RestaurantTrackingWorkspace.tsx",
+    ]) {
+      const src = readFileSync(path.resolve(process.cwd(), filePath), "utf8");
+      expect(src).not.toContain("carto.com/basemaps");
+      expect(src).not.toContain("cartocdn.com");
+      expect(src).not.toContain("apikey");
+      expect(src).toContain("tile.openstreetmap.org");
+    }
+    expect(onlineOrder.deliveryOrder.erpSalePublicId).toBeTruthy();
   });
 });

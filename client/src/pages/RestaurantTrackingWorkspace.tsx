@@ -8,6 +8,7 @@ import {
   Crosshair,
   DollarSign,
   Download,
+  Filter,
   Map as MapIcon,
   MapPin,
   Package,
@@ -22,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/contexts/ThemeContext";
 
 type TrackingTab = "live" | "payouts";
 type PayoutPreset = "today" | "week" | "month" | "custom";
@@ -51,6 +53,24 @@ const formatRelativeAgo = (iso?: string | null) => {
   return `há ${Math.floor(diffMin / 60)}h`;
 };
 
+const formatRouteDuration = (startedAt?: string | null) => {
+  if (!startedAt) return null;
+  const mins = Math.max(1, Math.floor((Date.now() - new Date(startedAt).getTime()) / 60_000));
+  if (mins < 60) return `${mins} min em rota`;
+  const h = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return `${h}h${rem > 0 ? `${rem}m` : ""} em rota`;
+};
+
+const getInitials = (name: string) =>
+  name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0] || "")
+    .join("")
+    .toUpperCase() || "MB";
+
 function escapeCsvCell(value: unknown): string {
   const s = String(value ?? "");
   if (/[;"\n\r,]/.test(s)) {
@@ -71,6 +91,7 @@ interface LiveMapProps {
       ticketNumber?: number | null;
       customerName: string;
       deliveryAddress: string;
+      startedAt?: string | null;
       destinationLat: number | null;
       destinationLng: number | null;
     } | null;
@@ -84,32 +105,69 @@ interface LiveMapProps {
     deliveryAddress: string;
     deliveryStatus: string;
     routeSequence: number;
+    motoboyUserId?: string | null;
     motoboyName: string | null;
     destinationLat: number | null;
     destinationLng: number | null;
   }>;
   focusPoint: { lat: number; lng: number; token: number } | null;
+  selectedMotoboyFilter: string;
+  onSelectMotoboyFilter: (userId: string) => void;
+  isDarkMode: boolean;
 }
 
-function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
+function LiveDeliveryMap({
+  motoboys,
+  activeOrders,
+  focusPoint,
+  selectedMotoboyFilter,
+  onSelectMotoboyFilter,
+  isDarkMode,
+}: LiveMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
   const hasAutoFittedRef = useRef(false);
 
+  const visibleMotoboys = useMemo(
+    () =>
+      selectedMotoboyFilter === "all"
+        ? motoboys
+        : motoboys.filter((m) => m.userId === selectedMotoboyFilter),
+    [motoboys, selectedMotoboyFilter]
+  );
+
+  const visibleOrders = useMemo(
+    () =>
+      selectedMotoboyFilter === "all"
+        ? activeOrders
+        : activeOrders.filter((o) => o.motoboyUserId === selectedMotoboyFilter),
+    [activeOrders, selectedMotoboyFilter]
+  );
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
     const map = L.map(containerRef.current, {
-      center: [-25.4284, -49.2733], // Curitiba fallback padrão até receber primeira coordenada real
+      center: [-25.4284, -49.2733],
       zoom: 13,
       zoomControl: true,
     });
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; CARTO',
+    const primaryLayer = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     }).addTo(map);
+
+    let fallbackApplied = false;
+    primaryLayer.on("tileerror", () => {
+      if (fallbackApplied) return;
+      fallbackApplied = true;
+      L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
+      }).addTo(map);
+    });
 
     layerGroupRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
@@ -122,6 +180,17 @@ function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
     };
   }, []);
 
+  // Aplica estilo limpo de modo escuro somente no tile pane (sem inverter pins/popups)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const tilePane = map.getPane("tilePane");
+    if (!tilePane) return;
+    tilePane.style.filter = isDarkMode
+      ? "invert(100%) hue-rotate(180deg) brightness(92%) contrast(92%)"
+      : "none";
+  }, [isDarkMode]);
+
   useEffect(() => {
     const map = mapRef.current;
     const group = layerGroupRef.current;
@@ -130,8 +199,8 @@ function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
     group.clearLayers();
     const boundsPoints: L.LatLngExpression[] = [];
 
-    // 1. Marcadores de destinos ativos (in_route / assigned)
-    for (const order of activeOrders) {
+    // 1. Destinos ativos
+    for (const order of visibleOrders) {
       if (order.destinationLat == null || order.destinationLng == null) continue;
       const pt: L.LatLngExpression = [order.destinationLat, order.destinationLng];
       boundsPoints.push(pt);
@@ -139,42 +208,46 @@ function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
       const isInRoute = order.deliveryStatus === "in_route";
       const pinIcon = L.divIcon({
         className: "megadesk-delivery-pin",
-        html: `<div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9999px;background:${
+        html: `<div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9999px;background:${
           isInRoute ? "#0284c7" : "#7c3aed"
-        };color:#fff;border:2px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,0.3);font-size:15px;">📍</div>`,
-        iconSize: [32, 32],
-        iconAnchor: [16, 32],
-        popupAnchor: [0, -30],
+        };color:#fff;border:2.5px solid #fff;box-shadow:0 6px 14px rgba(0,0,0,0.32);font-size:15px;">📍</div>`,
+        iconSize: [34, 34],
+        iconAnchor: [17, 34],
+        popupAnchor: [0, -32],
       });
 
       const ticketTag = order.ticketNumber ? `#${String(order.ticketNumber).padStart(4, "0")}` : "Pedido";
       L.marker(pt, { icon: pinIcon })
         .bindPopup(
-          `<div style="min-width:180px;font-family:sans-serif;font-size:12px;">
-            <strong>${ticketTag} · ${order.customerName}</strong><br/>
+          `<div style="min-width:190px;font-family:system-ui,sans-serif;font-size:12px;line-height:1.45;">
+            <strong style="font-size:13px;">${ticketTag} · ${order.customerName}</strong><br/>
             <span>${order.deliveryAddress}</span><br/>
-            <span style="color:#475569;">Motoboy: ${order.motoboyName || "Não atribuído"} (Fila #${order.routeSequence})</span>
+            <span style="color:#475569;">Entregador: <b>${order.motoboyName || "Aguardando"}</b> (Fila #${order.routeSequence})</span>
           </div>`
         )
         .addTo(group);
     }
 
-    // 2. Marcadores de motoboys + linha de trajeto até o destino ativo
-    for (const mb of motoboys) {
+    // 2. Motoboys com anel pulsante quando em rota + trajeto tracejado
+    for (const mb of visibleMotoboys) {
       if (!mb.location) continue;
       const pt: L.LatLngExpression = [mb.location.lat, mb.location.lng];
       boundsPoints.push(pt);
 
       const inRoute = mb.status === "in_route";
       const bg = inRoute ? "#059669" : mb.isOnline ? "#0f172a" : "#64748b";
-      const ring = mb.isOnline ? "0 0 0 4px rgba(16,185,129,0.3)" : "none";
+      const ring = inRoute
+        ? "0 0 0 6px rgba(16,185,129,0.35), 0 0 0 12px rgba(16,185,129,0.14)"
+        : mb.isOnline
+          ? "0 0 0 4px rgba(16,185,129,0.28)"
+          : "none";
 
       const mbIcon = L.divIcon({
         className: "megadesk-motoboy-pin",
-        html: `<div style="display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:9999px;background:${bg};color:#fff;border:2.5px solid #fff;box-shadow:0 6px 16px rgba(0,0,0,0.35),${ring};font-size:18px;">🛵</div>`,
-        iconSize: [38, 38],
-        iconAnchor: [19, 19],
-        popupAnchor: [0, -20],
+        html: `<div style="display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:9999px;background:${bg};color:#fff;border:3px solid #fff;box-shadow:0 8px 18px rgba(0,0,0,0.35),${ring};font-size:19px;">🛵</div>`,
+        iconSize: [42, 42],
+        iconAnchor: [21, 21],
+        popupAnchor: [0, -22],
       });
 
       const speedKmh =
@@ -184,13 +257,13 @@ function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
 
       L.marker(pt, { icon: mbIcon })
         .bindPopup(
-          `<div style="min-width:190px;font-family:sans-serif;font-size:12px;">
-            <strong>🛵 ${mb.name}</strong><br/>
+          `<div style="min-width:205px;font-family:system-ui,sans-serif;font-size:12px;line-height:1.45;">
+            <strong style="font-size:13px;">🛵 ${mb.name}</strong><br/>
             <span>Status: <b>${inRoute ? "Em Rota" : "Disponível"}</b> (${mb.isOnline ? "GPS Online" : "Offline"})</span><br/>
-            <span>Velocidade: ${speedKmh} • Atualizado ${formatRelativeAgo(mb.location.updatedAt)}</span>
+            <span>Velocidade: ${speedKmh} • GPS ${formatRelativeAgo(mb.location.updatedAt)}</span>
             ${
               mb.activeOrder
-                ? `<br/><span style="color:#0369a1;">Entregando para: ${mb.activeOrder.customerName}</span>`
+                ? `<br/><span style="color:#0369a1;font-weight:600;">Indo para: ${mb.activeOrder.customerName}</span><br/><span style="color:#64748b;">${mb.activeOrder.deliveryAddress}</span>`
                 : ""
             }
           </div>`
@@ -206,8 +279,8 @@ function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
           [pt, [mb.activeOrder.destinationLat, mb.activeOrder.destinationLng]],
           {
             color: "#10b981",
-            weight: 3.5,
-            opacity: 0.85,
+            weight: 4,
+            opacity: 0.9,
             dashArray: "8 6",
           }
         ).addTo(group);
@@ -218,11 +291,11 @@ function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
       if (boundsPoints.length === 1) {
         map.setView(boundsPoints[0], 15);
       } else {
-        map.fitBounds(L.latLngBounds(boundsPoints), { padding: [45, 45], maxZoom: 16 });
+        map.fitBounds(L.latLngBounds(boundsPoints), { padding: [50, 50], maxZoom: 16 });
       }
       hasAutoFittedRef.current = true;
     }
-  }, [motoboys, activeOrders]);
+  }, [visibleMotoboys, visibleOrders]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -234,10 +307,10 @@ function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
     const map = mapRef.current;
     if (!map) return;
     const pts: L.LatLngExpression[] = [];
-    motoboys.forEach((m) => {
+    visibleMotoboys.forEach((m) => {
       if (m.location) pts.push([m.location.lat, m.location.lng]);
     });
-    activeOrders.forEach((o) => {
+    visibleOrders.forEach((o) => {
       if (o.destinationLat != null && o.destinationLng != null) {
         pts.push([o.destinationLat, o.destinationLng]);
       }
@@ -245,30 +318,80 @@ function LiveDeliveryMap({ motoboys, activeOrders, focusPoint }: LiveMapProps) {
     if (pts.length === 1) {
       map.setView(pts[0], 15, { animate: true });
     } else if (pts.length > 1) {
-      map.fitBounds(L.latLngBounds(pts), { padding: [45, 45], maxZoom: 16 });
+      map.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: 16 });
     }
   };
 
   return (
-    <div className="relative h-[520px] lg:h-[620px] w-full overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 shadow-xs">
+    <div className="relative h-[540px] lg:h-[650px] w-full overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
       <div ref={containerRef} data-testid="restaurant-live-map" className="h-full w-full z-0" />
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={handleRecenter}
-        className="absolute top-3 right-3 z-[400] bg-white/95 dark:bg-slate-900/95 border-slate-300 dark:border-slate-700 text-xs font-semibold shadow-md cursor-pointer"
-      >
-        <Crosshair className="w-3.5 h-3.5 mr-1.5" />
-        Centralizar Mapa
-      </Button>
+
+      {/* Barra Flutuante Superior: Filtro Rápido por Motoboy + Centralizar */}
+      <div className="pointer-events-none absolute top-3 left-14 right-3 z-[400] flex flex-wrap items-center justify-between gap-2">
+        <div className="pointer-events-auto flex items-center gap-1.5 overflow-x-auto max-w-[75%] rounded-2xl border border-border bg-card/95 backdrop-blur px-2 py-1.5 shadow-md">
+          <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-1" />
+          <button
+            type="button"
+            onClick={() => onSelectMotoboyFilter("all")}
+            className={`rounded-xl px-2.5 py-1 text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+              selectedMotoboyFilter === "all"
+                ? "bg-emerald-600 text-white"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            Todos ({motoboys.length})
+          </button>
+          {motoboys.map((mb) => (
+            <button
+              key={mb.userId}
+              type="button"
+              onClick={() => {
+                onSelectMotoboyFilter(mb.userId);
+                if (mb.location && mapRef.current) {
+                  mapRef.current.setView([mb.location.lat, mb.location.lng], 16, { animate: true });
+                }
+              }}
+              className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                selectedMotoboyFilter === mb.userId
+                  ? "bg-emerald-600 text-white"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  mb.status === "in_route"
+                    ? "bg-emerald-400"
+                    : mb.isOnline
+                      ? "bg-sky-400"
+                      : "bg-slate-400"
+                }`}
+              />
+              {mb.name.split(" ")[0]}
+            </button>
+          ))}
+        </div>
+
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={handleRecenter}
+          className="pointer-events-auto h-9 rounded-2xl bg-card/95 backdrop-blur border-border text-foreground text-xs font-bold shadow-md cursor-pointer"
+        >
+          <Crosshair className="w-3.5 h-3.5 mr-1.5" />
+          Centralizar
+        </Button>
+      </div>
     </div>
   );
 }
 
 export function RestaurantTrackingWorkspace() {
+  const { theme } = useTheme();
+  const isDarkMode = theme === "dark";
   const utils = trpc.useUtils();
   const [activeTab, setActiveTab] = useState<TrackingTab>("live");
+  const [selectedMotoboyFilter, setSelectedMotoboyFilter] = useState<string>("all");
   const [focusPoint, setFocusPoint] = useState<{ lat: number; lng: number; token: number } | null>(null);
   const [assignChoiceByTicket, setAssignChoiceByTicket] = useState<Record<string, string>>({});
   const [showNewMotoboyModal, setShowNewMotoboyModal] = useState(false);
@@ -329,7 +452,6 @@ export function RestaurantTrackingWorkspace() {
   const unassignedOrders = live?.unassignedOrders ?? [];
   const onlineCount = motoboys.filter((m) => m.isOnline).length;
   const inRouteCount = motoboys.filter((m) => m.status === "in_route").length;
-
   const payout = payoutQuery.data;
 
   const handleExportCsv = () => {
@@ -384,46 +506,50 @@ export function RestaurantTrackingWorkspace() {
   return (
     <div
       data-testid="restaurant-tracking-workspace"
-      className="min-h-full w-full space-y-6 p-4 sm:p-6 bg-background text-foreground"
+      className="min-h-full w-full space-y-5 p-4 sm:p-6 bg-background text-foreground"
     >
-      {/* Cabeçalho + Abas Superiores */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-              <Bike className="h-5 w-5" />
-            </span>
-            <div>
-              <h1 className="text-xl font-extrabold tracking-tight text-foreground">
-                Central de Rastreamento &amp; Motoboys
+      {/* Cabeçalho Executivo — Torre de Controle */}
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between rounded-3xl border border-border bg-card p-4 sm:p-5 shadow-xs">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+            <Bike className="h-6 w-6" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
+                Torre de Controle &amp; Rastreamento
               </h1>
-              <p className="text-xs text-muted-foreground">
-                Acompanhamento GPS em tempo real das rotas e fechamento financeiro de repasses.
-              </p>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                AO VIVO
+              </span>
             </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Monitoramento GPS em tempo real dos entregadores, despacho rápido e fechamento financeiro.
+            </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-1 rounded-xl border border-border bg-muted/60 p-1">
+          <div className="inline-flex items-center gap-1 rounded-2xl border border-border bg-muted/60 p-1">
             <button
               type="button"
               data-testid="tracking-tab-live"
               onClick={() => setActiveTab("live")}
-              className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
                 activeTab === "live"
                   ? "bg-card text-emerald-600 dark:text-emerald-400 shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
               <MapIcon className="h-3.5 w-3.5" />
-              Mapa ao Vivo
+              Operação ao Vivo
             </button>
             <button
               type="button"
               data-testid="tracking-tab-payouts"
               onClick={() => setActiveTab("payouts")}
-              className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
                 activeTab === "payouts"
                   ? "bg-card text-emerald-600 dark:text-emerald-400 shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
@@ -439,7 +565,7 @@ export function RestaurantTrackingWorkspace() {
             size="sm"
             data-testid="tracking-new-motoboy-btn"
             onClick={() => setShowNewMotoboyModal(true)}
-            className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+            className="h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
           >
             <UserPlus className="h-3.5 w-3.5 mr-1.5" />
             + Novo Motoboy
@@ -453,7 +579,7 @@ export function RestaurantTrackingWorkspace() {
               if (activeTab === "live") void liveQuery.refetch();
               else void payoutQuery.refetch();
             }}
-            className="h-9 text-xs cursor-pointer"
+            className="h-9 rounded-xl text-xs font-semibold cursor-pointer"
           >
             <RefreshCw
               className={`h-3.5 w-3.5 mr-1.5 ${
@@ -463,98 +589,125 @@ export function RestaurantTrackingWorkspace() {
             Atualizar
           </Button>
         </div>
-      </div>
+      </header>
 
-      {/* ─── ABA 1: MAPA AO VIVO ──────────────────────────────────────────── */}
+      {/* ─── ABA 1: OPERAÇÃO AO VIVO ──────────────────────────────────────── */}
       {activeTab === "live" && (
         <div className="space-y-5">
-          {/* KPIs Rápidos */}
+          {/* Barra Compacta de 4 KPIs */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
-              <span className="text-[11px] font-bold uppercase text-muted-foreground flex items-center gap-1.5">
-                <Radio className="h-3.5 w-3.5 text-emerald-500" />
-                Motoboys Online (GPS)
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs flex items-center justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                  Motoboys Online
+                </span>
+                <p className="mt-1 text-2xl font-black text-foreground">
+                  {onlineCount}{" "}
+                  <span className="text-xs font-semibold text-muted-foreground">/ {motoboys.length}</span>
+                </p>
+              </div>
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                <Radio className="h-5 w-5" />
               </span>
-              <p className="mt-1.5 text-2xl font-black text-foreground">
-                {onlineCount} <span className="text-xs font-semibold text-muted-foreground">/ {motoboys.length}</span>
-              </p>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
-              <span className="text-[11px] font-bold uppercase text-muted-foreground flex items-center gap-1.5">
-                <Bike className="h-3.5 w-3.5 text-sky-500" />
-                Em Rota Agora
+
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs flex items-center justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                  Em Rota Agora
+                </span>
+                <p className="mt-1 text-2xl font-black text-sky-600 dark:text-sky-400">
+                  {inRouteCount}
+                </p>
+              </div>
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-500/15 text-sky-600 dark:text-sky-400">
+                <Bike className="h-5 w-5" />
               </span>
-              <p className="mt-1.5 text-2xl font-black text-sky-600 dark:text-sky-400">
-                {inRouteCount}
-              </p>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
-              <span className="text-[11px] font-bold uppercase text-muted-foreground flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5 text-indigo-500" />
-                Entregas Ativas
+
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs flex items-center justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                  Entregas Ativas
+                </span>
+                <p className="mt-1 text-2xl font-black text-foreground">{activeOrders.length}</p>
+              </div>
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                <MapPin className="h-5 w-5" />
               </span>
-              <p className="mt-1.5 text-2xl font-black text-foreground">{activeOrders.length}</p>
             </div>
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 shadow-xs">
-              <span className="text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
-                <Package className="h-3.5 w-3.5" />
-                Aguardando Motoboy
+
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 shadow-xs flex items-center justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                  Aguardando Atribuição
+                </span>
+                <p className="mt-1 text-2xl font-black text-amber-700 dark:text-amber-400">
+                  {unassignedOrders.length}
+                </p>
+              </div>
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                <Package className="h-5 w-5" />
               </span>
-              <p className="mt-1.5 text-2xl font-black text-amber-600 dark:text-amber-400">
-                {unassignedOrders.length}
-              </p>
             </div>
           </div>
 
-          {/* Grid Mapa + Painel Lateral */}
+          {/* Grid Principal: Mapa (~65%) + Painel Operacional (~35%) */}
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <div className="xl:col-span-8">
               <LiveDeliveryMap
                 motoboys={motoboys}
                 activeOrders={activeOrders}
                 focusPoint={focusPoint}
+                selectedMotoboyFilter={selectedMotoboyFilter}
+                onSelectMotoboyFilter={setSelectedMotoboyFilter}
+                isDarkMode={isDarkMode}
               />
             </div>
 
             <div className="xl:col-span-4 space-y-4">
-              {/* Lista de Motoboys */}
-              <div className="rounded-2xl border border-border bg-card p-4 shadow-xs space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Equipe de Entregadores ({motoboys.length})
+              {/* Painel de Entregadores */}
+              <section className="rounded-3xl border border-border bg-card p-4 shadow-xs space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                    Entregadores ({motoboys.length})
                   </h2>
-                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
-                    Auto-sync 5s
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Sync 5s
                   </span>
                 </div>
 
                 {motoboys.length === 0 ? (
-                  <div className="py-4 text-center space-y-2">
+                  <div className="rounded-2xl border border-dashed border-border p-5 text-center space-y-2.5">
                     <p className="text-xs text-muted-foreground">
-                      Nenhum motoboy cadastrado ainda. Crie o login de acesso do seu entregador em 1 clique.
+                      Nenhum motoboy cadastrado ainda. Crie o login de acesso do entregador em 1 clique.
                     </p>
                     <Button
                       type="button"
                       size="sm"
                       onClick={() => setShowNewMotoboyModal(true)}
-                      className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+                      className="h-8 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
                     >
                       <UserPlus className="h-3.5 w-3.5 mr-1.5" />
                       Cadastrar Primeiro Motoboy
                     </Button>
                   </div>
                 ) : (
-                  <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
+                  <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
                     {motoboys.map((mb) => {
                       const speedKmh =
                         mb.location?.speed != null && Number.isFinite(mb.location.speed)
                           ? `${Math.round(mb.location.speed * 3.6)} km/h`
                           : null;
+                      const routeDuration = formatRouteDuration(mb.activeOrder?.startedAt);
+                      const isSelected = selectedMotoboyFilter === mb.userId;
 
                       return (
                         <div
                           key={mb.userId}
                           onClick={() => {
+                            setSelectedMotoboyFilter((curr) => (curr === mb.userId ? "all" : mb.userId));
                             if (mb.location) {
                               setFocusPoint({
                                 lat: mb.location.lat,
@@ -563,49 +716,72 @@ export function RestaurantTrackingWorkspace() {
                               });
                             }
                           }}
-                          className={`rounded-xl border p-3 transition ${
-                            mb.location ? "cursor-pointer hover:border-emerald-500/50" : ""
-                          } border-border bg-muted/20 space-y-1.5`}
+                          className={`rounded-2xl border p-3.5 transition cursor-pointer space-y-2.5 ${
+                            isSelected
+                              ? "border-emerald-500 bg-emerald-500/10"
+                              : "border-border bg-muted/25 hover:border-emerald-500/40 hover:bg-muted/40"
+                          }`}
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-bold text-foreground truncate">
-                              🛵 {mb.name}
-                            </span>
+                          <div className="flex items-center justify-between gap-2.5">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="relative shrink-0">
+                                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-black text-xs border border-emerald-500/30">
+                                  {getInitials(mb.name)}
+                                </span>
+                                <span
+                                  className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card ${
+                                    mb.isOnline ? "bg-emerald-500" : "bg-slate-400"
+                                  }`}
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-extrabold text-foreground truncate">
+                                  {mb.name}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {mb.location ? `GPS ${formatRelativeAgo(mb.location.updatedAt)}` : "Sem GPS"}
+                                  {speedKmh ? ` • ${speedKmh}` : ""}
+                                </p>
+                              </div>
+                            </div>
+
                             <span
-                              className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase ${
+                              className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-extrabold uppercase ${
                                 mb.status === "in_route"
                                   ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
-                                  : "bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                                  : "bg-muted text-muted-foreground border border-border"
                               }`}
                             >
                               {mb.status === "in_route" ? "Em Rota" : "Disponível"}
                             </span>
                           </div>
 
-                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <span
-                                className={`inline-block h-2 w-2 rounded-full ${
-                                  mb.isOnline ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
-                                }`}
-                              />
-                              {mb.location ? `GPS ${formatRelativeAgo(mb.location.updatedAt)}` : "Sem GPS"}
-                              {speedKmh ? ` • ${speedKmh}` : ""}
-                            </span>
-                            <span className="font-semibold text-foreground">
-                              Fila: {mb.queuedCount} {mb.queuedCount === 1 ? "pedido" : "pedidos"}
-                            </span>
-                          </div>
-
-                          {mb.activeOrder && (
-                            <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-2.5 py-1.5 text-[11px] text-sky-800 dark:text-sky-200">
-                              <strong>
-                                {mb.activeOrder.ticketNumber
-                                  ? `#${String(mb.activeOrder.ticketNumber).padStart(4, "0")}`
-                                  : "Pedido"}{" "}
-                                · {mb.activeOrder.customerName}
-                              </strong>
-                              <p className="truncate opacity-80">{mb.activeOrder.deliveryAddress}</p>
+                          {mb.activeOrder ? (
+                            <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-xs space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <strong className="text-sky-900 dark:text-sky-200 truncate">
+                                  {mb.activeOrder.ticketNumber
+                                    ? `#${String(mb.activeOrder.ticketNumber).padStart(4, "0")} · `
+                                    : ""}
+                                  {mb.activeOrder.customerName}
+                                </strong>
+                                {routeDuration && (
+                                  <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                                    <Clock className="h-3 w-3" />
+                                    {routeDuration}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-sky-800/80 dark:text-sky-200/80 truncate">
+                                {mb.activeOrder.deliveryAddress}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                              <span>Sem corrida em trânsito</span>
+                              <span className="font-bold text-foreground">
+                                Fila: {mb.queuedCount} {mb.queuedCount === 1 ? "pedido" : "pedidos"}
+                              </span>
                             </div>
                           )}
                         </div>
@@ -613,36 +789,36 @@ export function RestaurantTrackingWorkspace() {
                     })}
                   </div>
                 )}
-              </div>
+              </section>
 
-              {/* Fila Geral Aguardando Atribuição */}
-              <div className="rounded-2xl border border-border bg-card p-4 shadow-xs space-y-3">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                  Pedidos Aguardando Atribuição ({unassignedOrders.length})
+              {/* Fila de Despacho Rápido */}
+              <section className="rounded-3xl border border-border bg-card p-4 shadow-xs space-y-3">
+                <h2 className="text-xs font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                  Despacho Rápido ({unassignedOrders.length})
                 </h2>
 
                 {unassignedOrders.length === 0 ? (
                   <p className="text-xs text-muted-foreground py-3 text-center">
-                    Todos os pedidos pendentes já estão atribuídos.
+                    Todos os pedidos ativos já estão atribuídos.
                   </p>
                 ) : (
-                  <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
+                  <div className="space-y-2.5 max-h-[250px] overflow-y-auto pr-1">
                     {unassignedOrders.map((order) => {
                       const chosen = assignChoiceByTicket[order.ticketId] ?? "";
                       return (
                         <div
                           key={order.id}
-                          className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2"
+                          className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2"
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold text-foreground truncate">
+                            <span className="text-xs font-extrabold text-foreground truncate">
                               {order.ticketNumber
                                 ? `#${String(order.ticketNumber).padStart(4, "0")} · `
                                 : ""}
                               {order.customerName}
                             </span>
-                            <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400">
-                              Taxa {formatBRL(order.deliveryFee)}
+                            <span className="shrink-0 rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300">
+                              {formatBRL(order.deliveryFee)}
                             </span>
                           </div>
                           <p className="text-[11px] text-muted-foreground truncate">
@@ -657,9 +833,9 @@ export function RestaurantTrackingWorkspace() {
                                   [order.ticketId]: e.target.value,
                                 }))
                               }
-                              className="min-w-0 flex-1 h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground"
+                              className="min-w-0 flex-1 h-8 rounded-xl border border-border bg-background px-2.5 text-xs text-foreground"
                             >
-                              <option value="">Escolher motoboy...</option>
+                              <option value="">Escolher entregador...</option>
                               {motoboys.map((mb) => (
                                 <option key={mb.userId} value={mb.userId}>
                                   {mb.name} ({mb.status === "in_route" ? "Em rota" : "Livre"})
@@ -676,10 +852,10 @@ export function RestaurantTrackingWorkspace() {
                                   motoboyUserId: chosen,
                                 })
                               }
-                              className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2.5 cursor-pointer"
+                              className="h-8 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 cursor-pointer"
                             >
                               <UserCheck className="h-3.5 w-3.5 mr-1" />
-                              Atribuir
+                              Despachar
                             </Button>
                           </div>
                         </div>
@@ -687,7 +863,7 @@ export function RestaurantTrackingWorkspace() {
                     })}
                   </div>
                 )}
-              </div>
+              </section>
             </div>
           </div>
         </div>
@@ -697,11 +873,11 @@ export function RestaurantTrackingWorkspace() {
       {activeTab === "payouts" && (
         <div data-testid="restaurant-payouts-view" className="space-y-5">
           {/* Barra de Filtros + Exportar CSV */}
-          <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-border bg-card p-4 shadow-xs">
+          <div className="flex flex-wrap items-end justify-between gap-3 rounded-3xl border border-border bg-card p-4 shadow-xs">
             <div className="flex flex-wrap items-end gap-3">
               <div>
                 <label className="block text-[11px] font-bold uppercase text-muted-foreground mb-1">
-                  Motoboy
+                  Entregador
                 </label>
                 <select
                   value={payoutMotoboyId}
@@ -734,7 +910,7 @@ export function RestaurantTrackingWorkspace() {
                       key={opt.id}
                       type="button"
                       onClick={() => setPayoutPreset(opt.id)}
-                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
+                      className={`rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
                         payoutPreset === opt.id
                           ? "bg-emerald-600 text-white"
                           : "text-muted-foreground hover:text-foreground"
@@ -780,7 +956,7 @@ export function RestaurantTrackingWorkspace() {
               data-testid="export-payouts-csv-btn"
               onClick={handleExportCsv}
               disabled={!payout || payout.deliveries.length === 0}
-              className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+              className="h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
             >
               <Download className="h-3.5 w-3.5 mr-1.5" />
               Exportar CSV
@@ -789,7 +965,7 @@ export function RestaurantTrackingWorkspace() {
 
           {/* 3 Cards de Resumo */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-xs">
+            <div className="rounded-3xl border border-border bg-card p-5 shadow-xs">
               <span className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1.5">
                 <CheckCircle2 className="h-4 w-4 text-sky-500" />
                 Total de Entregas Concluídas
@@ -798,19 +974,19 @@ export function RestaurantTrackingWorkspace() {
                 {payout?.summary.totalDeliveries ?? 0}
               </p>
             </div>
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 shadow-xs">
+            <div className="rounded-3xl border border-emerald-500/30 bg-emerald-500/10 p-5 shadow-xs">
               <span className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
-                <DollarSign className="h-4 w-4 text-emerald-500" />
-                Total a Pagar (Soma das Taxas)
+                <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                Total a Pagar (Repasses)
               </span>
-              <p className="mt-2 text-3xl font-black text-emerald-600 dark:text-emerald-400">
+              <p className="mt-2 text-3xl font-black text-emerald-700 dark:text-emerald-400">
                 {formatBRL(payout?.summary.totalPayout ?? 0)}
               </p>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-xs">
+            <div className="rounded-3xl border border-border bg-card p-5 shadow-xs">
               <span className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1.5">
                 <TrendingUp className="h-4 w-4 text-indigo-500" />
-                Ticket Médio por Entrega
+                Taxa Média por Entrega
               </span>
               <p className="mt-2 text-3xl font-black text-foreground">
                 {formatBRL(payout?.summary.averageFee ?? 0)}
@@ -820,8 +996,8 @@ export function RestaurantTrackingWorkspace() {
 
           {/* Resumo por Motoboy */}
           {payout && payout.byMotoboy.length > 0 && (
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <div className="rounded-3xl border border-border bg-card p-4 shadow-xs space-y-3">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
                 Resumo de Repasse por Entregador
               </h3>
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -834,18 +1010,18 @@ export function RestaurantTrackingWorkspace() {
                         curr === m.motoboyUserId ? "all" : m.motoboyUserId
                       )
                     }
-                    className={`rounded-xl border p-3 text-left transition cursor-pointer ${
+                    className={`rounded-2xl border p-3.5 text-left transition cursor-pointer ${
                       payoutMotoboyId === m.motoboyUserId
                         ? "border-emerald-500 bg-emerald-500/10"
                         : "border-border bg-muted/20 hover:border-emerald-500/40"
                     }`}
                   >
-                    <p className="text-sm font-bold text-foreground truncate">🛵 {m.motoboyName}</p>
-                    <div className="mt-1 flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">
-                        {m.deliveriesCount} {m.deliveriesCount === 1 ? "entrega" : "entregas"}
+                    <p className="text-sm font-extrabold text-foreground truncate">🛵 {m.motoboyName}</p>
+                    <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {m.deliveriesCount} {m.deliveriesCount === 1 ? "corrida" : "corridas"}
                       </span>
-                      <strong className="text-emerald-600 dark:text-emerald-400">
+                      <strong className="text-base font-black text-emerald-700 dark:text-emerald-400">
                         {formatBRL(m.totalAmount)}
                       </strong>
                     </div>
@@ -855,30 +1031,36 @@ export function RestaurantTrackingWorkspace() {
             </div>
           )}
 
-          {/* Tabela Detalhada de Rotas Concluídas */}
-          <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
+          {/* Tabela Limpa de Corridas */}
+          <div className="rounded-3xl border border-border bg-card shadow-xs overflow-hidden">
+            <div className="border-b border-border bg-muted/30 px-5 py-3.5 flex items-center justify-between">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                Detalhamento de Corridas Concluídas ({payout?.deliveries.length ?? 0})
+              </h3>
+            </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-border bg-muted/40 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              <table className="w-full min-w-[760px] text-left text-xs">
+                <thead className="border-b border-border bg-muted/20 text-[11px] uppercase text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-3">Ticket</th>
-                    <th className="px-4 py-3">Início / Entrega</th>
-                    <th className="px-4 py-3">Motoboy</th>
-                    <th className="px-4 py-3">Cliente / Endereço</th>
-                    <th className="px-4 py-3 text-right">Valor Pedido</th>
-                    <th className="px-4 py-3 text-right">Taxa / Repasse</th>
+                    <th className="px-4 py-3 font-bold">Ticket</th>
+                    <th className="px-4 py-3 font-bold">Entregue em</th>
+                    <th className="px-4 py-3 font-bold">Motoboy</th>
+                    <th className="px-4 py-3 font-bold">Cliente &amp; Endereço</th>
+                    <th className="px-4 py-3 font-bold">Pagamento</th>
+                    <th className="px-4 py-3 font-bold text-right">Valor Pedido</th>
+                    <th className="px-4 py-3 font-bold text-right">Repasse</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {payoutQuery.isLoading ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                        Carregando fechamento de repasses...
+                      <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                        Carregando fechamento...
                       </td>
                     </tr>
                   ) : !payout || payout.deliveries.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                      <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                         Nenhuma entrega concluída no período selecionado.
                       </td>
                     </tr>
@@ -889,23 +1071,22 @@ export function RestaurantTrackingWorkspace() {
                           {d.ticketNumber ? `#${String(d.ticketNumber).padStart(4, "0")}` : d.ticketId.slice(0, 8)}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            <span>{formatDateTime(d.startedAt)}</span>
-                          </div>
-                          <div className="text-foreground font-medium">
-                            ✓ {formatDateTime(d.deliveredAt)}
-                          </div>
+                          {formatDateTime(d.deliveredAt)}
                         </td>
-                        <td className="px-4 py-3 font-semibold text-foreground">{d.motoboyName}</td>
-                        <td className="px-4 py-3 max-w-xs">
+                        <td className="px-4 py-3 font-bold text-foreground">{d.motoboyName}</td>
+                        <td className="px-4 py-3 max-w-[260px]">
                           <p className="font-semibold text-foreground truncate">{d.customerName}</p>
-                          <p className="text-muted-foreground truncate">{d.deliveryAddress}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">{d.deliveryAddress}</p>
                         </td>
-                        <td className="px-4 py-3 text-right font-medium text-foreground">
+                        <td className="px-4 py-3">
+                          <span className="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                            {d.paymentMethod}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-foreground">
                           {formatBRL(d.orderTotal)}
                         </td>
-                        <td className="px-4 py-3 text-right font-extrabold text-emerald-600 dark:text-emerald-400">
+                        <td className="px-4 py-3 text-right font-black text-emerald-700 dark:text-emerald-400">
                           {formatBRL(d.deliveryFee)}
                         </td>
                       </tr>
@@ -917,22 +1098,23 @@ export function RestaurantTrackingWorkspace() {
           </div>
         </div>
       )}
+
       {/* Modal Rápido: + Novo Motoboy */}
       {showNewMotoboyModal && (
         <div
           data-testid="quick-new-motoboy-modal"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[1px]"
         >
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl space-y-4">
+          <div className="w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600">
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                   <Bike className="h-5 w-5" />
                 </span>
                 <div>
-                  <h3 className="text-base font-bold text-foreground">Cadastrar Novo Motoboy</h3>
+                  <h3 className="text-base font-extrabold text-foreground">Cadastrar Novo Motoboy</h3>
                   <p className="text-xs text-muted-foreground">
-                    Cria o login mobile com acesso exclusivo a entregas, GPS e ganhos.
+                    Cria o login mobile exclusivo de entregas, GPS e extrato de ganhos.
                   </p>
                 </div>
               </div>
@@ -1016,7 +1198,7 @@ export function RestaurantTrackingWorkspace() {
                   type="submit"
                   size="sm"
                   disabled={quickCreateMotoboyMutation.isPending}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
                 >
                   {quickCreateMotoboyMutation.isPending ? "Cadastrando..." : "Criar Login de Motoboy"}
                 </Button>
@@ -1028,4 +1210,3 @@ export function RestaurantTrackingWorkspace() {
     </div>
   );
 }
-
