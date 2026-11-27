@@ -35,7 +35,6 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { CompanyKnowledgeCard } from "@/components/CompanyKnowledgeCard";
 
 export function renderInlineMarkdown(text: string): React.ReactNode[] {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
@@ -161,7 +160,7 @@ export function AssistantMarkdown({ content }: { content: string }) {
   return <div data-testid="assistant-markdown" className="space-y-1">{elements}</div>;
 }
 
-export type AIAssistantTab = "chat" | "knowledge" | "themes" | "routines" | "settings";
+export type AIAssistantTab = "chat" | "themes" | "routines" | "settings";
 
 export type AIThemeId = "deep-navy" | "midnight-black" | "aqua-glass" | "terminal-emerald";
 
@@ -1579,20 +1578,6 @@ export function AIAssistant() {
 
             <button
               type="button"
-              data-testid="tab-knowledge"
-              onClick={() => setActiveTab("knowledge")}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                activeTab === "knowledge"
-                  ? currentTheme.activeTabBg
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
-              }`}
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Base da Empresa</span>
-            </button>
-
-            <button
-              type="button"
               data-testid="tab-themes"
               onClick={() => setActiveTab("themes")}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
@@ -1665,18 +1650,26 @@ export function AIAssistant() {
                         Sua IA ainda está zerada para {companyKnowledgeQuery.data?.companyName || "esta empresa"}
                       </p>
                       <p className="text-xs text-slate-300 leading-relaxed">
-                        Envie um arquivo <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-100">.txt</code> (bloco de notas) na aba <strong>Base da Empresa</strong> ou explique aqui mesmo no chat como a empresa funciona, sua rotina, horários e quem são os funcionários.
+                        Explique aqui mesmo no chat como a empresa funciona, sua rotina, horários e quem são os funcionários, ou peça ao administrador para enviar um arquivo <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-100">.txt</code> em <strong>Home &gt; Administração</strong>.
                       </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setActiveTab("knowledge")}
-                        className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 text-xs"
-                      >
-                        <FileText className="w-3.5 h-3.5 mr-1.5" />
-                        Enviar Bloco de Notas (.txt)
-                      </Button>
+                      {(session?.role === "admin" || session?.userRole === "admin") && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            window.dispatchEvent(
+                              new CustomEvent("megadesk-navigate", {
+                                detail: { route: "home", homeTab: "admin", adminSubTab: "ia_knowledge" },
+                              })
+                            )
+                          }
+                          className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 text-xs cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5 mr-1.5" />
+                          Configurar em Home &gt; Administração
+                        </Button>
+                      )}
                     </div>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
@@ -2331,13 +2324,6 @@ export function AIAssistant() {
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {/* ─── ABA: BASE DE CONHECIMENTO DA EMPRESA ─────────────────────────── */}
-        {activeTab === "knowledge" && (
-          <div data-testid="knowledge-tab-view" className="flex-1 overflow-y-auto p-6 sm:p-8 max-w-4xl mx-auto w-full">
-            <CompanyKnowledgeCard />
           </div>
         )}
 

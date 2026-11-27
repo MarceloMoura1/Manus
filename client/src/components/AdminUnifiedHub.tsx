@@ -13,7 +13,9 @@ import {
   ClipboardList,
   ExternalLink,
   Loader2,
+  BookOpen,
 } from "lucide-react";
+import { CompanyKnowledgeCard } from "@/components/CompanyKnowledgeCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,13 +26,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AITokenUsagePage } from "@/pages/AITokenUsagePage";
 import { cn } from "@/lib/utils";
 
+export type AdminHubSubTab = "equipe" | "fluxos" | "whatsapp" | "ia_knowledge" | "ia_audit";
+
 interface AdminUnifiedHubProps {
   tenantKey: string;
   userName: string;
+  initialSubTab?: AdminHubSubTab;
+  intentToken?: number;
 }
 
-export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
-  const [subTab, setSubTab] = useState<"equipe" | "fluxos" | "whatsapp" | "ia_audit">("equipe");
+export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToken }: AdminUnifiedHubProps) {
+  const [subTab, setSubTab] = useState<AdminHubSubTab>(initialSubTab || "equipe");
+
+  React.useEffect(() => {
+    if (initialSubTab) {
+      setSubTab(initialSubTab);
+    }
+  }, [initialSubTab, intentToken]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // SUB-ABA 1: EQUIPE & OPERADORES
@@ -211,6 +223,7 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
           { id: "equipe" as const, label: "Equipe & Operadores", icon: Users },
           { id: "fluxos" as const, label: "Atendimento & Fluxos", icon: SlidersHorizontal },
           { id: "whatsapp" as const, label: "Conexão WhatsApp", icon: Smartphone },
+          { id: "ia_knowledge" as const, label: "Base de Conhecimento da IA", icon: BookOpen },
           { id: "ia_audit" as const, label: "Consumo & Auditoria de IA", icon: Cpu },
         ].map((tab) => {
           const isActive = subTab === tab.id;
@@ -767,6 +780,13 @@ export function AdminUnifiedHub({ tenantKey, userName }: AdminUnifiedHubProps) {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Conteúdo da Sub-Aba: Base de Conhecimento da IA */}
+      {subTab === "ia_knowledge" && (
+        <div data-testid="admin-knowledge-view" className="animate-fade-in">
+          <CompanyKnowledgeCard />
         </div>
       )}
 

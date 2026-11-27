@@ -90,19 +90,19 @@ export function CompanyKnowledgeCard({
   return (
     <div
       data-testid="company-knowledge-card"
-      className={`rounded-2xl border border-slate-800 bg-slate-900/60 ${compact ? "p-4 space-y-4" : "p-6 space-y-5"} text-slate-100`}
+      className={`rounded-2xl border border-border bg-card shadow-xs ${compact ? "p-4 space-y-4" : "p-6 space-y-5"} text-foreground`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-emerald-400" />
-            <h4 className="text-base font-bold text-slate-100">Base de Conhecimento da Empresa</h4>
+            <BookOpen className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            <h4 className="text-base font-bold text-foreground">Base de Conhecimento da Empresa</h4>
           </div>
-          <p className="text-xs text-slate-400 max-w-2xl">
-            Envie um arquivo <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-200">.txt</code> ou{" "}
-            <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-200">.md</code> (bloco de notas) ou edite o texto abaixo explicando o que a{" "}
-            <strong className="text-slate-200">{companyName}</strong> faz, rotina operacional, horários, políticas e funções da equipe.
-            Tanto o <strong className="text-slate-200">Assistente IA</strong> quanto o <strong className="text-slate-200">Bot do WhatsApp</strong> usam esta base em tempo real.
+          <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
+            Envie um arquivo <code className="px-1 py-0.5 rounded bg-muted text-foreground">.txt</code> ou{" "}
+            <code className="px-1 py-0.5 rounded bg-muted text-foreground">.md</code> (bloco de notas) ou edite o texto abaixo explicando o que a{" "}
+            <strong className="text-foreground">{companyName}</strong> faz, rotina operacional, horários, políticas e funções da equipe.
+            Tanto o <strong className="text-foreground">Assistente IA</strong> quanto o <strong className="text-foreground">Bot do WhatsApp</strong> usam esta base em tempo real.
           </p>
         </div>
 
@@ -120,7 +120,7 @@ export function CompanyKnowledgeCard({
             variant="outline"
             disabled={saveMutation.isPending}
             onClick={() => fileInputRef.current?.click()}
-            className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 hover:text-white text-xs"
+            className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 text-xs cursor-pointer"
           >
             <Upload className="w-3.5 h-3.5 mr-1.5" />
             Importar .txt / .md
@@ -136,7 +136,7 @@ export function CompanyKnowledgeCard({
                 resetMutation.mutate();
               }
             }}
-            className="border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 hover:text-white text-xs"
+            className="border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 text-xs cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
             Resetar Memória da IA
@@ -145,10 +145,10 @@ export function CompanyKnowledgeCard({
       </div>
 
       {sourceFilename && (
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <FileText className="w-3.5 h-3.5 text-cyan-400" />
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <FileText className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
           <span>
-            Arquivo base importado: <strong className="text-slate-200">{sourceFilename}</strong>
+            Arquivo base importado: <strong className="text-foreground">{sourceFilename}</strong>
           </span>
         </div>
       )}
@@ -160,12 +160,12 @@ export function CompanyKnowledgeCard({
             setPlaybookDraft(e.target.value);
             setDirty(true);
           }}
-          rows={compact ? 6 : 9}
+          rows={compact ? 6 : 10}
           placeholder={`Exemplo:\n- O que a empresa faz e principais serviços/produtos\n- Horário de atendimento e entregas\n- Equipe e responsabilidades (ex: João cuida do financeiro, Maria do atendimento)\n- Regras de orçamento, prazos e garantias`}
-          className="w-full rounded-xl border border-slate-700/80 bg-slate-950/70 p-3 text-xs leading-relaxed text-slate-100 placeholder:text-slate-500 focus:border-emerald-500/60 focus:outline-none"
+          className="w-full rounded-xl border border-border bg-background p-3 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground focus:border-emerald-500 focus:outline-none"
         />
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-muted-foreground">
             {playbookDraft.length.toLocaleString("pt-BR")} caracteres
           </span>
           <Button
@@ -178,7 +178,7 @@ export function CompanyKnowledgeCard({
                 sourceFilename,
               })
             }
-            className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs"
+            className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs cursor-pointer"
           >
             <Save className="w-3.5 h-3.5 mr-1.5" />
             {saveMutation.isPending ? "Salvando..." : "Salvar Roteiro"}
@@ -186,19 +186,19 @@ export function CompanyKnowledgeCard({
         </div>
       </div>
 
-      <div className="space-y-2 pt-2 border-t border-slate-800/80">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+      <div className="space-y-2 pt-3 border-t border-border">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
             Regras &amp; Rotinas Aprendidas via Chat ({learnedUpdates.length})
           </span>
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-muted-foreground">
             Atualizadas automaticamente ao conversar com o Assistente IA
           </span>
         </div>
 
         {learnedUpdates.length === 0 ? (
-          <p className="text-xs text-slate-500 italic">
+          <p className="text-xs text-muted-foreground italic">
             Nenhuma regra aprendida via conversa ainda. Explique uma rotina ou mudança ao Assistente IA no chat e ele registrará aqui automaticamente.
           </p>
         ) : (
@@ -206,19 +206,19 @@ export function CompanyKnowledgeCard({
             {learnedUpdates.map((item) => (
               <div
                 key={item.id}
-                className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs space-y-1"
+                className="rounded-xl border border-border bg-muted/30 p-3 text-xs space-y-1"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="inline-flex items-center rounded-md bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
+                  <span className="inline-flex items-center rounded-md bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 text-[10px] font-semibold text-cyan-700 dark:text-cyan-300">
                     {item.topic}
                   </span>
-                  <span className="text-[11px] text-slate-500">
+                  <span className="text-[11px] text-muted-foreground">
                     {new Date(item.updatedAt).toLocaleString("pt-BR")} • {item.author}
                   </span>
                 </div>
-                <p className="text-slate-200">{item.summary}</p>
+                <p className="text-foreground">{item.summary}</p>
                 {item.previousRule && (
-                  <p className="text-[11px] text-slate-500 line-through">
+                  <p className="text-[11px] text-muted-foreground line-through">
                     Anterior: {item.previousRule}
                   </p>
                 )}
@@ -230,4 +230,3 @@ export function CompanyKnowledgeCard({
     </div>
   );
 }
-

@@ -13,7 +13,7 @@ import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
 import { AIAssistant } from "./AIAssistant";
 import { AITokenUsagePage } from "./AITokenUsagePage";
-import { AdminUnifiedHub } from "@/components/AdminUnifiedHub";
+import { AdminUnifiedHub, type AdminHubSubTab } from "@/components/AdminUnifiedHub";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
 import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorkspace";
 import { Users } from "lucide-react";
@@ -433,16 +433,26 @@ function DashboardPage({
   setActive,
   indicadores,
   session,
+  homeNavigationIntent,
 }: {
   setActive: (route: RouteId) => void;
   indicadores?: { conversasAbertas: number; chamadosAbertos: number; tempoMedio: string; resolucaoBot: string };
   session?: MegaDeskSession | null;
+  homeNavigationIntent?: { tab: "overview" | "admin"; subTab?: AdminHubSubTab; token: number } | null;
 }) {
-  const [homeTab, setHomeTab] = useState<"overview" | "admin">("overview");
+  const [homeTab, setHomeTab] = useState<"overview" | "admin">(homeNavigationIntent?.tab ?? "overview");
   const [isAiAuditOpen, setIsAiAuditOpen] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<CockpitPeriod>("today");
   const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
   const isAdmin = session?.role === "admin" || session?.userRole === "admin";
+
+  React.useEffect(() => {
+    if (homeNavigationIntent?.tab === "admin" && isAdmin) {
+      setHomeTab("admin");
+    } else if (homeNavigationIntent?.tab === "overview") {
+      setHomeTab("overview");
+    }
+  }, [homeNavigationIntent, isAdmin]);
 
   // Chaves de escopo para preferências do usuário e tenant
   const userKey = (session as any)?.userId || session?.userEmail || "user";
@@ -1795,7 +1805,7 @@ function DashboardPage({
       {/* Aba 2: Administração (Restrito a Perfil Admin) */}
       {homeTab === "admin" && isAdmin && (
         <div className="space-y-6 animate-fade-in">
-          <AdminUnifiedHub tenantKey={tenantKey} userName={userName} />
+          <AdminUnifiedHub tenantKey={tenantKey} userName={userName} initialSubTab={homeNavigationIntent?.subTab} intentToken={homeNavigationIntent?.token} />
         </div>
       )}
     </div>
@@ -5953,6 +5963,7 @@ export function AuthenticatedShell({
     const isCrmProposals = window.location.pathname === "/crm/propostas" || (window.location.pathname === "/crm" && tabParam === "proposals");
     return route.salePublicId ?? (isCrmProposals ? new URLSearchParams(window.location.search).get("salePublicId") : null);
   });
+  const [homeNavIntent, setHomeNavIntent] = useState<{ tab: "overview" | "admin"; subTab?: AdminHubSubTab; token: number } | null>(null);
   const [attendanceIntent, setAttendanceIntent] = useState(() => {
     const restoreLegacyAttendance = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance";
     return createAttendanceLaunchIntent(
@@ -6118,6 +6129,13 @@ export function AuthenticatedShell({
         const route = detail.route === "clients" ? "erp-clients" : detail.route as RouteId;
         if (route === "tickets" && detail.mode === "create" && typeof detail.crmClientId === "string") {
           sessionStorage.setItem("MEGADESK_TICKET_INTENT", JSON.stringify({ mode: "create", crmClientId: detail.crmClientId, companyName: detail.companyName, contactName: detail.contactName, conversationId: detail.conversationId }));
+        }
+        if (route === "home" && (detail.homeTab === "admin" || detail.homeTab === "overview")) {
+          setHomeNavIntent({
+            tab: detail.homeTab,
+            subTab: detail.adminSubTab as AdminHubSubTab | undefined,
+            token: Date.now(),
+          });
         }
         navigateToRoute(route, { crmClientId: typeof detail.crmClientId === "string" ? detail.crmClientId : undefined });
       }
@@ -6481,7 +6499,7 @@ export function AuthenticatedShell({
             : shellLayout.mainContentClassName,
         )}>
           <ErrorBoundary key={active}>
-            {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} session={session} />}
+            {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} session={session} homeNavigationIntent={homeNavIntent} />}
             {active === "conversations" && <ConversationsPage
               attendanceLaunch={attendanceIntent.activeToken}
               attendancePhone={attendanceIntent.phone}
