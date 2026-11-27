@@ -2147,7 +2147,8 @@ export const appRouter = router({
             userId,
             input.message,
             history,
-            user.permissions
+            user.permissions,
+            ctx.operationalUserRole || user.role
           );
           return result;
         } catch (error) {
@@ -2292,7 +2293,13 @@ export const appRouter = router({
       }),
 
     getCompanyKnowledge: megadeskProcedure.query(async ({ ctx }) => {
-      const { getTenantAiMemory, getTenantCompanyName } = await import("./modules/ai-memory/tenant-ai-memory");
+      const { getTenantAiMemory, getTenantCompanyName, isTenantAdminRole } = await import("./modules/ai-memory/tenant-ai-memory");
+      if (!isTenantAdminRole(ctx.operationalUserRole) && !isTenantAdminRole(ctx.user?.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Apenas administradores podem gerenciar a base de conhecimento da empresa.",
+        });
+      }
       const [memory, companyName] = await Promise.all([
         getTenantAiMemory(ctx.tenantId),
         getTenantCompanyName(ctx.tenantId),
@@ -2306,22 +2313,34 @@ export const appRouter = router({
         sourceFilename: z.string().max(255).nullable().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const { saveTenantPlaybook } = await import("./modules/ai-memory/tenant-ai-memory");
+        const { saveTenantPlaybook, isTenantAdminRole } = await import("./modules/ai-memory/tenant-ai-memory");
+        if (!isTenantAdminRole(ctx.operationalUserRole) && !isTenantAdminRole(ctx.user?.role)) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Apenas administradores podem gerenciar a base de conhecimento da empresa.",
+          });
+        }
         const memory = await saveTenantPlaybook({
           clientId: ctx.tenantId,
           companyPlaybook: input.companyPlaybook,
           sourceFilename: input.sourceFilename ?? null,
-          updatedBy: ctx.userEmail || ctx.operationalUserId || "Operador",
+          updatedBy: ctx.userEmail || ctx.operationalUserId || "Administrador",
         });
         audit("MegaDesk", `Base de conhecimento da empresa atualizada (${input.sourceFilename || "editor"})`, ctx.tenantId);
         return { ok: true, memory };
       }),
 
     resetCompanyKnowledge: megadeskProcedure.mutation(async ({ ctx }) => {
-      const { resetTenantAiMemory } = await import("./modules/ai-memory/tenant-ai-memory");
+      const { resetTenantAiMemory, isTenantAdminRole } = await import("./modules/ai-memory/tenant-ai-memory");
+      if (!isTenantAdminRole(ctx.operationalUserRole) && !isTenantAdminRole(ctx.user?.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Apenas administradores podem gerenciar a base de conhecimento da empresa.",
+        });
+      }
       const memory = await resetTenantAiMemory(
         ctx.tenantId,
-        ctx.userEmail || ctx.operationalUserId || "Operador"
+        ctx.userEmail || ctx.operationalUserId || "Administrador"
       );
       audit("MegaDesk", "Memória da IA da empresa zerada", ctx.tenantId);
       return { ok: true, memory };

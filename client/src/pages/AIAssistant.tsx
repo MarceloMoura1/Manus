@@ -426,15 +426,6 @@ export function AIAssistant() {
   // Aba Ativa (Typebot style)
   const [activeTab, setActiveTab] = useState<AIAssistantTab>("chat");
 
-  // ─── Base de Conhecimento da Empresa (tRPC) ────────────────────────────────
-  const companyKnowledgeQuery = trpc.assistant.getCompanyKnowledge.useQuery(undefined, {
-    refetchOnWindowFocus: false,
-  });
-  const isKnowledgeEmpty =
-    Boolean(companyKnowledgeQuery.data) &&
-    !companyKnowledgeQuery.data!.memory.companyPlaybook.trim() &&
-    companyKnowledgeQuery.data!.memory.learnedUpdates.length === 0;
-
   // ─── Rotinas Autônomas (tRPC) ───────────────────────────────────────────────
   const routinesQuery = trpc.assistantRoutines.listRoutines.useQuery(undefined, {
     refetchOnWindowFocus: false,
@@ -1641,37 +1632,6 @@ export function AIAssistant() {
                       Envie uma mensagem de texto ou grave um comando de voz pelo microfone para consultar vendas, CRM, chamados ou abrir solicitações em segundos.
                     </p>
                   </div>
-                  {isKnowledgeEmpty && (
-                    <div
-                      data-testid="empty-knowledge-banner"
-                      className="w-full rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 text-left space-y-2"
-                    >
-                      <p className="text-xs font-semibold text-emerald-300">
-                        Sua IA ainda está zerada para {companyKnowledgeQuery.data?.companyName || "esta empresa"}
-                      </p>
-                      <p className="text-xs text-slate-300 leading-relaxed">
-                        Explique aqui mesmo no chat como a empresa funciona, sua rotina, horários e quem são os funcionários, ou peça ao administrador para enviar um arquivo <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-100">.txt</code> em <strong>Home &gt; Administração</strong>.
-                      </p>
-                      {(session?.role === "admin" || session?.userRole === "admin") && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            window.dispatchEvent(
-                              new CustomEvent("megadesk-navigate", {
-                                detail: { route: "home", homeTab: "admin", adminSubTab: "ia_knowledge" },
-                              })
-                            )
-                          }
-                          className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 text-xs cursor-pointer"
-                        >
-                          <FileText className="w-3.5 h-3.5 mr-1.5" />
-                          Configurar em Home &gt; Administração
-                        </Button>
-                      )}
-                    </div>
-                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
                     {quickSuggestions.map((suggestion) => (
                       <button

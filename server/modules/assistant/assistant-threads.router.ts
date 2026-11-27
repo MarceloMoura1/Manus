@@ -1,9 +1,17 @@
 import { TRPCError } from "@trpc/server";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { generateText, isStepCount } from "ai";
+import { generateText, isStepCount, tool } from "ai";
+import { z } from "zod";
 import { router, isolatedProcedure } from "../../_core/trpc";
 import { createHermesTools } from "../../hermes-tools";
 import { getClientGeminiToken } from "../../gemini-client";
+import {
+  formatTenantMemoryForPrompt,
+  getTenantAiMemory,
+  getTenantCompanyName,
+  isTenantAdminRole,
+  upsertLearnedRoutine,
+} from "../ai-memory/tenant-ai-memory";
 import { recordAiUsageLog } from "../ai-usage/ai-usage.service";
 import {
   createThreadSchema,
@@ -20,6 +28,53 @@ import {
 
 export const CANONICAL_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
+
+async function prepareTenantKnowledgeContext(params: {
+  tenantId: string;
+  userId: string;
+  userEmail?: string;
+  userRole?: string;
+  tenantTools: Record<string, any>;
+}): Promise<{ companyName: string; knowledgeGovernance: string; memoryBlock: string }> {
+  const isAdmin = isTenantAdminRole(params.userRole);
+  const [companyName, tenantMemory] = await Promise.all([
+    getTenantCompanyName(params.tenantId),
+    getTenantAiMemory(params.tenantId).catch(() => null),
+  ]);
+  const memoryBlock = formatTenantMemoryForPrompt(companyName, tenantMemory);
+  if (isAdmin) {
+    params.tenantTools.upsert_company_knowledge = tool({
+      description:
+        "Salva ou substitui imediatamente na memória oficial da empresa uma regra operacional, rotina, horário, função de funcionário ou política informada pelo administrador.",
+      parameters: z.object({
+        topic: z.string().min(1).max(100),
+        summary: z.string().min(2).max(2000),
+        previousRule: z.string().max(1000).optional(),
+      }),
+      execute: async ({ topic, summary, previousRule }: { topic: string; summary: string; previousRule?: string }) => {
+        const res = await upsertLearnedRoutine({
+          clientId: params.tenantId,
+          topic,
+          summary,
+          previousRule,
+          author: params.userEmail || params.userId || "Administrador",
+        });
+        return {
+          success: true,
+          replaced: res.replaced,
+          entry: res.entry,
+          message: res.replaced
+            ? "Regra anterior substituída e memória da empresa atualizada."
+            : "Nova regra salva na memória da empresa.",
+        };
+      },
+    } as any);
+  }
+  const knowledgeGovernance = isAdmin
+    ? "Quando o administrador informar ou atualizar uma rotina, horário, regra ou responsável da empresa, utilize upsert_company_knowledge para salvar na base oficial da empresa."
+    : "Você NÃO tem permissão para alterar regras, rotinas ou a base de conhecimento da empresa para este usuário. Caso o usuário peça para atualizar ou ensinar regras da empresa, responda que alterações nas regras/rotinas da empresa devem ser feitas pelo administrador em Home > Administração.";
+  return { companyName, knowledgeGovernance, memoryBlock };
+}
 export function buildToneInstruction(tone?: "pratico" | "formal" | "direto"): string {
   switch (tone) {
     case "formal":
@@ -271,15 +326,26 @@ export function createAssistantThreadsRouter(
             hitlRequired,
           });
 
+          const { companyName, knowledgeGovernance, memoryBlock } = await prepareTenantKnowledgeContext({
+            tenantId,
+            userId,
+            userEmail: identity.userEmail,
+            userRole: identity.userRole,
+            tenantTools: tenantTools as Record<string, any>,
+          });
           const toneInstruction = buildToneInstruction(input.settings?.tone);
-          const systemInstruction = `Você é o Copiloto de Inteligência Artificial da plataforma MegaDesk.
+          const systemInstruction = `Você é o Copiloto de Inteligência Artificial da empresa "${companyName}".
 Atue como um assessor executivo e operacional ágil, estruturado, acolhedor e focado em resolver as necessidades do usuário em português do Brasil.
 ${toneInstruction}
 Você tem acesso a ferramentas operacionais para:
 - Consultar em tempo real os indicadores e métricas operacionais da empresa com get_system_metrics_summary (conversas ativas no WhatsApp, carga de atendentes, chamados abertos/críticos, rastreamentos, leads no CRM, orçamentos e status da cota de tokens de IA). SEMPRE use get_system_metrics_summary quando o usuário perguntar como está o dia, pendências, prioridades, gargalos da equipe ou consumo da plataforma.
 - Registrar tarefas acionáveis e prioritárias no checklist de 'Tarefas do Dia' do Centro de Comando com create_daily_action_task (especificando title, priority e targetRoute). Sempre que o usuário pedir para gerar plano do dia, sugerir prioridades ou organizar as ações operacionais, utilize create_daily_action_task para adicionar as tarefas mais importantes diretamente no painel.
 - Consultar chamados, vendas e clientes no CRM.
-- Abrir chamados e enviar mensagens via WhatsApp (send_whatsapp_message).`;
+- Abrir chamados e enviar mensagens via WhatsApp (send_whatsapp_message).
+
+${knowledgeGovernance}
+
+${memoryBlock}`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),
@@ -432,8 +498,15 @@ Você tem acesso a ferramentas operacionais para:
             hitlRequired,
           });
 
+          const { companyName, knowledgeGovernance, memoryBlock } = await prepareTenantKnowledgeContext({
+            tenantId,
+            userId,
+            userEmail: identity.userEmail,
+            userRole: identity.userRole,
+            tenantTools: tenantTools as Record<string, any>,
+          });
           const toneInstruction = buildToneInstruction(input.settings?.tone);
-          const systemInstruction = `Você é o Copiloto Multimodal de Inteligência Artificial da plataforma MegaDesk.
+          const systemInstruction = `Você é o Copiloto Multimodal de Inteligência Artificial da empresa "${companyName}".
 O usuário enviou um comando ou pergunta por voz.
 ${toneInstruction}
 REGRA OBRIGATÓRIA DE TRANSCRIÇÃO:
@@ -441,7 +514,11 @@ Na PRIMEIRA LINHA da sua resposta final em texto, você DEVE transcrever exatame
 [Transcrição: "texto falado pelo usuário"]
 
 Após essa primeira linha, pule uma linha e forneça a sua resposta natural ou resultado da execução das ferramentas ao usuário.
-Execute imediatamente as ferramentas necessárias (como consultar resumo e métricas operacionais com get_system_metrics_summary, registrar tarefas prioritárias no painel com create_daily_action_task, consultar CRM, vendas, chamados, preparar abertura de chamado ou enviar mensagem via WhatsApp) e responda de forma clara, estruturada e direta em português do Brasil.`;
+Execute imediatamente as ferramentas necessárias (como consultar resumo e métricas operacionais com get_system_metrics_summary, registrar tarefas prioritárias no painel com create_daily_action_task, consultar CRM, vendas, chamados, preparar abertura de chamado ou enviar mensagem via WhatsApp) e responda de forma clara, estruturada e direta em português do Brasil.
+
+${knowledgeGovernance}
+
+${memoryBlock}`;
 
           const aiResult = await aiGenerator({
             model: google(targetModel),

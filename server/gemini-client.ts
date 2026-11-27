@@ -16,6 +16,7 @@ import {
   formatTenantMemoryForPrompt,
   getTenantAiMemory,
   getTenantCompanyName,
+  isTenantAdminRole,
   upsertLearnedRoutine,
 } from "./modules/ai-memory/tenant-ai-memory";
 import { nanoid } from "nanoid";
@@ -1537,14 +1538,25 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
   },
 ];
 
-export function getAllowedHermesTools(permissions: readonly string[]): HermesToolDefinition[] {
+export function getAllowedHermesTools(
+  permissions: readonly string[],
+  options?: { isAdmin?: boolean }
+): HermesToolDefinition[] {
   const granted = new Set(permissions);
-  return HERMES_TOOL_REGISTRY.filter(tool => tool.requiredPermissions.some(permission => granted.has(permission)));
+  const isAdmin = options?.isAdmin === true;
+  return HERMES_TOOL_REGISTRY.filter((tool) => {
+    if (tool.name === "upsert_company_knowledge" && !isAdmin) return false;
+    return tool.requiredPermissions.some((permission) => granted.has(permission));
+  });
 }
 
 /** Defesa em profundidade: a ferramenta precisa ser autorizada na execução, não só na declaração enviada ao modelo. */
-export function getAuthorizedHermesTool(name: string, permissions: readonly string[]): HermesToolDefinition | null {
-  return getAllowedHermesTools(permissions).find(tool => tool.name === name) ?? null;
+export function getAuthorizedHermesTool(
+  name: string,
+  permissions: readonly string[],
+  options?: { isAdmin?: boolean }
+): HermesToolDefinition | null {
+  return getAllowedHermesTools(permissions, options).find((tool) => tool.name === name) ?? null;
 }
 
 /** Descrição amigável de uma mutação pendente, usada no card de aprovação humana. */
@@ -2138,9 +2150,10 @@ export async function executeClientFunction(
   permissions: readonly string[],
   geminiKey?: string,
   userId?: string,
+  isAdmin = false,
 ): Promise<string> {
   try {
-    const tool = getAuthorizedHermesTool(functionName, permissions);
+    const tool = getAuthorizedHermesTool(functionName, permissions, { isAdmin });
     if (!tool) {
       return JSON.stringify({ success: false, error: "Você não possui permissão para consultar dados deste módulo." });
     }
@@ -2158,6 +2171,12 @@ export async function executeClientFunction(
   const pool = getPool();
 
   if (functionName === "upsert_company_knowledge") {
+    if (!isAdmin) {
+      return JSON.stringify({
+        success: false,
+        error: "Apenas administradores podem alterar a base de conhecimento da empresa (disponível em Home > Administração).",
+      });
+    }
     const knowledge = validatedArgs as { topic: string; summary: string; previousRule?: string };
     const result = await upsertLearnedRoutine(
       {
@@ -2905,8 +2924,9 @@ export function detectUserPreferencesFromMessage(message: string): Partial<UserH
 export function buildSystemInstruction(
   allowedTools: readonly HermesToolDefinition[],
   preferences?: UserHermesPreferences,
-  tenantContext?: { companyName?: string; memoryBlock?: string }
+  tenantContext?: { companyName?: string; memoryBlock?: string; isAdmin?: boolean }
 ): string {
+  const isAdmin = tenantContext?.isAdmin === true;
   const companyName = tenantContext?.companyName?.trim() || "Empresa";
   const memoryBlock =
     tenantContext?.memoryBlock ||
@@ -2988,13 +3008,16 @@ CONTINUIDADE E MEMÓRIA DE CONVERSA:
 - Entenda linguagem coloquial e valores flexíveis ("120 conto", "60 pila", "coloca 120 reais", "muda o preço pra 50").
 - NUNCA zere valores informados pelo usuário. Mantenha os demais itens da proposta e seus preços anteriores preservados.
 
-APRENDIZADO CONTÍNUO DA EMPRESA:
-- Sempre que um usuário interno explicar como a empresa funciona, quem é responsável por cada área/função, ou informar uma nova rotina, horário, política ou mudança de processo (ex: "mudamos o horário...", "agora o João cuida do financeiro", "não trabalhamos mais com X, agora fazemos Y"), invoque IMEDIATAMENTE upsert_company_knowledge para salvar ou substituir a regra vigente na base persistente da empresa e confirme objetivamente o que foi aprendido.
+${isAdmin
+  ? `APRENDIZADO CONTÍNUO DA EMPRESA (SOMENTE ADMIN):
+- Sempre que o administrador explicar como a empresa funciona, quem é responsável por cada área/função, ou informar uma nova rotina, horário, política ou mudança de processo, invoque IMEDIATAMENTE upsert_company_knowledge para salvar ou substituir a regra vigente na base persistente da empresa e confirme objetivamente o que foi aprendido.`
+  : `GOVERNANÇA DA BASE DE CONHECIMENTO DA EMPRESA:
+- Você NÃO possui permissão para alterar regras, rotinas, horários ou informações institucionais da empresa via chat para este usuário. Caso o usuário solicite ou informe alterações nas regras ou rotinas da empresa, responda educadamente que alterações na base de conhecimento da empresa devem ser feitas pelo administrador em Home > Administração.`}
 
 ${memoryBlock}
 
 EXECUÇÃO DE FERRAMENTAS E FLUXO HITL:
-- Ao decidir executar consultas (READ), registrar preferências (set_user_preference) ou atualizar a base da empresa (upsert_company_knowledge), emita a functionCall correspondente sem mensagens preliminares.
+- Ao decidir executar consultas (READ) ou registrar preferências (set_user_preference)${isAdmin ? " ou atualizar a base da empresa (upsert_company_knowledge)" : ""}, emita a functionCall correspondente sem mensagens preliminares.
 - Quando a solicitação demandar criação ou alteração operacional (MUTATION), use apenas dados fornecidos pelo usuário ou consultados por ferramentas. Emita a ferramenta apropriada para preparar o Card de Aprovação (HITL); nenhuma escrita ocorre antes da confirmação humana.`;
 }
 
@@ -3749,8 +3772,10 @@ async function chatWithClientGeminiInternal(
   userId: string,
   userMessage: string,
   existingHistory: IAMessage[],
-  userPermissions: readonly string[]
+  userPermissions: readonly string[],
+  userRole?: string
 ): Promise<ChatResult> {
+  const isAdmin = isTenantAdminRole(userRole);
   // 1. Busca o token e verifica quota do cliente
   const iaStatus = await getClientIAStatus(clientId);
   if (iaStatus.status === "inativa") {
@@ -3790,7 +3815,7 @@ async function chatWithClientGeminiInternal(
   const memoryBlock = formatTenantMemoryForPrompt(companyName, tenantMemory);
 
   // 3. Chamada ao Gemini via Vercel AI SDK com tool calling nativo
-  const allowedTools = getAllowedHermesTools(userPermissions);
+  const allowedTools = getAllowedHermesTools(userPermissions, { isAdmin });
   const hermesTools = createHermesTools({
     clientId,
     userId,
@@ -3813,7 +3838,7 @@ async function chatWithClientGeminiInternal(
           const pendingAction = createPendingActionRequest(t, mutationArgs, { clientId, userId });
           return { success: true, pendingActionRequest: pendingAction };
         }
-        const raw = await executeClientFunction(t.name, args ?? {}, clientId, userPermissions, geminiKey, userId);
+        const raw = await executeClientFunction(t.name, args ?? {}, clientId, userPermissions, geminiKey, userId, isAdmin);
         try {
           return JSON.parse(raw);
         } catch {
@@ -3828,7 +3853,7 @@ async function chatWithClientGeminiInternal(
     { role: "user" as const, content: userMessage },
   ];
 
-  const systemInstruction = buildSystemInstruction(allowedTools, userPreferences, { companyName, memoryBlock });
+  const systemInstruction = buildSystemInstruction(allowedTools, userPreferences, { companyName, memoryBlock, isAdmin });
 
   let aiResult: any;
   const targetModel = DEFAULT_GEMINI_MODEL;
@@ -4131,9 +4156,10 @@ export async function chatWithClientGemini(
   userMessage: string,
   existingHistory: IAMessage[],
   userPermissions: readonly string[],
+  userRole?: string,
 ): Promise<ChatResult> {
   try {
-    return await chatWithClientGeminiInternal(clientId, userId, userMessage, existingHistory, userPermissions);
+    return await chatWithClientGeminiInternal(clientId, userId, userMessage, existingHistory, userPermissions, userRole);
   } catch (error: any) {
     const isTimeout = error?.name === "TimeoutError" || error?.name === "AbortError" || /tempo limite|timeout|excedeu o tempo/i.test(error?.message || "");
     if (isTimeout) {

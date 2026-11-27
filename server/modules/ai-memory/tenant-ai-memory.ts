@@ -271,3 +271,6 @@ export function formatTenantMemoryForPrompt(
   return parts.join("\n\n");
 }
 
+export function isTenantAdminRole(role?: string | null): boolean {
+  return String(role ?? "").trim().toLowerCase() === "admin";
+}

@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   formatTenantMemoryForPrompt,
   getTenantAiMemory,
+  isTenantAdminRole,
   normalizeKnowledgeTopic,
   resetTenantAiMemory,
   resetTenantAiMemoryTableEnsuredState,
   saveTenantPlaybook,
   upsertLearnedRoutine,
 } from "./tenant-ai-memory";
-import { buildSystemInstruction, getAllowedHermesTools } from "../../gemini-client";
+import { buildSystemInstruction, executeClientFunction, getAllowedHermesTools, getAuthorizedHermesTool } from "../../gemini-client";
 import { deleteTestTenant } from "../../_core/tenant-lifecycle";
 
 type MemoryRow = {
@@ -85,10 +88,11 @@ describe("tenant-ai-memory & neutral AI prompts", () => {
 
   it("gera prompt inicial 100% neutro e sem menção a FaYeRs/peças/autopeças/oficina", () => {
     const emptyMemoryBlock = formatTenantMemoryForPrompt("Clínica Horizonte", null);
-    const tools = getAllowedHermesTools(["ai-assistant", "conversations"]);
+    const tools = getAllowedHermesTools(["ai-assistant", "conversations"], { isAdmin: true });
     const prompt = buildSystemInstruction(tools, undefined, {
       companyName: "Clínica Horizonte",
       memoryBlock: emptyMemoryBlock,
+      isAdmin: true,
     });
 
     const combined = `${emptyMemoryBlock}\n${prompt}`.toLowerCase();
@@ -194,6 +198,41 @@ describe("tenant-ai-memory & neutral AI prompts", () => {
     );
     expect(res.deleted).toBe(true);
     expect(executed.some((s) => s.includes("DELETE FROM megadesk_domain_clients"))).toBe(true);
+  });
+
+  it("bloqueia alteração da base de conhecimento por usuários não-admin no chat e nos endpoints tRPC", async () => {
+    expect(isTenantAdminRole("admin")).toBe(true);
+    expect(isTenantAdminRole("ADMIN")).toBe(true);
+    expect(isTenantAdminRole("agent")).toBe(false);
+    expect(isTenantAdminRole("manager")).toBe(false);
+    expect(isTenantAdminRole(undefined)).toBe(false);
+
+    const nonAdminTools = getAllowedHermesTools(["ai-assistant", "conversations"]);
+    expect(nonAdminTools.some((t) => t.name === "upsert_company_knowledge")).toBe(false);
+    expect(getAuthorizedHermesTool("upsert_company_knowledge", ["ai-assistant"], { isAdmin: false })).toBeNull();
+
+    const nonAdminPrompt = buildSystemInstruction(nonAdminTools, undefined, {
+      companyName: "Olyver",
+      isAdmin: false,
+    });
+    expect(nonAdminPrompt).not.toContain("upsert_company_knowledge");
+    expect(nonAdminPrompt).toContain("Home > Administração");
+
+    const blockedExec = JSON.parse(
+      await executeClientFunction(
+        "upsert_company_knowledge",
+        { topic: "horario", summary: "Novo horário" },
+        "tenant-a",
+        ["ai-assistant"],
+        undefined,
+        "operador@olyver.com",
+        false
+      )
+    );
+    expect(blockedExec.success).toBe(false);
+
+    const routersSrc = readFileSync(resolve(process.cwd(), "server/routers.ts"), "utf8");
+    expect(routersSrc).toContain("Apenas administradores podem gerenciar a base de conhecimento da empresa.");
   });
 });
 

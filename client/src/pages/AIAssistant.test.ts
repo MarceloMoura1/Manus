@@ -197,4 +197,21 @@ describe("AIAssistant Fullscreen, Typebot Tabs, Themes & Composer Scrollbar", ()
     expect(aiAssistantSource).toContain("megadesk:assistant:prefill-context");
     expect(aiAssistantSource).toContain("sendCustomText");
   });
+
+  it("removes all company knowledge configuration UI from AIAssistant and BotConfigPage, keeping it only in Home > Administracao", () => {
+    const botConfigSource = readFileSync(resolve(process.cwd(), "client/src/pages/BotConfigPage.tsx"), "utf8");
+    const adminHubSource = readFileSync(resolve(process.cwd(), "client/src/components/AdminUnifiedHub.tsx"), "utf8");
+
+    expect(aiAssistantSource).not.toContain("empty-knowledge-banner");
+    expect(aiAssistantSource).not.toContain("getCompanyKnowledge");
+    expect(aiAssistantSource).not.toContain("Configurar em Home > Administração");
+    expect(aiAssistantSource).not.toContain("CompanyKnowledgeCard");
+    expect(aiAssistantSource).not.toContain("tab-knowledge");
+
+    expect(botConfigSource).not.toContain("CompanyKnowledgeCard");
+    expect(botConfigSource).toContain("BotConfigPage");
+
+    expect(adminHubSource).toContain("CompanyKnowledgeCard");
+    expect(adminHubSource).toContain("admin-knowledge-view");
+  });
 });

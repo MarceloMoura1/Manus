@@ -5,9 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { trpc } from '@/lib/trpc';
-import { CompanyKnowledgeCard } from '@/components/CompanyKnowledgeCard';
 import {
-  BookOpen,
   Bot,
   ExternalLink,
   Maximize2,
@@ -19,7 +17,6 @@ import {
 export function BotConfigPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [iframeLoaded, setIframeLoaded] = useState(false);
-  const [showKnowledge, setShowKnowledge] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // URL base pública padrão
@@ -78,26 +75,7 @@ export function BotConfigPage() {
   };
 
   return (
-    <div className="w-full space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/70 px-4 py-3">
-        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-          <BookOpen className="w-4 h-4 text-emerald-500" />
-          <span>
-            <strong>Base de Conhecimento da Empresa:</strong> o Bot do WhatsApp usa o mesmo roteiro (.txt) e regras aprendidas do Assistente IA.
-          </span>
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant={showKnowledge ? "default" : "outline"}
-          onClick={() => setShowKnowledge((v) => !v)}
-          className="text-xs"
-        >
-          {showKnowledge ? "Ocultar Base de Conhecimento" : "Base de Conhecimento da Empresa"}
-        </Button>
-      </div>
-
-      {showKnowledge && <CompanyKnowledgeCard compact />}
+    <div className="w-full">
       {/* ─── CORPO: Construtor Visual do Typebot (iframe expandido) ───────── */}
       {isLoadingWorkspace ? (
         <Card className="border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl overflow-hidden">
