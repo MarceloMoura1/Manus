@@ -809,13 +809,25 @@ export const megadeskSettingsRouter = router({
    * Listar status personalizados do cliente
    */
   listTicketStatuses: megadeskProcedure
-    .input(z.object({ clientId: z.string().min(1), userRole: z.string() }))
+    .input(z.object({ clientId: z.string().min(1), userRole: z.string().optional() }))
     .query(async ({ input, ctx }) => {
-      requireClientAdmin(ctx.operationalUserRole);
+      const targetClientId = ctx.tenantId || input.clientId;
       const pool = getPool();
+      // Para nicho restaurante, garante que os 5 status de delivery estejam cadastrados
+      // em megadesk_ticket_statuses para personalização e sincronização na página de Tickets.
+      try {
+        const { getTenantNicheContext } = await import("./modules/niche-guard");
+        const nicheCtx = await getTenantNicheContext(targetClientId, pool);
+        if (nicheCtx?.nicheProfile === "restaurante") {
+          const { ensureRestaurantTicketStatuses } = await import("./modules/delivery/delivery.service");
+          await ensureRestaurantTicketStatuses(targetClientId, pool);
+        }
+      } catch {
+        // fallback silencioso
+      }
       const [rows] = await pool.execute(
         "SELECT * FROM megadesk_ticket_statuses WHERE client_id = ? ORDER BY `order` ASC",
-        [input.clientId]
+        [targetClientId]
       ) as any;
       return (rows as any[]).map((r) => ({
         statusId: r.status_id,
@@ -935,11 +947,14 @@ export const megadeskSettingsRouter = router({
             permissions = [];
           }
         }
+        const isMotoboy = permissions.some((p) => String(p).toLowerCase() === "motoboy");
         return {
           userId: String(u.userId),
           name: String(u.name),
           email: String(u.email),
           role: u.role as "admin" | "manager" | "agent" | "viewer",
+          effectiveRole: (isMotoboy ? "motoboy" : u.role) as "admin" | "manager" | "agent" | "viewer" | "motoboy",
+          isMotoboy,
           status: u.status as "active" | "blocked",
           permissions,
         };
@@ -957,7 +972,8 @@ export const megadeskSettingsRouter = router({
         name: z.string().min(2).max(180),
         email: z.string().email(),
         password: z.string().min(6),
-        role: z.enum(["admin", "manager", "agent", "viewer"]).default("agent"),
+        phone: z.string().max(40).optional(),
+        role: z.enum(["admin", "manager", "agent", "viewer", "motoboy"]).default("agent"),
         permissions: z.array(z.string()).optional(),
       })
     )
@@ -1000,20 +1016,29 @@ export const megadeskSettingsRouter = router({
       const userId = `user-${randomUUID()}`;
       const passwordHash = await bcrypt.hash(input.password, 10);
 
+      const isMotoboyRole = input.role === "motoboy";
+      const persistedRole: "admin" | "manager" | "agent" | "viewer" =
+        input.role === "motoboy" ? "agent" : input.role;
+
       // Permissões padrão por role
       const defaultPermissions: Record<string, string[]> = {
         admin: ["home", "settings", "notifications", "active-attendance", "conversations", "tickets", "tracking", "erp", "clients", "bot-config", "ai-assistant"],
         manager: ["home", "settings", "notifications", "active-attendance", "conversations", "tickets", "tracking", "erp", "clients", "bot-config", "ai-assistant"],
         agent: ["home", "settings", "notifications", "active-attendance", "conversations", "tickets"],
         viewer: ["home", "settings", "notifications", "tickets"],
+        motoboy: ["motoboy"],
       };
-      const permissions = input.permissions ?? defaultPermissions[input.role];
+      const permissions = input.permissions
+        ? isMotoboyRole && !input.permissions.includes("motoboy")
+          ? [...input.permissions, "motoboy"]
+          : input.permissions
+        : defaultPermissions[input.role];
 
       await pool.execute(
         `INSERT INTO megadesk_domain_client_users
           (user_id, client_id, name, email, role, status, permissions_json, password_hash)
         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-        [userId, input.clientId, input.name, input.email.toLowerCase(), input.role, JSON.stringify(permissions), passwordHash]
+        [userId, input.clientId, input.name.trim(), input.email.toLowerCase(), persistedRole, JSON.stringify(permissions), passwordHash]
       );
 
       const { syncMegaDeskUserToMemory } = await import("./routers");
@@ -1021,9 +1046,9 @@ export const megadeskSettingsRouter = router({
         input.clientId,
         {
           id: userId,
-          name: input.name,
+          name: input.name.trim(),
           email: input.email.toLowerCase(),
-          role: input.role,
+          role: persistedRole,
           status: "active",
           permissions,
           passwordHash,
@@ -1031,7 +1056,7 @@ export const megadeskSettingsRouter = router({
         "upsert"
       );
 
-      return { success: true, userId };
+      return { success: true, userId, isMotoboy: isMotoboyRole };
     }),
 
   /**
@@ -1187,7 +1212,7 @@ export const megadeskSettingsRouter = router({
         targetUserId: z.string().min(1),
         name: z.string().min(2, "O nome deve ter no mínimo 2 caracteres").max(180).optional(),
         email: z.string().email("E-mail inválido").optional(),
-        role: z.enum(["admin", "manager", "agent", "viewer"]).optional(),
+        role: z.enum(["admin", "manager", "agent", "viewer", "motoboy"]).optional(),
         status: z.enum(["active", "blocked"]).optional(),
         password: z.string().min(6, "A nova senha deve ter no mínimo 6 caracteres").optional().or(z.literal("")),
         permissions: z.array(z.string()).optional(),
@@ -1199,7 +1224,7 @@ export const megadeskSettingsRouter = router({
 
       // Verificar existência do usuário na empresa
       const [existing] = (await pool.execute(
-        "SELECT user_id, name, email, role, status FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
+        "SELECT user_id, name, email, role, status, permissions_json FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
         [input.targetUserId, input.clientId]
       )) as any[];
       if ((existing as any[]).length === 0) {
@@ -1238,6 +1263,27 @@ export const megadeskSettingsRouter = router({
 
       const updates: string[] = [];
       const values: any[] = [];
+      let effectivePermissions: string[] | undefined = input.permissions;
+      let persistedRole: "admin" | "manager" | "agent" | "viewer" | undefined =
+        input.role === "motoboy" ? "agent" : input.role;
+
+      if (input.role === "motoboy" && !effectivePermissions) {
+        effectivePermissions = ["motoboy"];
+      } else if (input.role && input.role !== "motoboy" && !effectivePermissions) {
+        let prevPerms: string[] = [];
+        try {
+          prevPerms = JSON.parse(existing[0].permissions_json || "[]");
+        } catch {}
+        if (prevPerms.some((p) => String(p).toLowerCase() === "motoboy")) {
+          const defaultPermissionsByRole: Record<string, string[]> = {
+            admin: ["home", "settings", "notifications", "active-attendance", "conversations", "tickets", "tracking", "erp", "clients", "bot-config", "ai-assistant"],
+            manager: ["home", "settings", "notifications", "active-attendance", "conversations", "tickets", "tracking", "erp", "clients", "bot-config", "ai-assistant"],
+            agent: ["home", "settings", "notifications", "active-attendance", "conversations", "tickets"],
+            viewer: ["home", "settings", "notifications", "tickets"],
+          };
+          effectivePermissions = defaultPermissionsByRole[input.role];
+        }
+      }
 
       if (input.name !== undefined) {
         updates.push("name = ?");
@@ -1247,17 +1293,17 @@ export const megadeskSettingsRouter = router({
         updates.push("email = ?");
         values.push(input.email.trim().toLowerCase());
       }
-      if (input.role !== undefined) {
+      if (persistedRole !== undefined) {
         updates.push("role = ?");
-        values.push(input.role);
+        values.push(persistedRole);
       }
       if (input.status !== undefined) {
         updates.push("status = ?");
         values.push(input.status);
       }
-      if (input.permissions !== undefined) {
+      if (effectivePermissions !== undefined) {
         updates.push("permissions_json = ?");
-        values.push(JSON.stringify(input.permissions));
+        values.push(JSON.stringify(effectivePermissions));
       }
       if (input.password && input.password.trim().length >= 6) {
         const passwordHash = await bcrypt.hash(input.password.trim(), 10);
@@ -1295,9 +1341,9 @@ export const megadeskSettingsRouter = router({
           id: input.targetUserId,
           ...(input.name !== undefined ? { name: input.name.trim() } : {}),
           ...(input.email !== undefined ? { email: input.email.trim().toLowerCase() } : {}),
-          ...(input.role !== undefined ? { role: input.role } : {}),
+          ...(persistedRole !== undefined ? { role: persistedRole } : {}),
           ...(input.status !== undefined ? { status: input.status } : {}),
-          ...(input.permissions !== undefined ? { permissions: input.permissions } : {}),
+          ...(effectivePermissions !== undefined ? { permissions: effectivePermissions } : {}),
           ...(passwordHash !== undefined ? { passwordHash } : {}),
         },
         "upsert"

@@ -38,7 +38,35 @@ import {
   type TicketSortKey,
 } from "./db-chamados";
 import { getCrmClientById, listCrmClients } from "./db-crm";
+import { getPool } from "./db";
 import { createDeliveryOrderForTicket } from "./modules/delivery/delivery.service";
+
+async function loadDeliveryStageMap(
+  clientId: string,
+  ticketIds: string[]
+): Promise<Map<string, { stageLabel: string; deliveryStatus: string }>> {
+  const map = new Map<string, { stageLabel: string; deliveryStatus: string }>();
+  if (!ticketIds.length) return map;
+  try {
+    const pool = getPool();
+    const placeholders = ticketIds.map(() => "?").join(", ");
+    const [rows] = (await pool.execute(
+      `SELECT ticket_id, stage_label, delivery_status
+       FROM megadesk_delivery_orders
+       WHERE client_id = ? AND ticket_id IN (${placeholders})`,
+      [clientId, ...ticketIds]
+    )) as any[];
+    for (const r of rows || []) {
+      map.set(String(r.ticket_id), {
+        stageLabel: String(r.stage_label || ""),
+        deliveryStatus: String(r.delivery_status || ""),
+      });
+    }
+  } catch {
+    // Tabela opcional em testes unitários ou tenants não-restaurante
+  }
+  return map;
+}
 
 // Schemas Zod com validações rigorosas
 const ChamadoIdSchema = z.string().uuid('ID de chamado inválido');
@@ -168,6 +196,7 @@ export const chamadosRouter = router({
     .input(
       z.object({
         status: z.enum(["total", "open", "in_progress", "waiting", "closed"]).optional(),
+        stageLabel: z.string().trim().max(80).optional(),
         limit: z.number().int().min(1).max(100).default(10),
         offset: z.number().int().min(0).default(0),
         scope: z.enum(['all', 'mine']).default('all'),
@@ -191,29 +220,59 @@ export const chamadosRouter = router({
         // Rate limiting
         checkRateLimit(clientId);
 
-        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Listing chamados for clientId:', clientId, 'status:', input.status);
-        
-        const [chamados, total] = await Promise.all([
-          listChamados(clientId, input.status, input.limit, input.offset, {
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Listing chamados for clientId:', clientId, 'status:', input.status, 'stageLabel:', input.stageLabel);
+
+        const fetchLimit = input.stageLabel ? 100 : input.limit;
+        const fetchOffset = input.stageLabel ? 0 : input.offset;
+        const effectiveStatus = input.stageLabel ? undefined : input.status;
+
+        const [rawChamados, rawTotal] = await Promise.all([
+          listChamados(clientId, effectiveStatus, fetchLimit, fetchOffset, {
             scope: input.scope as TicketScope,
             operationalUserId: ctx.operationalUserId ?? '',
             search: input.search,
             sortBy: input.sortBy as TicketSortKey,
             sortDirection: input.sortDirection as TicketSortDirection,
           }),
-          countChamados(clientId, input.status, {
+          countChamados(clientId, effectiveStatus, {
             scope: input.scope as TicketScope,
             operationalUserId: ctx.operationalUserId ?? '',
             search: input.search,
           }),
         ]);
-        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Found chamados:', chamados.length, 'total:', total);
-        
+
+        const stageMap = await loadDeliveryStageMap(
+          clientId,
+          rawChamados.map((c: any) => String(c.id))
+        );
+        let enriched = rawChamados.map((c: any) => {
+          const dlv = stageMap.get(String(c.id));
+          return dlv
+            ? { ...c, deliveryStageLabel: dlv.stageLabel, deliveryStatus: dlv.deliveryStatus }
+            : c;
+        });
+
+        let total = rawTotal;
+        if (input.stageLabel) {
+          const target = input.stageLabel.trim().toLowerCase();
+          const fallbackStageForTicket = (t: any): string => {
+            if (t.deliveryStageLabel) return String(t.deliveryStageLabel).toLowerCase();
+            if (t.status === "open") return "novo pedido";
+            if (t.status === "in_progress") return "em preparo";
+            if (t.status === "waiting") return "pronto p/ motoboy";
+            if (t.status === "closed") return "entregue";
+            return "";
+          };
+          const filtered = enriched.filter((t: any) => fallbackStageForTicket(t) === target);
+          total = filtered.length;
+          enriched = filtered.slice(input.offset, input.offset + input.limit);
+        }
+
         return { 
-          chamados, 
+          chamados: enriched, 
           limit: input.limit, 
           offset: input.offset,
-          total: total,
+          total,
         };
       } catch (error) {
         console.error('[ERROR] Failed to list chamados:', error);
@@ -264,10 +323,13 @@ export const chamadosRouter = router({
         const canonicalCustomer = chamado.customerId
           ? await getCrmClientById(chamado.customerId, clientId)
           : null;
+        const stageMap = await loadDeliveryStageMap(clientId, [String(chamado.id)]);
+        const dlv = stageMap.get(String(chamado.id));
 
         return {
           chamado: {
             ...chamado,
+            ...(dlv ? { deliveryStageLabel: dlv.stageLabel, deliveryStatus: dlv.deliveryStatus } : {}),
             customer: resolveTicketDetailCustomer(chamado, canonicalCustomer),
           },
         };
@@ -298,6 +360,16 @@ export const chamadosRouter = router({
         delivery: z
           .object({
             orderSource: z.enum(["site", "whatsapp", "manual"]).default("manual"),
+            items: z
+              .array(
+                z.object({
+                  productPublicId: z.string().max(64).nullable().optional(),
+                  name: z.string().min(1).max(180),
+                  quantity: z.number().positive(),
+                  unitPrice: z.number().min(0),
+                })
+              )
+              .optional(),
             itemsSummary: z.string().max(4000).default(""),
             orderTotal: z.number().min(0).default(0),
             deliveryFee: z.number().min(0).default(0),
@@ -372,7 +444,10 @@ export const chamadosRouter = router({
           deliveryOrder = await createDeliveryOrderForTicket({
             clientId,
             ticketId: chamado.id,
+            ticketNumber: chamado.number,
+            customerId: customer.crmClientId,
             orderSource: input.delivery.orderSource,
+            items: input.delivery.items,
             itemsSummary: input.delivery.itemsSummary,
             orderTotal: input.delivery.orderTotal,
             deliveryFee: input.delivery.deliveryFee,
@@ -384,6 +459,8 @@ export const chamadosRouter = router({
             addressComplement: input.delivery.addressComplement ?? null,
             destinationLat: input.delivery.destinationLat ?? null,
             destinationLng: input.delivery.destinationLng ?? null,
+            actorUserId: creator.userId,
+            actorUserName: creator.userName,
           });
         }
 
@@ -841,7 +918,35 @@ export const chamadosRouter = router({
         }
 
         const counts = await getStatusCounts(clientId, input.scope as TicketScope, ctx.operationalUserId ?? '');
-        return counts;
+        const byStageLabel: Record<string, number> = {};
+        try {
+          const pool = getPool();
+          const [stageRows] = (await pool.execute(
+            `SELECT COALESCE(d.stage_label,
+                      CASE c.status
+                        WHEN 'open' THEN 'Novo Pedido'
+                        WHEN 'in_progress' THEN 'Em Preparo'
+                        WHEN 'waiting' THEN 'Pronto p/ Motoboy'
+                        WHEN 'closed' THEN 'Entregue'
+                        ELSE c.status
+                      END) AS stage_name,
+                    COUNT(*) AS total
+             FROM megadesk_domain_chamados c
+             LEFT JOIN megadesk_delivery_orders d
+               ON d.ticket_id = c.chamadoId AND d.client_id = c.clientId
+             WHERE c.clientId = ?
+             GROUP BY stage_name`,
+            [clientId]
+          )) as any[];
+          for (const r of stageRows || []) {
+            if (r.stage_name) {
+              byStageLabel[String(r.stage_name)] = Number(r.total || 0);
+            }
+          }
+        } catch {
+          // fallback silencioso se tabela delivery ainda não existir
+        }
+        return { ...counts, byStageLabel };
       } catch (error) {
         console.error('[ERROR] Failed to get status counts:', error);
         

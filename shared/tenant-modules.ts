@@ -68,6 +68,7 @@ export const NICHE_PRESETS: Record<TenantNicheProfile, TenantModuleKey[]> = {
   restaurante: [
     'atendimento',
     'chamados',
+    'rastreamento',
     'assistente_ia',
     'crm.resumo',
     'crm.clientes',
@@ -203,12 +204,16 @@ export function resolveTenantEnabledModules(
   nicheProfile?: TenantNicheProfile | string | null,
   customModules?: unknown
 ): TenantModuleKey[] {
+  const normalizedProfile = (nicheProfile || 'personalizado') as TenantNicheProfile;
   const normalized = normalizeTenantModules(customModules);
   if (normalized && normalized.length > 0) {
-    return expandLegacyCrmModules(normalized);
+    const expanded = expandLegacyCrmModules(normalized);
+    if (normalizedProfile === 'restaurante' && !expanded.includes('rastreamento')) {
+      return [...expanded, 'rastreamento'];
+    }
+    return expanded;
   }
 
-  const normalizedProfile = (nicheProfile || 'personalizado') as TenantNicheProfile;
   if (normalizedProfile in NICHE_PRESETS && normalizedProfile !== 'personalizado') {
     return [...NICHE_PRESETS[normalizedProfile]];
   }

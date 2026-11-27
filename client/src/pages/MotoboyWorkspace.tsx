@@ -111,6 +111,16 @@ export function MotoboyWorkspace({
   );
 
   const updateLocationMutation = trpc.delivery.updateMotoboyLocation.useMutation();
+  const acceptOrderMutation = trpc.delivery.acceptOrder.useMutation({
+    onSuccess: async () => {
+      toast.success("Corrida aceita! Status atualizado automaticamente para Pronto p/ Motoboy.");
+      await utils.delivery.myQueue.invalidate();
+    },
+    onError: (err) => {
+      toast.error(err.message || "Não foi possível aceitar a corrida.");
+    },
+  });
+
   const startRouteMutation = trpc.delivery.startRoute.useMutation({
     onSuccess: async (res) => {
       if (res.whatsappSent) {
@@ -536,16 +546,35 @@ export function MotoboyWorkspace({
 
                   {/* AÇÕES DA CORRIDA */}
                   {!isInRoute ? (
-                    <Button
-                      type="button"
-                      data-testid={`motoboy-start-route-${order.ticketId}`}
-                      disabled={startRouteMutation.isPending}
-                      onClick={() => startRouteMutation.mutate({ ticketId: order.ticketId })}
-                      className="w-full h-14 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-base font-black gap-2 shadow-lg cursor-pointer"
-                    >
-                      <Play className="h-5 w-5 fill-current" />
-                      {startRouteMutation.isPending ? "INICIANDO ROTA..." : "INICIAR ROTA"}
-                    </Button>
+                    <div className="space-y-2.5">
+                      {!order.acceptedAt ? (
+                        <Button
+                          type="button"
+                          data-testid={`motoboy-accept-order-${order.ticketId}`}
+                          disabled={acceptOrderMutation.isPending}
+                          onClick={() => acceptOrderMutation.mutate({ ticketId: order.ticketId })}
+                          className="w-full h-14 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-base font-black gap-2 shadow-lg cursor-pointer"
+                        >
+                          <CheckCircle2 className="h-5 w-5" />
+                          {acceptOrderMutation.isPending ? "ACEITANDO CORRIDA..." : "ACEITAR CORRIDA"}
+                        </Button>
+                      ) : (
+                        <div className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-extrabold text-emerald-300">
+                          <CheckCircle2 className="h-4 w-4" />
+                          CORRIDA ACEITA • PRONTO PARA SAIR
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        data-testid={`motoboy-start-route-${order.ticketId}`}
+                        disabled={startRouteMutation.isPending}
+                        onClick={() => startRouteMutation.mutate({ ticketId: order.ticketId })}
+                        className="w-full h-14 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-base font-black gap-2 shadow-lg cursor-pointer"
+                      >
+                        <Play className="h-5 w-5 fill-current" />
+                        {startRouteMutation.isPending ? "INICIANDO ROTA..." : "INICIAR ROTA"}
+                      </Button>
+                    </div>
                   ) : (
                     <div className="space-y-3">
                       {/* Botões grandes de Navegação Externa */}

@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveTenantEnabledModules } from "../../../shared/tenant-modules";
 import { assertTenantModule, assertTenantNiche } from "../niche-guard";
 import {
+  acceptDeliveryOrder,
   assignMotoboyToOrder,
   buildStartRouteWhatsAppMessage,
   completeDeliveryOrder,
@@ -14,9 +16,11 @@ import {
   getMotoboyHistory,
   getMotoboyQueue,
   getPublicDeliveryTrackByToken,
+  ingestExternalDeliveryOrder,
   resetDeliveryTableEnsuredState,
   RESTAURANT_TICKET_STATUSES,
   startDeliveryRoute,
+  updateDeliveryStage,
   updateMotoboyLocation,
 } from "./delivery.service";
 
@@ -34,6 +38,7 @@ type FakeOrderRow = {
   client_id: string;
   ticket_id: string;
   order_source: string;
+  items_json: string | null;
   items_summary: string;
   order_total: number;
   delivery_fee: number;
@@ -55,9 +60,64 @@ type FakeOrderRow = {
   tracking_expires_at: Date | null;
   delivery_status: string;
   stage_label: string;
+  erp_sale_public_id: string | null;
+  accepted_at: Date | null;
   started_at: Date | null;
   delivered_at: Date | null;
   created_at: Date;
+};
+
+type FakeProductRow = {
+  id: number;
+  public_id: string;
+  client_id: string;
+  name: string;
+  sku: string;
+  category: string | null;
+  sale_price_cents: number;
+  active: number;
+};
+
+type FakeCrmClientRow = {
+  crm_client_id: string;
+  client_id: string;
+  company_name: string;
+  responsible_name: string;
+  cpf_cnpj: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  address: string;
+  city: string;
+  state: string;
+  cep: string;
+  lifecycle_state: string;
+};
+
+type FakeErpSaleRow = {
+  id: number;
+  public_id: string;
+  client_id: string;
+  order_number: string;
+  crm_client_id: string;
+  customer_name_snapshot: string;
+  status: string;
+  commercial_status: string;
+  current_stage: string;
+  subtotal_cents: number;
+  freight_cents: number;
+  total_cents: number;
+  payment_method_snapshot: string;
+  notes: string;
+};
+
+type FakeErpSaleItemRow = {
+  sale_order_id: number;
+  product_id: number;
+  product_name_snapshot: string;
+  quantity: string;
+  unit_price_cents: number;
+  line_total_cents: number;
 };
 
 type FakeLocationRow = {
@@ -74,14 +134,23 @@ type FakeLocationRow = {
 
 function createFakeDeliveryPool(
   clients: FakeClient[],
-  users: Array<{ client_id: string; user_id: string; name: string; email: string; role: string; status: string; permissions_json: string }> = []
+  users: Array<{ client_id: string; user_id: string; name: string; email: string; role: string; status: string; permissions_json: string }> = [],
+  extras: {
+    products?: FakeProductRow[];
+    crmClients?: FakeCrmClientRow[];
+  } = {}
 ) {
   const clientMap = new Map(clients.map((c) => [c.client_id, c]));
   const orders = new Map<string, FakeOrderRow>();
   const locations = new Map<string, FakeLocationRow>();
   const statuses: Array<{ status_id: string; client_id: string; name: string; color: string; order: number }> = [];
   const ticketUpdates: Array<{ clientId: string; ticketId: string; status: string }> = [];
-  const activities: Array<{ ticketId: string; clientId: string; description: string }> = [];
+  const activities: Array<{ ticketId: string; clientId: string; attendant: string; description: string }> = [];
+  const products: FakeProductRow[] = [...(extras.products ?? [])];
+  const crmClients: FakeCrmClientRow[] = [...(extras.crmClients ?? [])];
+  const erpSales: FakeErpSaleRow[] = [];
+  const erpSaleItems: FakeErpSaleItemRow[] = [];
+  let erpSaleSeq = 1;
 
   return {
     orders,
@@ -89,6 +158,10 @@ function createFakeDeliveryPool(
     statuses,
     ticketUpdates,
     activities,
+    products,
+    crmClients,
+    erpSales,
+    erpSaleItems,
     async execute(sql: string, params: unknown[] = []) {
       const q = sql.replace(/\s+/g, " ").trim();
 
@@ -209,33 +282,186 @@ function createFakeDeliveryPool(
           client_id: String(params[1]),
           ticket_id: String(params[2]),
           order_source: String(params[3]),
-          items_summary: String(params[4]),
-          order_total: Number(params[5]),
-          delivery_fee: Number(params[6]),
-          payment_method: String(params[7]),
-          customer_name: String(params[8]),
-          customer_phone: String(params[9]),
-          delivery_address: String(params[10]),
-          address_type: String(params[11]),
-          address_complement: params[12] ? String(params[12]) : null,
-          destination_lat: params[13] != null ? Number(params[13]) : null,
-          destination_lng: params[14] != null ? Number(params[14]) : null,
+          items_json: params[4] ? String(params[4]) : null,
+          items_summary: String(params[5]),
+          order_total: Number(params[6]),
+          delivery_fee: Number(params[7]),
+          payment_method: String(params[8]),
+          customer_name: String(params[9]),
+          customer_phone: String(params[10]),
+          delivery_address: String(params[11]),
+          address_type: String(params[12]),
+          address_complement: params[13] ? String(params[13]) : null,
+          destination_lat: params[14] != null ? Number(params[14]) : null,
+          destination_lng: params[15] != null ? Number(params[15]) : null,
           current_lat: null,
           current_lng: null,
           location_updated_at: null,
-          motoboy_user_id: params[15] ? String(params[15]) : null,
-          route_sequence: Number(params[16]),
-          delivery_code: String(params[17]),
-          tracking_token: String(params[18]),
-          tracking_expires_at: params[19] instanceof Date ? params[19] : null,
-          delivery_status: String(params[20]),
-          stage_label: String(params[21]),
+          motoboy_user_id: params[16] ? String(params[16]) : null,
+          route_sequence: Number(params[17]),
+          delivery_code: String(params[18]),
+          tracking_token: String(params[19]),
+          tracking_expires_at: params[20] instanceof Date ? params[20] : null,
+          delivery_status: String(params[21]),
+          stage_label: String(params[22]),
+          erp_sale_public_id: null,
+          accepted_at: null,
           started_at: null,
           delivered_at: null,
           created_at: new Date(),
         };
         orders.set(`${row.client_id}:${row.ticket_id}`, row);
         return [{ affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("SELECT id, public_id, name, sku, category, sale_price_cents FROM erp_products")) {
+        const cid = String(params[0]);
+        return [products.filter((p) => p.client_id === cid && p.active === 1), []];
+      }
+
+      if (q.startsWith("SELECT id, public_id, name, sku, sale_price_cents FROM erp_products WHERE client_id = ? AND public_id = ?")) {
+        const match = products.find((p) => p.client_id === String(params[0]) && p.public_id === String(params[1]));
+        return [match ? [match] : [], []];
+      }
+
+      if (q.startsWith("SELECT id, public_id, name, sku, sale_price_cents FROM erp_products WHERE client_id = ? AND active = 1 AND LOWER(name) = LOWER(?)")) {
+        const match = products.find(
+          (p) => p.client_id === String(params[0]) && p.active === 1 && p.name.toLowerCase() === String(params[1]).toLowerCase()
+        );
+        return [match ? [match] : [], []];
+      }
+
+      if (q.startsWith("SELECT next_number FROM erp_sale_document_sequences")) {
+        return [[{ next_number: erpSaleSeq }], []];
+      }
+
+      if (q.startsWith("UPDATE erp_sale_document_sequences SET next_number = ?")) {
+        erpSaleSeq = Number(params[0]);
+        return [{ affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("INSERT INTO erp_sale_orders")) {
+        const newId = erpSales.length + 1;
+        erpSales.push({
+          id: newId,
+          public_id: String(params[0]),
+          client_id: String(params[1]),
+          order_number: String(params[2]),
+          crm_client_id: String(params[4]),
+          customer_name_snapshot: String(params[5]),
+          status: "confirmed",
+          commercial_status: "active",
+          current_stage: "confirmed",
+          freight_cents: Number(params[10]),
+          payment_method_snapshot: String(params[11]),
+          notes: String(params[12]),
+          subtotal_cents: Number(params[13]),
+          total_cents: Number(params[14]),
+        });
+        return [{ insertId: newId, affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("INSERT INTO erp_sale_order_items")) {
+        erpSaleItems.push({
+          sale_order_id: Number(params[1]),
+          product_id: Number(params[2]),
+          product_name_snapshot: String(params[3]),
+          quantity: String(params[5]),
+          unit_price_cents: Number(params[6]),
+          line_total_cents: Number(params[7]),
+        });
+        return [{ affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("UPDATE erp_sale_orders SET status = 'fulfilled'")) {
+        const cid = String(params[1]);
+        const pubId = String(params[2]);
+        const sale = erpSales.find((s) => s.client_id === cid && s.public_id === pubId);
+        if (sale) {
+          sale.status = "fulfilled";
+          sale.commercial_status = "completed";
+          sale.current_stage = "completed";
+        }
+        return [{ affectedRows: sale ? 1 : 0 }, []];
+      }
+
+      if (q.startsWith("UPDATE erp_sale_orders SET status = 'cancelled'")) {
+        const cid = String(params[1]);
+        const pubId = String(params[2]);
+        const sale = erpSales.find((s) => s.client_id === cid && s.public_id === pubId);
+        if (sale) {
+          sale.status = "cancelled";
+          sale.commercial_status = "cancelled";
+        }
+        return [{ affectedRows: sale ? 1 : 0 }, []];
+      }
+
+      if (q.startsWith("UPDATE megadesk_delivery_orders SET erp_sale_public_id = ?")) {
+        const existing = orders.get(`${String(params[1])}:${String(params[2])}`);
+        if (existing) existing.erp_sale_public_id = String(params[0]);
+        return [{ affectedRows: existing ? 1 : 0 }, []];
+      }
+
+      if (q.startsWith("SELECT crm_client_id, company_name, responsible_name, phone, whatsapp, email, address, city, state, cep FROM megadesk_crm_clients")) {
+        const cid = String(params[0]);
+        const rest = params.slice(1).map((p) => String(p).replace(/^%|%$/g, "").toLowerCase());
+        const found = crmClients.find((c) => {
+          if (c.client_id !== cid || c.lifecycle_state !== "active") return false;
+          const pDigits = (c.phone || "").replace(/\D/g, "");
+          const wDigits = (c.whatsapp || "").replace(/\D/g, "");
+          const cpfDigits = (c.cpf_cnpj || "").replace(/\D/g, "");
+          const email = (c.email || "").toLowerCase();
+          return rest.some(
+            (term) =>
+              (term && pDigits.endsWith(term)) ||
+              (term && wDigits.endsWith(term)) ||
+              (term && email === term) ||
+              (term && cpfDigits === term)
+          );
+        });
+        return [found ? [found] : [], []];
+      }
+
+      if (q.startsWith("INSERT INTO megadesk_crm_clients")) {
+        crmClients.push({
+          crm_client_id: String(params[0]),
+          client_id: String(params[1]),
+          company_name: String(params[2]),
+          responsible_name: String(params[3]),
+          cpf_cnpj: params[4] ? String(params[4]) : null,
+          phone: params[5] ? String(params[5]) : null,
+          whatsapp: params[6] ? String(params[6]) : null,
+          email: params[7] ? String(params[7]) : null,
+          address: String(params[8] || ""),
+          city: "",
+          state: "",
+          cep: "",
+          lifecycle_state: "active",
+        });
+        return [{ affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("UPDATE megadesk_delivery_orders SET motoboy_user_id = ?, delivery_status = ?, stage_label = ?, accepted_at =")) {
+        const existing = orders.get(`${String(params[3])}:${String(params[4])}`);
+        if (existing) {
+          existing.motoboy_user_id = String(params[0]);
+          existing.delivery_status = String(params[1]);
+          existing.stage_label = String(params[2]);
+          existing.accepted_at = existing.accepted_at ?? new Date();
+        }
+        return [{ affectedRows: existing ? 1 : 0 }, []];
+      }
+
+      if (q.startsWith("UPDATE megadesk_delivery_orders SET delivery_status = ?, stage_label = ?")) {
+        const existing = orders.get(`${String(params[3])}:${String(params[4])}`);
+        if (existing) {
+          existing.delivery_status = String(params[0]);
+          existing.stage_label = String(params[1]);
+          if (existing.delivery_status === "delivered") {
+            existing.delivered_at = existing.delivered_at ?? new Date();
+          }
+        }
+        return [{ affectedRows: existing ? 1 : 0 }, []];
       }
 
       if (q.startsWith("SELECT * FROM megadesk_delivery_orders WHERE id = ?")) {
@@ -400,7 +626,8 @@ function createFakeDeliveryPool(
         activities.push({
           ticketId: String(params[1]),
           clientId: String(params[2]),
-          description: String(params[5]),
+          description: String(params[3]),
+          attendant: String(params[4]),
         });
         return [{ affectedRows: 1 }, []];
       }
@@ -1201,5 +1428,180 @@ describe("niche-guard & restaurant delivery tickets (Entregas 1 e 2)", () => {
       "utf8"
     );
     expect(publicPageSource.toLowerCase()).not.toContain("megadesk");
+  });
+
+  it("criação com itens do cardápio sincroniza ERP > Vendas, auto-preenche cliente do site e registra todo ciclo no Histórico do Ticket", async () => {
+    // 1) Verifica que o preset restaurante sempre libera Rastreamento (inclusive em listas salvas antes do fix)
+    expect(resolveTenantEnabledModules("restaurante", null)).toContain("rastreamento");
+    expect(resolveTenantEnabledModules("restaurante", ["atendimento", "chamados"])).toContain("rastreamento");
+
+    const pool = createFakeDeliveryPool(
+      [{ client_id: "tenant-rest", niche_profile: "restaurante", enabled_modules: null, company: "Burger House" }],
+      [
+        {
+          client_id: "tenant-rest",
+          user_id: "mb-1",
+          name: "Marcos Motoboy",
+          email: "marcos@burger.com",
+          role: "agent",
+          status: "active",
+          permissions_json: JSON.stringify(["motoboy"]),
+        },
+      ],
+      {
+        products: [
+          {
+            id: 101,
+            public_id: "11111111-1111-4111-8111-111111111111",
+            client_id: "tenant-rest",
+            name: "X-Bacon Artesanal",
+            sku: "BURGER-01",
+            category: "Lanches",
+            sale_price_cents: 3500,
+            active: 1,
+          },
+          {
+            id: 102,
+            public_id: "22222222-2222-4222-8222-222222222222",
+            client_id: "tenant-rest",
+            name: "Coca-Cola 2L",
+            sku: "BEBIDA-01",
+            category: "Bebidas",
+            sale_price_cents: 1400,
+            active: 1,
+          },
+        ],
+        crmClients: [
+          {
+            crm_client_id: "crm-site-existing-1",
+            client_id: "tenant-rest",
+            company_name: "Fernanda Oliveira",
+            responsible_name: "Fernanda Oliveira",
+            cpf_cnpj: "12345678901",
+            phone: "41998887766",
+            whatsapp: "5541998887766",
+            email: "fernanda@exemplo.com",
+            address: "Av. Batel, 1500",
+            city: "Curitiba",
+            state: "PR",
+            cep: "80420-090",
+            lifecycle_state: "active",
+          },
+        ],
+      }
+    );
+
+    const createTicketMock = vi.fn().mockResolvedValue({ id: "ticket-e2e-1", number: 7 });
+
+    // 2) Pedido vindo do Site omitindo nome e endereço -> auto-preenche do CRM + resolve preços do ERP + cria venda ERP
+    const ingested = await ingestExternalDeliveryOrder(
+      {
+        clientId: "tenant-rest",
+        orderSource: "site",
+        customerPhone: "(41) 99888-7766",
+        paymentMethod: "Pago online",
+        deliveryFee: 10,
+        items: [
+          { productPublicId: "11111111-1111-4111-8111-111111111111", name: "X-Bacon Artesanal", quantity: 2 },
+          { name: "Coca-Cola 2L", quantity: 1 },
+        ],
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    expect(ingested.customer.reusedExisting).toBe(true);
+    expect(ingested.customer.crmClientId).toBe("crm-site-existing-1");
+    expect(ingested.deliveryOrder.customerName).toBe("Fernanda Oliveira");
+    expect(ingested.deliveryOrder.deliveryAddress).toContain("Av. Batel, 1500");
+    // 2x 35 + 1x 14 + 10 taxa = 94
+    expect(ingested.deliveryOrder.orderTotal).toBe(94);
+    expect(ingested.deliveryOrder.items).toHaveLength(2);
+    expect(ingested.deliveryOrder.stageLabel).toBe("Novo Pedido");
+    expect(ingested.deliveryOrder.erpSalePublicId).toBeTruthy();
+
+    // Venda sincronizada automaticamente em ERP > Vendas
+    expect(pool.erpSales).toHaveLength(1);
+    expect(pool.erpSales[0].crm_client_id).toBe("crm-site-existing-1");
+    expect(pool.erpSales[0].subtotal_cents).toBe(8400);
+    expect(pool.erpSales[0].freight_cents).toBe(1000);
+    expect(pool.erpSales[0].total_cents).toBe(9400);
+    expect(pool.erpSales[0].status).toBe("confirmed");
+    expect(pool.erpSaleItems).toHaveLength(2);
+
+    // 3) Automação total de etapas + sincronização com status do ticket + Histórico do Ticket
+    // Cozinha inicia preparo -> Em Preparo (ticket = in_progress)
+    const prep = await updateDeliveryStage(
+      {
+        clientId: "tenant-rest",
+        ticketId: "ticket-e2e-1",
+        stageLabel: "Em Preparo",
+        actorUserId: "chef-1",
+        actorUserName: "Cozinha",
+      },
+      pool
+    );
+    expect(prep.stageLabel).toBe("Em Preparo");
+
+    // Motoboy aceita corrida -> Pronto p/ Motoboy (ticket = waiting)
+    const accepted = await acceptDeliveryOrder(
+      {
+        clientId: "tenant-rest",
+        ticketId: "ticket-e2e-1",
+        motoboyUserId: "mb-1",
+        actorUserName: "Marcos Motoboy",
+      },
+      pool
+    );
+    expect(accepted.stageLabel).toBe("Pronto p/ Motoboy");
+    expect(accepted.deliveryStatus).toBe("assigned");
+    expect(accepted.acceptedAt).toBeTruthy();
+
+    // Motoboy inicia rota -> Em Rota com Motoboy (ticket = in_progress) + WhatsApp enviado
+    const started = await startDeliveryRoute(
+      {
+        clientId: "tenant-rest",
+        ticketId: "ticket-e2e-1",
+        actorUserId: "mb-1",
+        actorUserName: "Marcos Motoboy",
+      },
+      { pool, sendWhatsApp: vi.fn().mockResolvedValue({ ok: true }) }
+    );
+    expect(started.deliveryOrder.stageLabel).toBe("Em Rota com Motoboy");
+    expect(started.whatsappSent).toBe(true);
+
+    // Motoboy finaliza com código 4D -> Entregue (ticket = closed) + Venda ERP concluída!
+    const done = await completeDeliveryOrder(
+      {
+        clientId: "tenant-rest",
+        ticketId: "ticket-e2e-1",
+        deliveryCode: ingested.deliveryOrder.deliveryCode,
+        motoboyUserId: "mb-1",
+        actorUserName: "Marcos Motoboy",
+      },
+      pool
+    );
+    expect(done.deliveryOrder.stageLabel).toBe("Entregue");
+    expect(done.deliveryOrder.deliveryStatus).toBe("delivered");
+    expect(pool.erpSales[0].status).toBe("fulfilled");
+    expect(pool.erpSales[0].commercial_status).toBe("completed");
+
+    // Verifica sequência de status do ticket sincronizada
+    expect(pool.ticketUpdates.filter((u) => u.ticketId === "ticket-e2e-1").map((u) => u.status)).toEqual([
+      "in_progress",
+      "waiting",
+      "in_progress",
+      "closed",
+    ]);
+
+    // Verifica eventos completos gravados no Histórico do Ticket
+    const historyDescriptions = pool.activities
+      .filter((a) => a.ticketId === "ticket-e2e-1")
+      .map((a) => a.description);
+    expect(historyDescriptions.length).toBeGreaterThanOrEqual(5);
+    expect(historyDescriptions[0]).toContain("origem: Site");
+    expect(historyDescriptions.some((d) => d.includes("Em Preparo"))).toBe(true);
+    expect(historyDescriptions.some((d) => d.includes("aceitou a corrida"))).toBe(true);
+    expect(historyDescriptions.some((d) => d.includes("iniciou a rota"))).toBe(true);
+    expect(historyDescriptions.some((d) => d.includes("finalizou a entrega (Entregue)"))).toBe(true);
   });
 });

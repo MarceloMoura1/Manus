@@ -19,6 +19,7 @@ const defaultPermissionsByRole: Record<string, string[]> = {
   manager: ["home", "settings", "notifications", "active-attendance", "conversations", "tickets", "tracking", "erp", "clients", "bot-config", "ai-assistant"],
   agent: ["home", "settings", "notifications", "active-attendance", "conversations", "tickets"],
   viewer: ["home", "settings", "notifications", "tickets"],
+  motoboy: ["motoboy"],
 };
 
 export const teamRouter = router({
@@ -73,7 +74,7 @@ export const teamRouter = router({
         name: z.string().min(2, "O nome deve ter no mínimo 2 caracteres").max(180),
         email: z.string().email("E-mail inválido"),
         password: z.string().min(6, "A senha deve ter no mínimo 6 caracteres"),
-        role: z.enum(["admin", "manager", "agent", "viewer"]).default("agent"),
+        role: z.enum(["admin", "manager", "agent", "viewer", "motoboy"]).default("agent"),
         status: z.enum(["active", "blocked"]).default("active"),
         permissions: z.array(z.string()).optional(),
       })
@@ -117,13 +118,16 @@ export const teamRouter = router({
 
       const userId = `user-${randomUUID()}`;
       const passwordHash = await bcrypt.hash(input.password, 10);
+      const isMotoboy = input.role === "motoboy";
+      const persistedRole: "admin" | "manager" | "agent" | "viewer" =
+        input.role === "motoboy" ? "agent" : input.role;
       const permissions = input.permissions ?? defaultPermissionsByRole[input.role] ?? [];
 
       await pool.execute(
         `INSERT INTO megadesk_domain_client_users
           (user_id, client_id, name, email, role, status, permissions_json, password_hash)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, input.clientId, input.name.trim(), cleanEmail, input.role, input.status, JSON.stringify(permissions), passwordHash]
+        [userId, input.clientId, input.name.trim(), cleanEmail, persistedRole, input.status, JSON.stringify(permissions), passwordHash]
       );
 
       const { syncMegaDeskUserToMemory } = await import("../../routers");
@@ -133,7 +137,7 @@ export const teamRouter = router({
           id: userId,
           name: input.name.trim(),
           email: cleanEmail,
-          role: input.role,
+          role: persistedRole,
           status: input.status,
           permissions,
           passwordHash,
@@ -155,7 +159,7 @@ export const teamRouter = router({
         userId: z.string().min(1),
         name: z.string().min(2, "O nome deve ter no mínimo 2 caracteres").max(180).optional(),
         email: z.string().email("E-mail inválido").optional(),
-        role: z.enum(["admin", "manager", "agent", "viewer"]).optional(),
+        role: z.enum(["admin", "manager", "agent", "viewer", "motoboy"]).optional(),
         status: z.enum(["active", "blocked"]).optional(),
         password: z.string().min(6, "A nova senha deve ter no mínimo 6 caracteres").optional().or(z.literal("")),
         permissions: z.array(z.string()).optional(),
@@ -167,7 +171,7 @@ export const teamRouter = router({
 
       // Verificar existência do usuário na empresa
       const [existing] = (await pool.execute(
-        "SELECT user_id, name, email, role, status FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
+        "SELECT user_id, name, email, role, status, permissions_json FROM megadesk_domain_client_users WHERE user_id = ? AND client_id = ?",
         [input.userId, input.clientId]
       )) as any[];
       if ((existing as any[]).length === 0) {
@@ -206,6 +210,20 @@ export const teamRouter = router({
 
       const updates: string[] = [];
       const values: any[] = [];
+      const persistedRole: "admin" | "manager" | "agent" | "viewer" | undefined =
+        input.role === "motoboy" ? "agent" : input.role;
+      let effectivePermissions: string[] | undefined = input.permissions;
+      if (input.role === "motoboy" && !effectivePermissions) {
+        effectivePermissions = ["motoboy"];
+      } else if (input.role && input.role !== "motoboy" && !effectivePermissions) {
+        let prevPerms: string[] = [];
+        try {
+          prevPerms = JSON.parse(existing[0].permissions_json || "[]");
+        } catch {}
+        if (prevPerms.some((p) => String(p).toLowerCase() === "motoboy")) {
+          effectivePermissions = defaultPermissionsByRole[input.role];
+        }
+      }
 
       if (input.name !== undefined) {
         updates.push("name = ?");
@@ -215,17 +233,17 @@ export const teamRouter = router({
         updates.push("email = ?");
         values.push(input.email.trim().toLowerCase());
       }
-      if (input.role !== undefined) {
+      if (persistedRole !== undefined) {
         updates.push("role = ?");
-        values.push(input.role);
+        values.push(persistedRole);
       }
       if (input.status !== undefined) {
         updates.push("status = ?");
         values.push(input.status);
       }
-      if (input.permissions !== undefined) {
+      if (effectivePermissions !== undefined) {
         updates.push("permissions_json = ?");
-        values.push(JSON.stringify(input.permissions));
+        values.push(JSON.stringify(effectivePermissions));
       }
       if (input.password && input.password.trim().length >= 6) {
         const passwordHash = await bcrypt.hash(input.password.trim(), 10);
@@ -263,9 +281,9 @@ export const teamRouter = router({
           id: input.userId,
           ...(input.name !== undefined ? { name: input.name.trim() } : {}),
           ...(input.email !== undefined ? { email: input.email.trim().toLowerCase() } : {}),
-          ...(input.role !== undefined ? { role: input.role } : {}),
+          ...(persistedRole !== undefined ? { role: persistedRole } : {}),
           ...(input.status !== undefined ? { status: input.status } : {}),
-          ...(input.permissions !== undefined ? { permissions: input.permissions } : {}),
+          ...(effectivePermissions !== undefined ? { permissions: effectivePermissions } : {}),
           ...(passwordHash !== undefined ? { passwordHash } : {}),
         },
         "upsert"

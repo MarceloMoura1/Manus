@@ -4,8 +4,10 @@ import { router, megadeskProcedure, publicProcedure } from "../../_core/trpc";
 import { getActiveClientUser } from "../../db-chamados";
 import { isTenantAdminRole } from "../ai-memory/tenant-ai-memory";
 import {
+  acceptDeliveryOrder,
   assertMotoboyOrAdmin,
   assignMotoboyToOrder,
+  cancelDeliveryOrder,
   completeDeliveryOrder,
   createDeliveryOrderForTicket,
   createRestaurantOrderWithTicket,
@@ -16,7 +18,10 @@ import {
   getMotoboyHistory,
   getMotoboyQueue,
   getPublicDeliveryTrackByToken,
+  getRestaurantMenuCatalog,
+  ingestExternalDeliveryOrder,
   listTenantMotoboys,
+  quickCreateTenantMotoboy,
   startDeliveryRoute,
   toggleUserMotoboyTag,
   updateDeliveryStage,
@@ -33,12 +38,26 @@ const stageLabelSchema = z.enum([
   "Entregue",
 ]);
 const historyPeriodSchema = z.enum(["today", "week", "month", "custom"]);
+const deliveryItemSchema = z.object({
+  productPublicId: z.string().max(64).nullable().optional(),
+  sku: z.string().max(80).nullable().optional(),
+  name: z.string().min(1).max(180),
+  quantity: z.number().positive(),
+  unitPrice: z.number().min(0),
+});
 
 export const deliveryRouter = router({
   getStatuses: megadeskProcedure.query(async ({ ctx }) => {
     const statuses = await ensureRestaurantTicketStatuses(ctx.tenantId);
     return { statuses };
   }),
+
+  menuCatalog: megadeskProcedure
+    .input(z.object({ search: z.string().max(120).optional() }).optional())
+    .query(async ({ input, ctx }) => {
+      const items = await getRestaurantMenuCatalog(ctx.tenantId, input?.search);
+      return { items };
+    }),
 
   getByTicket: megadeskProcedure
     .input(z.object({ ticketId: z.string().min(1) }))
@@ -58,8 +77,9 @@ export const deliveryRouter = router({
         observations: z.string().max(2000).optional(),
         priority: z.enum(["baixa", "media", "alta", "critica"]).default("media"),
         orderSource: orderSourceSchema.default("manual"),
-        itemsSummary: z.string().min(1).max(4000),
-        orderTotal: z.number().min(0),
+        items: z.array(deliveryItemSchema).optional(),
+        itemsSummary: z.string().max(4000).default(""),
+        orderTotal: z.number().min(0).default(0),
         deliveryFee: z.number().min(0).default(0),
         paymentMethod: z.string().min(1).max(80).default("A combinar"),
         deliveryAddress: z.string().min(3).max(1000),
@@ -81,11 +101,48 @@ export const deliveryRouter = router({
       });
     }),
 
+  ingestSiteOrder: megadeskProcedure
+    .input(
+      z.object({
+        customerName: z.string().max(180).optional(),
+        customerPhone: z.string().max(40).optional(),
+        customerEmail: z.string().email().optional().or(z.literal("")),
+        customerCpf: z.string().max(24).optional(),
+        deliveryAddress: z.string().max(1000).optional(),
+        addressType: addressTypeSchema.default("casa"),
+        addressComplement: z.string().max(255).nullable().optional(),
+        destinationLat: z.number().nullable().optional(),
+        destinationLng: z.number().nullable().optional(),
+        paymentMethod: z.string().min(1).max(80).default("Pago online"),
+        deliveryFee: z.number().min(0).default(0),
+        observations: z.string().max(2000).optional(),
+        items: z
+          .array(
+            z.object({
+              productPublicId: z.string().max(64).nullable().optional(),
+              sku: z.string().max(80).nullable().optional(),
+              name: z.string().min(1).max(180),
+              quantity: z.number().positive(),
+              unitPrice: z.number().min(0).optional(),
+            })
+          )
+          .min(1),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      return ingestExternalDeliveryOrder({
+        ...input,
+        clientId: ctx.tenantId,
+        orderSource: "site",
+      });
+    }),
+
   upsertForTicket: megadeskProcedure
     .input(
       z.object({
         ticketId: z.string().min(1),
         orderSource: orderSourceSchema.default("manual"),
+        items: z.array(deliveryItemSchema).optional(),
         itemsSummary: z.string().max(4000).default(""),
         orderTotal: z.number().min(0).default(0),
         deliveryFee: z.number().min(0).default(0),
@@ -102,6 +159,7 @@ export const deliveryRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      const actor = await getActiveClientUser(ctx.tenantId, ctx.operationalUserId ?? "");
       const existing = await getDeliveryOrderByTicket(ctx.tenantId, input.ticketId);
       if (existing) {
         return {
@@ -111,12 +169,16 @@ export const deliveryRouter = router({
             motoboyUserId: input.motoboyUserId ?? existing.motoboyUserId,
             routeSequence: input.routeSequence,
             deliveryFee: input.deliveryFee,
+            actorUserId: actor?.userId || ctx.operationalUserId,
+            actorUserName: actor?.userName || ctx.userEmail || "Operador",
           }),
         };
       }
       const order = await createDeliveryOrderForTicket({
         ...input,
         clientId: ctx.tenantId,
+        actorUserId: actor?.userId || ctx.operationalUserId,
+        actorUserName: actor?.userName || ctx.userEmail || "Operador",
       });
       return { order };
     }),
@@ -131,12 +193,35 @@ export const deliveryRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      const actor = await getActiveClientUser(ctx.tenantId, ctx.operationalUserId ?? "");
       const order = await assignMotoboyToOrder({
         clientId: ctx.tenantId,
         ticketId: input.ticketId,
         motoboyUserId: input.motoboyUserId,
         routeSequence: input.routeSequence,
         deliveryFee: input.deliveryFee,
+        actorUserId: actor?.userId || ctx.operationalUserId,
+        actorUserName: actor?.userName || ctx.userEmail || "Operador",
+      });
+      return { ok: true, order };
+    }),
+
+  acceptOrder: megadeskProcedure
+    .input(z.object({ ticketId: z.string().min(1) }))
+    .mutation(async ({ input, ctx }) => {
+      const auth = await assertMotoboyOrAdmin({
+        clientId: ctx.tenantId,
+        userId: ctx.operationalUserId,
+        role: ctx.operationalUserRole || ctx.user?.role,
+        permissions: ctx.operationalPermissions,
+      });
+      const actor = await getActiveClientUser(ctx.tenantId, auth.userId);
+      const order = await acceptDeliveryOrder({
+        clientId: ctx.tenantId,
+        ticketId: input.ticketId,
+        motoboyUserId: auth.userId,
+        actorUserName: actor?.userName || ctx.userEmail || "Motoboy",
+        isAdmin: auth.isAdmin,
       });
       return { ok: true, order };
     }),
@@ -149,12 +234,56 @@ export const deliveryRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      const actor = await getActiveClientUser(ctx.tenantId, ctx.operationalUserId ?? "");
       const order = await updateDeliveryStage({
         clientId: ctx.tenantId,
         ticketId: input.ticketId,
         stageLabel: input.stageLabel,
+        actorUserId: actor?.userId || ctx.operationalUserId,
+        actorUserName: actor?.userName || ctx.userEmail || "Operador",
       });
       return { ok: true, order };
+    }),
+
+  cancelOrder: megadeskProcedure
+    .input(
+      z.object({
+        ticketId: z.string().min(1),
+        reason: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const actor = await getActiveClientUser(ctx.tenantId, ctx.operationalUserId ?? "");
+      const order = await cancelDeliveryOrder({
+        clientId: ctx.tenantId,
+        ticketId: input.ticketId,
+        reason: input.reason,
+        actorUserId: actor?.userId || ctx.operationalUserId,
+        actorUserName: actor?.userName || ctx.userEmail || "Operador",
+      });
+      return { ok: true, order };
+    }),
+
+  quickCreateMotoboy: megadeskProcedure
+    .input(
+      z.object({
+        name: z.string().min(2).max(180),
+        email: z.string().email(),
+        password: z.string().min(6),
+        phone: z.string().max(40).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!isTenantAdminRole(ctx.operationalUserRole) && !isTenantAdminRole(ctx.user?.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Apenas administradores podem cadastrar motoboys.",
+        });
+      }
+      return quickCreateTenantMotoboy({
+        clientId: ctx.tenantId,
+        ...input,
+      });
     }),
 
   startRoute: megadeskProcedure

@@ -15,7 +15,9 @@ import {
   RefreshCw,
   TrendingUp,
   UserCheck,
+  UserPlus,
   Wallet,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -269,6 +271,8 @@ export function RestaurantTrackingWorkspace() {
   const [activeTab, setActiveTab] = useState<TrackingTab>("live");
   const [focusPoint, setFocusPoint] = useState<{ lat: number; lng: number; token: number } | null>(null);
   const [assignChoiceByTicket, setAssignChoiceByTicket] = useState<Record<string, string>>({});
+  const [showNewMotoboyModal, setShowNewMotoboyModal] = useState(false);
+  const [motoboyForm, setMotoboyForm] = useState({ name: "", email: "", phone: "", password: "" });
 
   // Filtros de Fechamento & Repasses
   const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
@@ -301,6 +305,21 @@ export function RestaurantTrackingWorkspace() {
     },
     onError: (err) => {
       toast.error(err.message || "Falha ao atribuir motoboy.");
+    },
+  });
+
+  const quickCreateMotoboyMutation = trpc.delivery.quickCreateMotoboy.useMutation({
+    onSuccess: async (res) => {
+      toast.success(`Login do motoboy ${res.name} criado com sucesso!`);
+      setShowNewMotoboyModal(false);
+      setMotoboyForm({ name: "", email: "", phone: "", password: "" });
+      await Promise.all([
+        utils.delivery.liveOverview.invalidate(),
+        utils.delivery.listMotoboys.invalidate(),
+      ]);
+    },
+    onError: (err) => {
+      toast.error(err.message || "Não foi possível cadastrar o motoboy.");
     },
   });
 
@@ -418,6 +437,17 @@ export function RestaurantTrackingWorkspace() {
           <Button
             type="button"
             size="sm"
+            data-testid="tracking-new-motoboy-btn"
+            onClick={() => setShowNewMotoboyModal(true)}
+            className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+          >
+            <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+            + Novo Motoboy
+          </Button>
+
+          <Button
+            type="button"
+            size="sm"
             variant="outline"
             onClick={() => {
               if (activeTab === "live") void liveQuery.refetch();
@@ -499,9 +529,20 @@ export function RestaurantTrackingWorkspace() {
                 </div>
 
                 {motoboys.length === 0 ? (
-                  <p className="text-xs text-muted-foreground py-4 text-center">
-                    Nenhum motoboy cadastrado. Marque um operador com a tag motoboy em um ticket de pedido.
-                  </p>
+                  <div className="py-4 text-center space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Nenhum motoboy cadastrado ainda. Crie o login de acesso do seu entregador em 1 clique.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setShowNewMotoboyModal(true)}
+                      className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+                      Cadastrar Primeiro Motoboy
+                    </Button>
+                  </div>
                 ) : (
                   <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
                     {motoboys.map((mb) => {
@@ -873,6 +914,114 @@ export function RestaurantTrackingWorkspace() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Modal Rápido: + Novo Motoboy */}
+      {showNewMotoboyModal && (
+        <div
+          data-testid="quick-new-motoboy-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[1px]"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600">
+                  <Bike className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Cadastrar Novo Motoboy</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Cria o login mobile com acesso exclusivo a entregas, GPS e ganhos.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewMotoboyModal(false)}
+                className="text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                quickCreateMotoboyMutation.mutate({
+                  name: motoboyForm.name.trim(),
+                  email: motoboyForm.email.trim(),
+                  phone: motoboyForm.phone.trim() || undefined,
+                  password: motoboyForm.password,
+                });
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">Nome completo</label>
+                <input
+                  type="text"
+                  required
+                  minLength={2}
+                  value={motoboyForm.name}
+                  onChange={(e) => setMotoboyForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Ex: João Entregador"
+                  className="w-full h-9 rounded-xl border border-border bg-background px-3 text-xs text-foreground"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">E-mail de login</label>
+                <input
+                  type="email"
+                  required
+                  value={motoboyForm.email}
+                  onChange={(e) => setMotoboyForm((f) => ({ ...f, email: e.target.value }))}
+                  placeholder="joao.moto@restaurante.com"
+                  className="w-full h-9 rounded-xl border border-border bg-background px-3 text-xs text-foreground"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">Telefone / WhatsApp (opcional)</label>
+                <input
+                  type="tel"
+                  value={motoboyForm.phone}
+                  onChange={(e) => setMotoboyForm((f) => ({ ...f, phone: e.target.value }))}
+                  placeholder="(41) 99999-0000"
+                  className="w-full h-9 rounded-xl border border-border bg-background px-3 text-xs text-foreground"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">Senha de acesso (mín. 6 caracteres)</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={motoboyForm.password}
+                  onChange={(e) => setMotoboyForm((f) => ({ ...f, password: e.target.value }))}
+                  placeholder="••••••••"
+                  className="w-full h-9 rounded-xl border border-border bg-background px-3 text-xs text-foreground"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowNewMotoboyModal(false)}
+                  className="text-xs cursor-pointer"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={quickCreateMotoboyMutation.isPending}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+                >
+                  {quickCreateMotoboyMutation.isPending ? "Cadastrando..." : "Criar Login de Motoboy"}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

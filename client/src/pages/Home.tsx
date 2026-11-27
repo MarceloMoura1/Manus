@@ -15,6 +15,7 @@ import { AIAssistant } from "./AIAssistant";
 import { AITokenUsagePage } from "./AITokenUsagePage";
 import { AdminUnifiedHub, type AdminHubSubTab } from "@/components/AdminUnifiedHub";
 import { DeliveryTicketCard } from "@/components/DeliveryTicketCard";
+import { DeliveryMenuItemsPicker, computeDeliveryTotals, type SelectedDeliveryItem } from "@/components/DeliveryMenuItemsPicker";
 import { MotoboyWorkspace } from "./MotoboyWorkspace";
 import { RestaurantTrackingWorkspace } from "./RestaurantTrackingWorkspace";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
@@ -1822,7 +1823,7 @@ function DashboardPage({
       {/* Aba 2: Administração (Restrito a Perfil Admin) */}
       {homeTab === "admin" && isAdmin && (
         <div className="space-y-6 animate-fade-in">
-          <AdminUnifiedHub tenantKey={tenantKey} userName={userName} initialSubTab={homeNavigationIntent?.subTab} intentToken={homeNavigationIntent?.token} />
+          <AdminUnifiedHub tenantKey={tenantKey} userName={userName} nicheProfile={session?.nicheProfile} initialSubTab={homeNavigationIntent?.subTab} intentToken={homeNavigationIntent?.token} />
         </div>
       )}
     </div>
@@ -3465,10 +3466,9 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
     observations: '',
     priority: 'media',
   });
+  const [newDeliveryItems, setNewDeliveryItems] = React.useState<SelectedDeliveryItem[]>([]);
   const [newDeliveryForm, setNewDeliveryForm] = React.useState<{
     orderSource: 'site' | 'whatsapp' | 'manual';
-    itemsSummary: string;
-    orderTotal: string;
     deliveryFee: string;
     paymentMethod: string;
     deliveryAddress: string;
@@ -3476,8 +3476,6 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
     addressComplement: string;
   }>({
     orderSource: 'manual',
-    itemsSummary: '',
-    orderTotal: '0',
     deliveryFee: '0',
     paymentMethod: 'Pix',
     deliveryAddress: '',
@@ -3522,10 +3520,16 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
     } catch { /* intenção inválida é ignorada */ }
   }, []);
 
+  const selectedStageFilter = selectedFilter.startsWith('stage:') ? selectedFilter.slice(6) : undefined;
+  const selectedCanonicalStatus = selectedStageFilter
+    ? undefined
+    : (selectedFilter as 'total' | 'open' | 'in_progress' | 'waiting' | 'closed');
+
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
     {
-      status: selectedFilter as 'total' | 'open' | 'in_progress' | 'waiting' | 'closed',
+      status: selectedCanonicalStatus,
+      stageLabel: selectedStageFilter,
       limit: ITEMS_PER_PAGE,
       offset: (currentPage - 1) * ITEMS_PER_PAGE,
       scope: chamadoFilter,
@@ -3545,6 +3549,7 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
 
   const utils = trpc.useUtils();
   const updateChamadoMutation = trpc.chamados.update.useMutation();
+  const updateDeliveryStageMutation = trpc.delivery.updateStage.useMutation();
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
   const createChamadoMutation = trpc.chamados.create.useMutation();
@@ -3928,6 +3933,7 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
     setValidationErrors([]);
 
     try {
+      const deliveryTotals = computeDeliveryTotals(newDeliveryItems, Number(newDeliveryForm.deliveryFee || 0));
       const result = await createChamadoMutation.mutateAsync({
         customerId: newChamadoForm.customerId,
         title: newChamadoForm.title,
@@ -3937,9 +3943,10 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
           ? {
               delivery: {
                 orderSource: newDeliveryForm.orderSource,
-                itemsSummary: newDeliveryForm.itemsSummary.trim(),
-                orderTotal: Number(newDeliveryForm.orderTotal || 0),
-                deliveryFee: Number(newDeliveryForm.deliveryFee || 0),
+                items: newDeliveryItems,
+                itemsSummary: deliveryTotals.summary,
+                orderTotal: deliveryTotals.orderTotal,
+                deliveryFee: deliveryTotals.deliveryFee,
                 paymentMethod: newDeliveryForm.paymentMethod.trim() || "A combinar",
                 deliveryAddress: newDeliveryForm.deliveryAddress.trim(),
                 addressType: newDeliveryForm.addressType,
@@ -3953,7 +3960,8 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
         showToast(`Ticket #${result.chamado.number} criado com sucesso!`, 'success');
         setShowNewChamadoModal(false);
         setNewChamadoForm({ customerId: '', title: '', observations: '', priority: 'media' });
-        setNewDeliveryForm({ orderSource: 'manual', itemsSummary: '', orderTotal: '0', deliveryFee: '0', paymentMethod: 'Pix', deliveryAddress: '', addressType: 'casa', addressComplement: '' });
+        setNewDeliveryItems([]);
+        setNewDeliveryForm({ orderSource: 'manual', deliveryFee: '0', paymentMethod: 'Pix', deliveryAddress: '', addressType: 'casa', addressComplement: '' });
         setCustomerSearch('');
         setDebouncedCustomerSearch('');
         setSelectedCrmCustomer(null);
@@ -4094,33 +4102,101 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
   console.log('[DEBUG] filteredChamados:', filteredChamados);
 
   // Contar status (usando dados da query)
-  const statusCounts = statusCountsQuery.data || {
+  const statusCounts: any = statusCountsQuery.data || {
     total: 0,
     open: 0,
     in_progress: 0,
     waiting: 0,
     closed: 0,
+    byStageLabel: {},
   };
-  console.log('[DEBUG] statusCounts:', statusCounts);
+  const stageCountMap: Record<string, number> = statusCounts.byStageLabel || {};
 
-  const statusCards: Array<{ id: string; label: string; value: number; gradient: string; bgGradient: string; icon: any; iconColor: string; customColor?: string }> = [
-    { id: 'total', label: 'Total', value: statusCounts.total, gradient: 'from-slate-600 to-slate-900', bgGradient: 'from-slate-50 to-slate-100', icon: Ticket, iconColor: 'text-slate-700' },
-    { id: 'open', label: 'Abertos', value: statusCounts.open, gradient: 'from-blue-400 to-blue-600', bgGradient: 'from-blue-50 to-blue-100', icon: AlertCircle, iconColor: 'text-blue-600' },
-    { id: 'in_progress', label: 'Em Progresso', value: statusCounts.in_progress, gradient: 'from-amber-400 to-amber-600', bgGradient: 'from-amber-50 to-amber-100', icon: Clock, iconColor: 'text-amber-600' },
-    { id: 'waiting', label: 'Aguardando', value: statusCounts.waiting, gradient: 'from-orange-400 to-orange-600', bgGradient: 'from-orange-50 to-orange-100', icon: Hourglass, iconColor: 'text-orange-600' },
-    { id: 'closed', label: 'Fechados', value: statusCounts.closed, gradient: 'from-emerald-400 to-emerald-600', bgGradient: 'from-emerald-50 to-emerald-100', icon: CheckCircle2, iconColor: 'text-emerald-600' },
-    // Status personalizados do cliente
-    ...customStatuses.map((cs) => ({
-      id: `custom_${cs.statusId}`,
-      label: cs.name,
-      value: 0,
-      gradient: 'from-slate-400 to-slate-600',
-      bgGradient: 'from-slate-50 to-slate-100',
-      icon: Tag,
-      iconColor: 'text-slate-600',
-      customColor: cs.color,
-    })),
-  ];
+  const statusCards: Array<{ id: string; label: string; value: number; gradient: string; bgGradient: string; icon: any; iconColor: string; customColor?: string }> =
+    isRestaurantNiche && customStatuses.length > 0
+      ? [
+          { id: 'total', label: 'Total Ativos', value: statusCounts.total, gradient: 'from-slate-600 to-slate-900', bgGradient: 'from-slate-50 to-slate-100', icon: Ticket, iconColor: 'text-slate-700' },
+          ...customStatuses.map((cs) => ({
+            id: `stage:${cs.name}`,
+            label: cs.name,
+            value: Number(stageCountMap[cs.name] ?? 0),
+            gradient: 'from-slate-400 to-slate-600',
+            bgGradient: 'from-slate-50 to-slate-100',
+            icon: Tag,
+            iconColor: 'text-slate-600',
+            customColor: cs.color,
+          })),
+        ]
+      : [
+          { id: 'total', label: 'Total', value: statusCounts.total, gradient: 'from-slate-600 to-slate-900', bgGradient: 'from-slate-50 to-slate-100', icon: Ticket, iconColor: 'text-slate-700' },
+          { id: 'open', label: 'Abertos', value: statusCounts.open, gradient: 'from-blue-400 to-blue-600', bgGradient: 'from-blue-50 to-blue-100', icon: AlertCircle, iconColor: 'text-blue-600' },
+          { id: 'in_progress', label: 'Em Progresso', value: statusCounts.in_progress, gradient: 'from-amber-400 to-amber-600', bgGradient: 'from-amber-50 to-amber-100', icon: Clock, iconColor: 'text-amber-600' },
+          { id: 'waiting', label: 'Aguardando', value: statusCounts.waiting, gradient: 'from-orange-400 to-orange-600', bgGradient: 'from-orange-50 to-orange-100', icon: Hourglass, iconColor: 'text-orange-600' },
+          { id: 'closed', label: 'Fechados', value: statusCounts.closed, gradient: 'from-emerald-400 to-emerald-600', bgGradient: 'from-emerald-50 to-emerald-100', icon: CheckCircle2, iconColor: 'text-emerald-600' },
+          ...customStatuses.map((cs) => ({
+            id: `stage:${cs.name}`,
+            label: cs.name,
+            value: Number(stageCountMap[cs.name] ?? 0),
+            gradient: 'from-slate-400 to-slate-600',
+            bgGradient: 'from-slate-50 to-slate-100',
+            icon: Tag,
+            iconColor: 'text-slate-600',
+            customColor: cs.color,
+          })),
+        ];
+
+  const resolveTicketDisplayStatus = (ticket: any): { label: string; color?: string } => {
+    const stageName = ticket?.deliveryStageLabel
+      ? String(ticket.deliveryStageLabel)
+      : isRestaurantNiche
+        ? ticket?.status === 'open'
+          ? 'Novo Pedido'
+          : ticket?.status === 'in_progress'
+            ? 'Em Preparo'
+            : ticket?.status === 'waiting'
+              ? 'Pronto p/ Motoboy'
+              : ticket?.status === 'closed'
+                ? 'Entregue'
+                : getStatusLabel(ticket?.status)
+        : null;
+    if (stageName) {
+      const matched = customStatuses.find((cs) => cs.name.toLowerCase() === stageName.toLowerCase());
+      return { label: matched?.name || stageName, color: matched?.color };
+    }
+    return { label: getStatusLabel(ticket?.status) };
+  };
+
+  const handleUpdateRestaurantStage = async (stageLabel: string) => {
+    if (!selectedChamado) return;
+    const validStages = ['Novo Pedido', 'Em Preparo', 'Pronto p/ Motoboy', 'Em Rota com Motoboy', 'Entregue'];
+    if (selectedChamado.deliveryStageLabel && validStages.includes(stageLabel)) {
+      try {
+        await updateDeliveryStageMutation.mutateAsync({
+          ticketId: selectedChamado.id,
+          stageLabel: stageLabel as any,
+        });
+        showToast(`Status atualizado para ${stageLabel}!`, 'success');
+        await Promise.all([
+          utils.chamados.list.invalidate(),
+          utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id }),
+          utils.chamados.getStatusCounts.invalidate(),
+          utils.delivery.getByTicket.invalidate({ ticketId: selectedChamado.id }),
+        ]);
+        return;
+      } catch (err: any) {
+        showToast(err?.message || 'Erro ao atualizar etapa do pedido', 'error');
+        return;
+      }
+    }
+    const mapToCanonical: Record<string, 'open' | 'in_progress' | 'waiting' | 'closed'> = {
+      'Novo Pedido': 'open',
+      'Em Preparo': 'in_progress',
+      'Pronto p/ Motoboy': 'waiting',
+      'Em Rota com Motoboy': 'in_progress',
+      'Entregue': 'closed',
+    };
+    await handleUpdateStatus(mapToCanonical[stageLabel] ?? (stageLabel as any));
+  };
 
   const ticketSortHeaders: Array<{ key: TicketSortKey; label: string }> = [
     { key: 'number', label: 'ID' },
@@ -4416,9 +4492,27 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
                         <span className={`text-sm font-medium ${getPriorityColor(chamado.priority)}`}>{getPriorityLabel(chamado.priority)}</span>
                       </td>
                       <td className="px-5 py-3.5">
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getStatusBadgeColor(chamado.status)}`}>
-                          {getStatusLabel(chamado.status)}
-                        </span>
+                        {(() => {
+                          const disp = resolveTicketDisplayStatus(chamado);
+                          return (
+                            <span
+                              style={
+                                disp.color
+                                  ? {
+                                      backgroundColor: `${disp.color}18`,
+                                      borderColor: `${disp.color}55`,
+                                      color: disp.color,
+                                    }
+                                  : undefined
+                              }
+                              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                                disp.color ? '' : getStatusBadgeColor(chamado.status)
+                              }`}
+                            >
+                              {disp.label}
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );
@@ -4611,47 +4705,20 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
                   <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
                     🛵 Dados de Pedido &amp; Delivery (Restaurante)
                   </p>
-                  <textarea
-                    rows={2}
-                    placeholder="Itens do pedido (ex: 2x Hambúrguer Artesanal, 1x Refrigerante)"
-                    value={newDeliveryForm.itemsSummary}
-                    onChange={(e) => setNewDeliveryForm((d) => ({ ...d, itemsSummary: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900"
+                  <DeliveryMenuItemsPicker
+                    compact
+                    items={newDeliveryItems}
+                    onChange={setNewDeliveryItems}
+                    deliveryFee={newDeliveryForm.deliveryFee}
+                    onDeliveryFeeChange={(nextFee) => setNewDeliveryForm((d) => ({ ...d, deliveryFee: nextFee }))}
                   />
-                  <div className="grid grid-cols-3 gap-2">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="Total (R$)"
-                      value={newDeliveryForm.orderTotal}
-                      onChange={(e) => setNewDeliveryForm((d) => ({ ...d, orderTotal: e.target.value }))}
-                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
-                    />
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="Taxa rota (R$)"
-                      value={newDeliveryForm.deliveryFee}
-                      onChange={(e) => setNewDeliveryForm((d) => ({ ...d, deliveryFee: e.target.value }))}
-                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
-                    />
+                  <div className="grid grid-cols-2 gap-2">
                     <input
                       type="text"
-                      placeholder="Pagamento"
+                      placeholder="Pagamento (Pix, Cartão, Dinheiro)"
                       value={newDeliveryForm.paymentMethod}
                       onChange={(e) => setNewDeliveryForm((d) => ({ ...d, paymentMethod: e.target.value }))}
                       className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Endereço completo de entrega"
-                      value={newDeliveryForm.deliveryAddress}
-                      onChange={(e) => setNewDeliveryForm((d) => ({ ...d, deliveryAddress: e.target.value }))}
-                      className="col-span-2 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
                     />
                     <select
                       value={newDeliveryForm.addressType}
@@ -4664,6 +4731,13 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
                       <option value="outro">Outro</option>
                     </select>
                   </div>
+                  <input
+                    type="text"
+                    placeholder="Endereço completo de entrega"
+                    value={newDeliveryForm.deliveryAddress}
+                    onChange={(e) => setNewDeliveryForm((d) => ({ ...d, deliveryAddress: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+                  />
                   <input
                     type="text"
                     placeholder="Complemento / Referência (bloco, apto, portão)"
@@ -4727,17 +4801,53 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
 
             {/* Status e Botao Encerrar */}
             <div className="flex flex-wrap items-center gap-2 md:justify-end">
-              <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value as 'open' | 'in_progress' | 'waiting' | 'closed')}>
-                <SelectTrigger data-testid="ticket-status-control" data-status={selectedChamado.status} className={`h-9 w-36 border ${getStatusBadgeColor(selectedChamado.status)} focus:ring-2 focus:ring-blue-200`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-white border-2 border-slate-200">
-                  <SelectItem value="open">Aberto</SelectItem>
-                  <SelectItem value="in_progress">Em Progresso</SelectItem>
-                  <SelectItem value="waiting">Aguardando</SelectItem>
-                  <SelectItem value="closed">Encerrado</SelectItem>
-                </SelectContent>
-              </Select>
+              {isRestaurantNiche && customStatuses.length > 0 ? (
+                (() => {
+                  const disp = resolveTicketDisplayStatus(selectedChamado);
+                  return (
+                    <Select
+                      value={disp.label}
+                      onValueChange={(value) => void handleUpdateRestaurantStage(value)}
+                    >
+                      <SelectTrigger
+                        data-testid="ticket-status-control"
+                        data-status={selectedChamado.status}
+                        style={
+                          disp.color
+                            ? {
+                                backgroundColor: `${disp.color}18`,
+                                borderColor: `${disp.color}55`,
+                                color: disp.color,
+                              }
+                            : undefined
+                        }
+                        className="h-9 min-w-[168px] border font-semibold focus:ring-2 focus:ring-blue-200"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border-2 border-slate-200">
+                        {customStatuses.map((cs) => (
+                          <SelectItem key={cs.statusId} value={cs.name}>
+                            {cs.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  );
+                })()
+              ) : (
+                <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value as 'open' | 'in_progress' | 'waiting' | 'closed')}>
+                  <SelectTrigger data-testid="ticket-status-control" data-status={selectedChamado.status} className={`h-9 w-36 border ${getStatusBadgeColor(selectedChamado.status)} focus:ring-2 focus:ring-blue-200`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-2 border-slate-200">
+                    <SelectItem value="open">Aberto</SelectItem>
+                    <SelectItem value="in_progress">Em Progresso</SelectItem>
+                    <SelectItem value="waiting">Aguardando</SelectItem>
+                    <SelectItem value="closed">Encerrado</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
               <Button
                 onClick={() => setShowCloseModal(true)}
                 className="h-9 bg-red-500 px-4 font-semibold text-white hover:bg-red-600"
@@ -4908,7 +5018,28 @@ export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMe
                   </div>
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</dt>
-                    <dd data-testid="ticket-detail-status" className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusBadgeColor(selectedChamado.status)}`}>{getStatusLabel(selectedChamado.status)}</dd>
+                    {(() => {
+                      const disp = resolveTicketDisplayStatus(selectedChamado);
+                      return (
+                        <dd
+                          data-testid="ticket-detail-status"
+                          style={
+                            disp.color
+                              ? {
+                                  backgroundColor: `${disp.color}18`,
+                                  borderColor: `${disp.color}55`,
+                                  color: disp.color,
+                                }
+                              : undefined
+                          }
+                          className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                            disp.color ? '' : getStatusBadgeColor(selectedChamado.status)
+                          }`}
+                        >
+                          {disp.label}
+                        </dd>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div>
@@ -6302,7 +6433,7 @@ export function AuthenticatedShell({
   React.useEffect(() => {
     if (!session || !enabledModules) return;
 
-    if (active === "tracking" && !isModuleEnabled(enabledModules, "rastreamento")) {
+    if (active === "tracking" && session.nicheProfile !== "restaurante" && !isModuleEnabled(enabledModules, "rastreamento")) {
       navigateToRoute("home", { replace: true });
       return;
     }
@@ -6390,6 +6521,9 @@ export function AuthenticatedShell({
       return isModuleEnabled(enabledModules, "chamados") && hasUserPermission(session.permissions, "tickets");
     }
     if (item.id === "tracking") {
+      if (session.nicheProfile === "restaurante") {
+        return isAdmin || hasUserPermission(session.permissions, "tracking") || hasUserPermission(session.permissions, "tickets");
+      }
       return isModuleEnabled(enabledModules, "rastreamento") && hasUserPermission(session.permissions, "tracking");
     }
     if (item.id === "ai-assistant") {

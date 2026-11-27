@@ -19,6 +19,8 @@ import { queryErpProducts, queryTicketsByPhone, saveLead } from "./bot.router";
 import { checkBotEligibility, deliverBotMessage, transferConversationToHuman } from "./bot-runtime";
 import { recordAiUsageLog } from "../ai-usage/ai-usage.service";
 import { formatTenantMemoryForPrompt, getTenantAiMemory, getTenantCompanyName } from "../ai-memory/tenant-ai-memory";
+import { getTenantNicheContext } from "../niche-guard";
+import { getRestaurantMenuCatalog, ingestExternalDeliveryOrder } from "../delivery/delivery.service";
 
 export interface ProcessBotMessageInput {
   tenantId: string;
@@ -64,10 +66,15 @@ export async function processCognitiveBotMessage(
       return { replied: false, error: eligibility.reason };
     }
 
-    // 2. Busca o nome da empresa e a base de conhecimento do tenant (100% isolado por tenantId)
+    // 2. Busca o nome da empresa, nicho e a base de conhecimento do tenant (100% isolado por tenantId)
     const companyName = await getTenantCompanyName(tenantId, pool);
     const tenantMemory = await getTenantAiMemory(tenantId, pool).catch(() => null);
     const tenantMemoryBlock = formatTenantMemoryForPrompt(companyName, tenantMemory);
+    const nicheCtx = await getTenantNicheContext(tenantId, pool).catch(() => null);
+    const isRestaurantNiche = nicheCtx?.nicheProfile === "restaurante";
+    const restaurantMenu = isRestaurantNiche
+      ? await getRestaurantMenuCatalog(tenantId, undefined, pool).catch(() => [])
+      : [];
 
     const apiKey = getGeminiApiKey();
     if (!apiKey) {
@@ -219,6 +226,96 @@ export async function processCognitiveBotMessage(
       } as any),
     };
 
+    // Ferramenta exclusiva para tenants do nicho Restaurante: fechamento estruturado de pedido delivery
+    if (isRestaurantNiche) {
+      tools.create_restaurant_delivery_order = tool({
+        description:
+          "Registra automaticamente um pedido de delivery confirmado pelo cliente no WhatsApp, criando o Ticket, o Pedido de Delivery (código de 4 dígitos e link de rastreio) e a Venda no ERP > Vendas. Só acione após o cliente confirmar os itens, endereço completo e forma de pagamento.",
+        parameters: z.object({
+          customerName: z.string().min(2).describe("Nome do cliente"),
+          deliveryAddress: z.string().min(3).describe("Endereço completo de entrega (rua, número, bairro)"),
+          addressType: z
+            .enum(["casa", "apartamento", "comercial", "outro"])
+            .default("casa")
+            .describe("Tipo do endereço"),
+          addressComplement: z
+            .string()
+            .optional()
+            .describe("Complemento (bloco, apartamento, portão ou referência)"),
+          paymentMethod: z
+            .string()
+            .min(2)
+            .describe("Forma de pagamento escolhida (ex: Pix, Cartão na entrega, Dinheiro/Troco, Pago online)"),
+          deliveryFee: z.number().min(0).default(0).describe("Taxa de entrega em reais (se informada na base do restaurante)"),
+          observations: z.string().optional().describe("Observações de preparo (ex: sem cebola, ponto da carne)"),
+          items: z
+            .array(
+              z.object({
+                productPublicId: z.string().optional().describe("ID do produto no cardápio oficial"),
+                name: z.string().min(1).describe("Nome exato do item do cardápio"),
+                quantity: z.number().positive().describe("Quantidade"),
+                unitPrice: z.number().min(0).optional().describe("Preço unitário em reais"),
+              })
+            )
+            .min(1),
+        }),
+        execute: async (orderArgs: {
+          customerName: string;
+          deliveryAddress: string;
+          addressType?: "casa" | "apartamento" | "comercial" | "outro";
+          addressComplement?: string;
+          paymentMethod: string;
+          deliveryFee?: number;
+          observations?: string;
+          items: Array<{ productPublicId?: string; name: string; quantity: number; unitPrice?: number }>;
+        }) => {
+          try {
+            const created = await ingestExternalDeliveryOrder({
+              clientId: tenantId,
+              orderSource: "whatsapp",
+              customerName: orderArgs.customerName || customerName || "Cliente WhatsApp",
+              customerPhone: phone,
+              deliveryAddress: orderArgs.deliveryAddress,
+              addressType: orderArgs.addressType ?? "casa",
+              addressComplement: orderArgs.addressComplement ?? null,
+              paymentMethod: orderArgs.paymentMethod,
+              deliveryFee: Number(orderArgs.deliveryFee ?? 0),
+              observations: orderArgs.observations,
+              items: orderArgs.items,
+            });
+            return {
+              success: true,
+              ticketNumber: `#${String(created.ticket.number).padStart(4, "0")}`,
+              orderTotal: `R$ ${created.deliveryOrder.orderTotal.toFixed(2).replace(".", ",")}`,
+              deliveryCode: created.deliveryOrder.deliveryCode,
+              stageLabel: created.deliveryOrder.stageLabel,
+              erpSaleCreated: Boolean(created.deliveryOrder.erpSalePublicId),
+              message: "Pedido registrado com sucesso! Informe o número do pedido, o resumo, o valor total e avise que enviaremos o link de rastreio assim que o motoboy sair para entrega.",
+            };
+          } catch (err: any) {
+            return {
+              success: false,
+              error: err?.message || "Não foi possível registrar o pedido automaticamente. Acione transfer_to_human.",
+            };
+          }
+        },
+      } as any);
+    }
+
+    const restaurantMenuBlock = isRestaurantNiche
+      ? `\n\n=== CARDÁPIO OFICIAL DO RESTAURANTE (ERP > PRODUTOS) ===\n${
+          restaurantMenu.length > 0
+            ? restaurantMenu
+                .slice(0, 80)
+                .map(
+                  (p) =>
+                    `- [ID: ${p.id}] ${p.name}${p.category ? ` (${p.category})` : ""} — R$ ${p.price.toFixed(2).replace(".", ",")}`
+                )
+                .join("\n")
+            : "(Nenhum produto ativo cadastrado no cardápio ainda. Caso o cliente peça algo, transfira para um atendente humano.)"
+        }\n\nREGRAS EXCLUSIVAS DE PEDIDO DELIVERY:\n- Apresente itens e preços SOMENTE com base no cardápio oficial acima.\n- Antes de finalizar um pedido, confirme com o cliente: (1) itens e quantidades, (2) endereço completo, se é Casa/Apartamento/Comercial e complemento/bloco/apto, (3) forma de pagamento.\n- Assim que o cliente confirmar o pedido, ACIONE OBRIGATORIAMENTE a ferramenta create_restaurant_delivery_order com os itens do cardápio (informando productPublicId, name, quantity e unitPrice) para criar automaticamente o Ticket, o Delivery e a Venda no ERP.`
+      : "";
+
     // 5. System Instruction configurada com a política de transbordo elegante
     const systemInstruction = `Você é o assistente virtual de atendimento da empresa "${companyName}".
 Você atende clientes via WhatsApp em português brasileiro de forma acolhedora, prestativa, ágil, direta e altamente profissional.
@@ -240,7 +337,7 @@ Diretrizes obrigatórias de comportamento:
 
 4. Formate mensagens de forma limpa para WhatsApp: use quebras de linha e negrito (*texto*) onde facilitar a leitura. Evite textos excessivamente longos.
 
-${tenantMemoryBlock}`;
+${tenantMemoryBlock}${restaurantMenuBlock}`;
 
     const googleInstance = createGoogleGenerativeAI({ apiKey });
     const targetModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";

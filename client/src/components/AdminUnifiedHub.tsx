@@ -14,6 +14,8 @@ import {
   ExternalLink,
   Loader2,
   BookOpen,
+  Bike,
+  Pencil,
 } from "lucide-react";
 import { CompanyKnowledgeCard } from "@/components/CompanyKnowledgeCard";
 import { Button } from "@/components/ui/button";
@@ -31,11 +33,13 @@ export type AdminHubSubTab = "equipe" | "fluxos" | "whatsapp" | "ia_knowledge" |
 interface AdminUnifiedHubProps {
   tenantKey: string;
   userName: string;
+  nicheProfile?: string | null;
   initialSubTab?: AdminHubSubTab;
   intentToken?: number;
 }
 
-export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToken }: AdminUnifiedHubProps) {
+export function AdminUnifiedHub({ tenantKey, userName, nicheProfile, initialSubTab, intentToken }: AdminUnifiedHubProps) {
+  const isRestaurantNiche = nicheProfile === "restaurante";
   const [subTab, setSubTab] = useState<AdminHubSubTab>(initialSubTab || "equipe");
 
   React.useEffect(() => {
@@ -56,28 +60,44 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
     onSuccess: () => {
       void teamUsersQuery.refetch();
       setIsAddUserOpen(false);
-      setNewUserForm({ name: "", email: "", password: "", role: "agent" });
+      setNewUserForm({ name: "", email: "", phone: "", password: "", role: "agent" });
     },
   });
 
   const updateTeamUserMutation = trpc.megadeskSettings.updateTeamUser.useMutation({
     onSuccess: () => {
       void teamUsersQuery.refetch();
+      setEditingUser(null);
     },
   });
 
+  type TeamRoleOption = "admin" | "manager" | "agent" | "viewer" | "motoboy";
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [newUserForm, setNewUserForm] = useState<{
     name: string;
     email: string;
+    phone: string;
     password: string;
-    role: "admin" | "manager" | "agent" | "viewer";
+    role: TeamRoleOption;
   }>({
     name: "",
     email: "",
+    phone: "",
     password: "",
     role: "agent",
   });
+  const [editingUser, setEditingUser] = useState<{
+    userId: string;
+    name: string;
+    email: string;
+    role: TeamRoleOption;
+    password: string;
+  } | null>(null);
+
+  const openAddUserModal = (defaultRole: TeamRoleOption = "agent") => {
+    setNewUserForm({ name: "", email: "", phone: "", password: "", role: defaultRole });
+    setIsAddUserOpen(true);
+  };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,11 +108,30 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
         userRole: "admin",
         name: newUserForm.name.trim(),
         email: newUserForm.email.trim(),
+        phone: newUserForm.phone.trim() || undefined,
         password: newUserForm.password,
         role: newUserForm.role,
       });
     } catch (err) {
       console.error("[AdminUnifiedHub] Falha ao criar operador:", err);
+    }
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser || !editingUser.name.trim() || !editingUser.email.trim()) return;
+    try {
+      await updateTeamUserMutation.mutateAsync({
+        clientId: tenantKey,
+        userRole: "admin",
+        targetUserId: editingUser.userId,
+        name: editingUser.name.trim(),
+        email: editingUser.email.trim(),
+        role: editingUser.role,
+        ...(editingUser.password.trim().length >= 6 ? { password: editingUser.password.trim() } : {}),
+      });
+    } catch (err) {
+      console.error("[AdminUnifiedHub] Falha ao atualizar operador:", err);
     }
   };
 
@@ -114,6 +153,7 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
     manager: "Gerente",
     agent: "Atendente",
     viewer: "Visualizador",
+    motoboy: "🛵 Motoboy (Entregador)",
   };
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -261,14 +301,29 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
               </p>
             </div>
 
-            <Button
-              onClick={() => setIsAddUserOpen(true)}
-              size="sm"
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-xs gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Novo Operador</span>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {isRestaurantNiche && (
+                <Button
+                  type="button"
+                  data-testid="admin-quick-new-motoboy-btn"
+                  onClick={() => openAddUserModal("motoboy")}
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl shadow-xs gap-1.5 cursor-pointer"
+                >
+                  <Bike className="w-3.5 h-3.5" />
+                  <span>+ Novo Motoboy</span>
+                </Button>
+              )}
+              <Button
+                type="button"
+                onClick={() => openAddUserModal("agent")}
+                size="sm"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-xs gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Novo Operador</span>
+              </Button>
+            </div>
           </div>
 
           {/* Lista de Membros */}
@@ -313,10 +368,37 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <Badge variant="outline" className="text-[10px] uppercase font-bold py-0.5">
-                          {roleLabels[user.role] || user.role}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] uppercase font-bold py-0.5",
+                            (user.isMotoboy || user.permissions?.includes("motoboy")) &&
+                              "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                          )}
+                        >
+                          {roleLabels[user.isMotoboy || user.permissions?.includes("motoboy") ? "motoboy" : user.role] || user.role}
                         </Badge>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingUser({
+                              userId: user.userId,
+                              name: user.name || "",
+                              email: user.email || "",
+                              role: (user.isMotoboy || user.permissions?.includes("motoboy")
+                                ? "motoboy"
+                                : user.role) as TeamRoleOption,
+                              password: "",
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-border bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
+                          title="Editar operador"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          Editar
+                        </button>
 
                         <button
                           type="button"
@@ -378,6 +460,17 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
                 </div>
 
                 <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-foreground">Telefone (Opcional)</Label>
+                  <Input
+                    type="tel"
+                    value={newUserForm.phone}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, phone: e.target.value })}
+                    placeholder="(41) 99999-0000"
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
                   <Label className="text-xs font-semibold text-foreground">Senha Provisória</Label>
                   <Input
                     type="password"
@@ -393,7 +486,7 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
                   <Label className="text-xs font-semibold text-foreground">Perfil de Acesso</Label>
                   <Select
                     value={newUserForm.role}
-                    onValueChange={(val: "admin" | "manager" | "agent" | "viewer") =>
+                    onValueChange={(val: TeamRoleOption) =>
                       setNewUserForm({ ...newUserForm, role: val })
                     }
                   >
@@ -401,12 +494,20 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
                       <SelectValue placeholder="Selecione o perfil" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="agent">Atendente (Conversas & Chamados)</SelectItem>
+                      <SelectItem value="agent">Atendente (Conversas &amp; Tickets)</SelectItem>
                       <SelectItem value="manager">Gerente / Supervisor</SelectItem>
                       <SelectItem value="admin">Administrador Completo</SelectItem>
                       <SelectItem value="viewer">Visualizador (Somente Leitura)</SelectItem>
+                      {isRestaurantNiche && (
+                        <SelectItem value="motoboy">🛵 Motoboy (Entregador)</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
+                  {newUserForm.role === "motoboy" && (
+                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                      Acesso mobile exclusivo: Minhas Entregas (GPS + Waze/Maps + Código 4D) e Extrato de Ganhos.
+                    </p>
+                  )}
                 </div>
 
                 <DialogFooter className="pt-3">
@@ -421,13 +522,107 @@ export function AdminUnifiedHub({ tenantKey, userName, initialSubTab, intentToke
                   <Button
                     type="submit"
                     disabled={addTeamUserMutation.isPending}
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
+                    className={cn(
+                      "text-white text-xs font-semibold cursor-pointer",
+                      newUserForm.role === "motoboy"
+                        ? "bg-emerald-600 hover:bg-emerald-700"
+                        : "bg-blue-600 hover:bg-blue-700"
+                    )}
                   >
                     {addTeamUserMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
-                    Criar Operador
+                    {newUserForm.role === "motoboy" ? "Criar Login de Motoboy" : "Criar Operador"}
                   </Button>
                 </DialogFooter>
               </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* Modal de Edição de Operador / Motoboy */}
+          <Dialog open={Boolean(editingUser)} onOpenChange={(open) => { if (!open) setEditingUser(null); }}>
+            <DialogContent className="sm:max-w-md bg-card border-border">
+              <DialogHeader>
+                <DialogTitle className="text-base font-bold text-foreground flex items-center gap-2">
+                  <Pencil className="w-4 h-4 text-blue-600" />
+                  Editar Usuário da Equipe
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Altere os dados, o cargo (inclusive Motoboy) ou redefina a senha de acesso.
+                </DialogDescription>
+              </DialogHeader>
+
+              {editingUser && (
+                <form onSubmit={handleUpdateUser} className="space-y-4 py-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-foreground">Nome Completo</Label>
+                    <Input
+                      required
+                      value={editingUser.name}
+                      onChange={(e) => setEditingUser({ ...editingUser, name: e.target.value })}
+                      className="text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-foreground">E-mail de Acesso</Label>
+                    <Input
+                      type="email"
+                      required
+                      value={editingUser.email}
+                      onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })}
+                      className="text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-foreground">Cargo / Perfil</Label>
+                    <Select
+                      value={editingUser.role}
+                      onValueChange={(val: TeamRoleOption) =>
+                        setEditingUser({ ...editingUser, role: val })
+                      }
+                    >
+                      <SelectTrigger className="text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="agent">Atendente</SelectItem>
+                        <SelectItem value="manager">Gerente / Supervisor</SelectItem>
+                        <SelectItem value="admin">Administrador Completo</SelectItem>
+                        <SelectItem value="viewer">Visualizador</SelectItem>
+                        {isRestaurantNiche && (
+                          <SelectItem value="motoboy">🛵 Motoboy (Entregador)</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-foreground">Nova Senha (Opcional)</Label>
+                    <Input
+                      type="password"
+                      value={editingUser.password}
+                      onChange={(e) => setEditingUser({ ...editingUser, password: e.target.value })}
+                      placeholder="Deixe vazio para manter a senha atual"
+                      className="text-xs"
+                    />
+                  </div>
+                  <DialogFooter className="pt-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setEditingUser(null)}
+                      className="text-xs cursor-pointer"
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={updateTeamUserMutation.isPending}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      {updateTeamUserMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
+                      Salvar Alterações
+                    </Button>
+                  </DialogFooter>
+                </form>
+              )}
             </DialogContent>
           </Dialog>
         </div>

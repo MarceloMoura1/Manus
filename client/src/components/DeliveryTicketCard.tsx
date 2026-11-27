@@ -15,6 +15,11 @@ import {
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
+import {
+  DeliveryMenuItemsPicker,
+  computeDeliveryTotals,
+  type SelectedDeliveryItem,
+} from "@/components/DeliveryMenuItemsPicker";
 
 const RESTAURANT_STAGES = [
   "Novo Pedido",
@@ -68,9 +73,8 @@ export function DeliveryTicketCard({
   const [copiedLink, setCopiedLink] = useState(false);
 
   // Formulário para vincular delivery em ticket manual ainda sem pedido de entrega
+  const [selectedItems, setSelectedItems] = useState<SelectedDeliveryItem[]>([]);
   const [draft, setDraft] = useState({
-    itemsSummary: "",
-    orderTotal: "0",
     deliveryFee: "0",
     paymentMethod: "Pix",
     deliveryAddress: "",
@@ -156,6 +160,7 @@ export function DeliveryTicketCard({
   }
 
   if (!order) {
+    const pickerTotals = computeDeliveryTotals(selectedItems, Number(draft.deliveryFee || 0));
     return (
       <section
         data-testid="delivery-ticket-card-empty"
@@ -169,45 +174,20 @@ export function DeliveryTicketCard({
             <div>
               <h3 className="text-sm font-bold text-slate-900">Dados da Entrega &amp; Motoboy</h3>
               <p className="text-xs text-slate-500">
-                Preencha os dados de delivery para gerar automaticamente o código de 4 dígitos e link de rastreio.
+                Selecione os produtos do cardápio (ERP &gt; Produtos) e informe o endereço para gerar o código de 4 dígitos, o link de rastreio e a venda no ERP.
               </p>
             </div>
           </div>
         </div>
 
+        <DeliveryMenuItemsPicker
+          items={selectedItems}
+          onChange={setSelectedItems}
+          deliveryFee={draft.deliveryFee}
+          onDeliveryFeeChange={(nextFee) => setDraft((d) => ({ ...d, deliveryFee: nextFee }))}
+        />
+
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="md:col-span-2">
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Resumo dos itens do pedido</label>
-            <textarea
-              rows={2}
-              value={draft.itemsSummary}
-              onChange={(e) => setDraft((d) => ({ ...d, itemsSummary: e.target.value }))}
-              placeholder="Ex: 2x X-Bacon, 1x Coca-Cola 2L, 1x Batata G"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Valor total (R$)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={draft.orderTotal}
-              onChange={(e) => setDraft((d) => ({ ...d, orderTotal: e.target.value }))}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Taxa de entrega / Motoboy (R$)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={draft.deliveryFee}
-              onChange={(e) => setDraft((d) => ({ ...d, deliveryFee: e.target.value }))}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
-            />
-          </div>
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Forma de pagamento</label>
             <input
@@ -255,14 +235,19 @@ export function DeliveryTicketCard({
 
         <Button
           type="button"
-          disabled={upsertMutation.isPending || draft.deliveryAddress.trim().length < 3}
+          disabled={
+            upsertMutation.isPending ||
+            draft.deliveryAddress.trim().length < 3 ||
+            selectedItems.length === 0
+          }
           onClick={() =>
             upsertMutation.mutate({
               ticketId,
               orderSource: "manual",
-              itemsSummary: draft.itemsSummary,
-              orderTotal: Number(draft.orderTotal || 0),
-              deliveryFee: Number(draft.deliveryFee || 0),
+              items: selectedItems,
+              itemsSummary: pickerTotals.summary,
+              orderTotal: pickerTotals.orderTotal,
+              deliveryFee: pickerTotals.deliveryFee,
               paymentMethod: draft.paymentMethod || "A combinar",
               customerName: customerName || "Cliente",
               customerPhone: customerPhone || "0000000000",
@@ -271,9 +256,11 @@ export function DeliveryTicketCard({
               addressComplement: draft.addressComplement.trim() || null,
             })
           }
-          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold"
+          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
         >
-          {upsertMutation.isPending ? "Salvando..." : "Gerar Pedido de Delivery e Código 4 Dígitos"}
+          {upsertMutation.isPending
+            ? "Salvando..."
+            : `Gerar Pedido de Delivery (${formatCurrency(pickerTotals.orderTotal)}) + Venda ERP`}
         </Button>
       </section>
     );
@@ -354,13 +341,35 @@ export function DeliveryTicketCard({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* 1. Pedido e Valores */}
         <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-2">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
-            <Package className="h-3.5 w-3.5 text-slate-400" />
-            Pedido &amp; Pagamento
-          </p>
-          <p className="text-sm text-slate-800 whitespace-pre-wrap">
-            {order.itemsSummary || "Sem itens detalhados."}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
+              <Package className="h-3.5 w-3.5 text-slate-400" />
+              Pedido &amp; Pagamento
+            </p>
+            {order.erpSalePublicId && (
+              <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                ERP &gt; Vendas ✓
+              </span>
+            )}
+          </div>
+          {order.items && order.items.length > 0 ? (
+            <ul className="space-y-1 text-xs text-slate-800">
+              {order.items.map((it, idx) => (
+                <li key={`${it.productPublicId || it.name}-${idx}`} className="flex items-center justify-between gap-2">
+                  <span className="truncate font-medium">
+                    <strong>{it.quantity}x</strong> {it.name}
+                  </span>
+                  <span className="shrink-0 font-semibold text-slate-600">
+                    {formatCurrency(it.subtotal)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-slate-800 whitespace-pre-wrap">
+              {order.itemsSummary || "Sem itens detalhados."}
+            </p>
+          )}
           <div className="pt-2 border-t border-slate-200/80 grid grid-cols-2 gap-2 text-xs">
             <div>
               <span className="text-slate-500 block">Total do Pedido</span>

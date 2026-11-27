@@ -1,10 +1,12 @@
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
+import bcrypt from "bcryptjs";
 import type mysql from "mysql2/promise";
 import { getPool } from "../../db";
 import { createChamadoWithActivity, type CanonicalTicketActor } from "../../chamados-domain";
 import { evoSendText } from "../../evolution/client";
 import { instanceNameFor } from "../../evolution/session-store";
+import { emitOperationalTenantEvent } from "../whatsapp/socket/whatsapp.socket";
 import { isTenantAdminRole } from "../ai-memory/tenant-ai-memory";
 import { assertTenantNiche, getTenantNicheContext, type NicheQueryExecutor } from "../niche-guard";
 
@@ -12,6 +14,24 @@ export type DeliveryOrderSource = "site" | "whatsapp" | "manual";
 export type DeliveryAddressType = "casa" | "apartamento" | "comercial" | "outro";
 export type DeliveryOrderStatus = "pending" | "assigned" | "in_route" | "delivered" | "canceled";
 export type MotoboyHistoryPeriod = "today" | "week" | "month" | "custom";
+
+export interface DeliveryOrderItem {
+  productPublicId?: string | null;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface RestaurantMenuItem {
+  id: string;
+  productId: number;
+  name: string;
+  sku: string;
+  category: string | null;
+  price: number;
+  priceCents: number;
+}
 
 export const RESTAURANT_TICKET_STATUSES = [
   { name: "Novo Pedido", color: "#ef4444", order: 1 },
@@ -29,6 +49,7 @@ export interface DeliveryOrderRecord {
   ticketId: string;
   ticketNumber?: number | null;
   orderSource: DeliveryOrderSource;
+  items: DeliveryOrderItem[];
   itemsSummary: string;
   orderTotal: number;
   deliveryFee: number;
@@ -51,6 +72,8 @@ export interface DeliveryOrderRecord {
   trackingExpiresAt: string | null;
   deliveryStatus: DeliveryOrderStatus;
   stageLabel: string;
+  erpSalePublicId: string | null;
+  acceptedAt: string | null;
   startedAt: string | null;
   deliveredAt: string | null;
   createdAt: string;
@@ -60,6 +83,103 @@ export interface DeliveryDependencies {
   pool?: NicheQueryExecutor;
   sendWhatsApp?: (input: { clientId: string; phone: string; message: string }) => Promise<unknown>;
   createTicket?: typeof createChamadoWithActivity;
+}
+
+export function normalizeDeliveryItems(
+  rawItems?: Array<{
+    productPublicId?: string | null;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+  }> | null
+): DeliveryOrderItem[] {
+  if (!Array.isArray(rawItems) || rawItems.length === 0) return [];
+  const result: DeliveryOrderItem[] = [];
+  for (const item of rawItems) {
+    const name = String(item?.name ?? "").trim();
+    if (!name) continue;
+    const quantity = Math.max(1, Number(item.quantity || 1));
+    const unitPrice = Math.max(0, Number(item.unitPrice || 0));
+    const subtotal = Number((quantity * unitPrice).toFixed(2));
+    result.push({
+      productPublicId: item.productPublicId ? String(item.productPublicId).trim() : null,
+      name,
+      quantity,
+      unitPrice,
+      subtotal,
+    });
+  }
+  return result;
+}
+
+export function formatDeliveryItemsSummary(items: readonly DeliveryOrderItem[]): string {
+  if (!items || items.length === 0) return "";
+  return items
+    .map((item) => {
+      const qtyLabel = Number.isInteger(item.quantity) ? String(item.quantity) : item.quantity.toFixed(2);
+      const priceStr = item.subtotal > 0 ? ` (R$ ${item.subtotal.toFixed(2).replace(".", ",")})` : "";
+      return `${qtyLabel}x ${item.name}${priceStr}`;
+    })
+    .join(", ");
+}
+
+function parseItemsJson(raw: unknown): DeliveryOrderItem[] {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed)) return [];
+    return normalizeDeliveryItems(parsed);
+  } catch {
+    return [];
+  }
+}
+
+const ORDER_SOURCE_LABEL: Record<DeliveryOrderSource, string> = {
+  whatsapp: "WhatsApp IA",
+  site: "Site",
+  manual: "Manual",
+};
+
+/**
+ * Grava evento no Histórico do Ticket usando as colunas canônicas da tabela
+ * `megadesk_domain_chamado_activities`.
+ */
+export async function recordDeliveryTicketActivity(
+  pool: NicheQueryExecutor,
+  input: {
+    clientId: string;
+    ticketId: string;
+    actorUserId?: string | null;
+    actorUserName?: string | null;
+    actionType?: string;
+    description: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const attendant = String(input.actorUserName || "Sistema Delivery").trim().slice(0, 180) || "Sistema Delivery";
+  const actorUserId = String(input.actorUserId || "system").trim().slice(0, 80) || "system";
+  const description = String(input.description || "Atualização de delivery.").trim().slice(0, 2000);
+  const actionType = String(input.actionType || "status_changed").trim().slice(0, 64);
+
+  await pool
+    .execute(
+      `INSERT INTO megadesk_domain_chamado_activities
+       (activity_id, chamado_id, client_id, description, attendant, actor_user_id, action_type, metadata_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        `act-${randomUUID()}`,
+        input.ticketId,
+        input.clientId,
+        description,
+        attendant,
+        actorUserId,
+        actionType,
+        JSON.stringify({ eventType: actionType, ...(input.metadata ?? {}) }),
+      ]
+    )
+    .catch((err) => {
+      console.warn("[DeliveryService] Falha ao gravar atividade no Histórico do Ticket:", err);
+    });
 }
 
 let deliveryTableEnsured = false;
@@ -78,6 +198,7 @@ export async function ensureDeliveryOrdersTable(
       client_id VARCHAR(80) NOT NULL,
       ticket_id VARCHAR(80) NOT NULL,
       order_source ENUM('site','whatsapp','manual') NOT NULL DEFAULT 'manual',
+      items_json LONGTEXT NULL,
       items_summary TEXT NULL,
       order_total DECIMAL(10,2) NOT NULL DEFAULT 0.00,
       delivery_fee DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -99,6 +220,8 @@ export async function ensureDeliveryOrdersTable(
       tracking_expires_at DATETIME NULL,
       delivery_status ENUM('pending','assigned','in_route','delivered','canceled') NOT NULL DEFAULT 'pending',
       stage_label VARCHAR(64) NOT NULL DEFAULT 'Novo Pedido',
+      erp_sale_public_id VARCHAR(64) NULL,
+      accepted_at DATETIME NULL,
       started_at DATETIME NULL,
       delivered_at DATETIME NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -113,6 +236,9 @@ export async function ensureDeliveryOrdersTable(
     "ALTER TABLE megadesk_delivery_orders ADD COLUMN current_lat DOUBLE NULL",
     "ALTER TABLE megadesk_delivery_orders ADD COLUMN current_lng DOUBLE NULL",
     "ALTER TABLE megadesk_delivery_orders ADD COLUMN location_updated_at DATETIME NULL",
+    "ALTER TABLE megadesk_delivery_orders ADD COLUMN items_json LONGTEXT NULL",
+    "ALTER TABLE megadesk_delivery_orders ADD COLUMN erp_sale_public_id VARCHAR(64) NULL",
+    "ALTER TABLE megadesk_delivery_orders ADD COLUMN accepted_at DATETIME NULL",
   ];
   for (const sql of alterMigrations) {
     try {
@@ -165,13 +291,16 @@ export function buildStartRouteWhatsAppMessage(trackingUrl: string, deliveryCode
 
 function mapRowToDeliveryOrder(row: any): DeliveryOrderRecord {
   const trackingToken = String(row.tracking_token);
+  const items = parseItemsJson(row.items_json);
+  const summaryFromRow = String(row.items_summary ?? "").trim();
   return {
     id: String(row.id),
     clientId: String(row.client_id),
     ticketId: String(row.ticket_id),
     ticketNumber: row.ticket_number != null ? Number(row.ticket_number) : null,
     orderSource: (row.order_source || "manual") as DeliveryOrderSource,
-    itemsSummary: String(row.items_summary ?? ""),
+    items,
+    itemsSummary: summaryFromRow || formatDeliveryItemsSummary(items),
     orderTotal: Number(row.order_total ?? 0),
     deliveryFee: Number(row.delivery_fee ?? 0),
     paymentMethod: String(row.payment_method ?? "A combinar"),
@@ -193,6 +322,8 @@ function mapRowToDeliveryOrder(row: any): DeliveryOrderRecord {
     trackingExpiresAt: row.tracking_expires_at ? new Date(row.tracking_expires_at).toISOString() : null,
     deliveryStatus: (row.delivery_status || "pending") as DeliveryOrderStatus,
     stageLabel: String(row.stage_label || "Novo Pedido"),
+    erpSalePublicId: row.erp_sale_public_id ? String(row.erp_sale_public_id) : null,
+    acceptedAt: row.accepted_at ? new Date(row.accepted_at).toISOString() : null,
     startedAt: row.started_at ? new Date(row.started_at).toISOString() : null,
     deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
@@ -295,11 +426,322 @@ export async function ensureRestaurantTicketStatuses(
   }));
 }
 
+/**
+ * Lista produtos ativos do catálogo ERP > Produtos como cardápio do restaurante.
+ */
+export async function getRestaurantMenuCatalog(
+  clientId: string,
+  search?: string,
+  pool: NicheQueryExecutor = getPool()
+): Promise<RestaurantMenuItem[]> {
+  await assertTenantNiche(clientId, ["restaurante"], pool);
+  const term = String(search || "").trim();
+  const [rows] = (term
+    ? await pool.execute(
+        `SELECT id, public_id, name, sku, category, sale_price_cents
+         FROM erp_products
+         WHERE client_id = ? AND active = 1
+           AND (name LIKE ? OR sku LIKE ? OR COALESCE(category, '') LIKE ?)
+         ORDER BY name ASC
+         LIMIT 200`,
+        [clientId, `%${term}%`, `%${term}%`, `%${term}%`]
+      )
+    : await pool.execute(
+        `SELECT id, public_id, name, sku, category, sale_price_cents
+         FROM erp_products
+         WHERE client_id = ? AND active = 1
+         ORDER BY name ASC
+         LIMIT 200`,
+        [clientId]
+      )) as any[];
+
+  return (rows || []).map((r: any) => {
+    const priceCents = Math.max(0, Number(r.sale_price_cents ?? 0));
+    return {
+      id: String(r.public_id),
+      productId: Number(r.id),
+      name: String(r.name),
+      sku: String(r.sku ?? ""),
+      category: r.category ? String(r.category) : null,
+      price: Number((priceCents / 100).toFixed(2)),
+      priceCents,
+    };
+  });
+}
+
+/**
+ * Sincroniza um pedido de delivery com `ERP > Vendas` (`erp_sale_orders` + `erp_sale_order_items`).
+ * Resolve produtos do catálogo por `productPublicId` ou nome exato/aproximado e nunca bloqueia
+ * a operação de restaurante por saldo de estoque zerado (já que o nicho restaurante oculta estoque).
+ */
+export async function syncDeliveryOrderToErpSale(
+  input: {
+    clientId: string;
+    ticketId: string;
+    ticketNumber?: number | null;
+    customerId?: string | null;
+    customerName: string;
+    deliveryAddress: string;
+    addressComplement?: string | null;
+    orderSource: DeliveryOrderSource;
+    paymentMethod: string;
+    deliveryFee: number;
+    items: readonly DeliveryOrderItem[];
+    actorUserId?: string | null;
+    actorUserName?: string | null;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{ publicId: string; orderNumber: string } | null> {
+  if (!input.customerId || !input.items || input.items.length === 0) {
+    return null;
+  }
+
+  try {
+    // Resolve produtos cadastrados no ERP > Produtos
+    const resolvedLines: Array<{
+      productId: number;
+      productName: string;
+      sku: string;
+      quantity: number;
+      unitPriceCents: number;
+      lineTotalCents: number;
+    }> = [];
+
+    for (const item of input.items) {
+      let prodRow: any = null;
+      if (item.productPublicId) {
+        const [pRows] = (await pool.execute(
+          "SELECT id, public_id, name, sku, sale_price_cents FROM erp_products WHERE client_id = ? AND public_id = ? LIMIT 1",
+          [input.clientId, item.productPublicId]
+        )) as any[];
+        prodRow = pRows?.[0] ?? null;
+      }
+      if (!prodRow && item.name) {
+        const [pRows] = (await pool.execute(
+          "SELECT id, public_id, name, sku, sale_price_cents FROM erp_products WHERE client_id = ? AND active = 1 AND LOWER(name) = LOWER(?) LIMIT 1",
+          [input.clientId, item.name.trim()]
+        )) as any[];
+        prodRow = pRows?.[0] ?? null;
+      }
+      if (!prodRow) continue;
+
+      const qty = Math.max(1, Number(item.quantity || 1));
+      const unitCents =
+        item.unitPrice > 0
+          ? Math.round(item.unitPrice * 100)
+          : Math.max(0, Number(prodRow.sale_price_cents ?? 0));
+      const lineTotalCents = Math.round(qty * unitCents);
+
+      const existingIdx = resolvedLines.findIndex((l) => l.productId === Number(prodRow.id));
+      if (existingIdx >= 0) {
+        resolvedLines[existingIdx].quantity += qty;
+        resolvedLines[existingIdx].lineTotalCents += lineTotalCents;
+      } else {
+        resolvedLines.push({
+          productId: Number(prodRow.id),
+          productName: String(prodRow.name),
+          sku: String(prodRow.sku || `MENU-${prodRow.id}`),
+          quantity: qty,
+          unitPriceCents: unitCents,
+          lineTotalCents,
+        });
+      }
+    }
+
+    if (resolvedLines.length === 0) {
+      return null;
+    }
+
+    // Sequência canônica de vendas (`V-<n>`)
+    await pool
+      .execute(
+        `INSERT INTO erp_sale_document_sequences (client_id, document_type, next_number)
+         SELECT ?, 'sale', COALESCE(MAX(CAST(SUBSTRING(order_number, 3) AS UNSIGNED)), 0) + 1
+         FROM erp_sale_orders
+         WHERE client_id = ? AND document_type = 'sale' AND order_number REGEXP '^V-[0-9]+$'
+         ON DUPLICATE KEY UPDATE next_number = next_number`,
+        [input.clientId, input.clientId]
+      )
+      .catch(() => {});
+
+    const [seqRows] = (await pool.execute(
+      "SELECT next_number FROM erp_sale_document_sequences WHERE client_id = ? AND document_type = 'sale' LIMIT 1",
+      [input.clientId]
+    )) as any[];
+    const nextNum = Math.max(1, Number(seqRows?.[0]?.next_number || 1));
+    await pool
+      .execute(
+        "UPDATE erp_sale_document_sequences SET next_number = ? WHERE client_id = ? AND document_type = 'sale'",
+        [nextNum + 1, input.clientId]
+      )
+      .catch(() => {});
+
+    const orderNumber = `V-${nextNum}`;
+    const salePublicId = randomUUID();
+    const subtotalCents = resolvedLines.reduce((acc, l) => acc + l.lineTotalCents, 0);
+    const freightCents = Math.max(0, Math.round(Number(input.deliveryFee || 0) * 100));
+    const totalCents = subtotalCents + freightCents;
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const actorUserId = String(input.actorUserId || "delivery-auto").slice(0, 80);
+    const actorUserName = String(input.actorUserName || ORDER_SOURCE_LABEL[input.orderSource]).slice(0, 180);
+    const ticketRef = input.ticketNumber ? `#${String(input.ticketNumber).padStart(4, "0")}` : input.ticketId;
+    const shippingSnapshot = JSON.stringify({
+      recipientName: input.customerName.trim(),
+      street: input.deliveryAddress.trim(),
+      complement: input.addressComplement?.trim() || "",
+      number: "",
+      district: "",
+      city: "",
+      state: "",
+      postalCode: "",
+    });
+
+    const [insertRes] = (await pool.execute(
+      `INSERT INTO erp_sale_orders (
+        public_id, client_id, order_number, document_type, commercial_status, commercial_date,
+        crm_client_id, customer_name_snapshot, seller_user_id, seller_name_snapshot,
+        status, current_stage, shipping_address_snapshot, billing_address_snapshot,
+        discount_cents, freight_cents, charges_cents, payment_method_snapshot,
+        notes, subtotal_cents, total_cents, confirmed_by, confirmed_at, created_by
+      ) VALUES (?, ?, ?, 'sale', 'active', ?, ?, ?, ?, ?, 'confirmed', 'confirmed', ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, NOW(), ?)`,
+      [
+        salePublicId,
+        input.clientId,
+        orderNumber,
+        todayIso,
+        input.customerId,
+        input.customerName.trim().slice(0, 255),
+        actorUserId,
+        actorUserName,
+        shippingSnapshot,
+        shippingSnapshot,
+        freightCents,
+        input.paymentMethod.trim().slice(0, 80),
+        `Pedido Delivery (${ORDER_SOURCE_LABEL[input.orderSource]}) — Ticket ${ticketRef}`,
+        subtotalCents,
+        totalCents,
+        actorUserId,
+        actorUserId,
+      ]
+    )) as any[];
+
+    let saleOrderId = Number(insertRes?.insertId ?? 0);
+    if (!saleOrderId) {
+      const [idRows] = (await pool.execute(
+        "SELECT id FROM erp_sale_orders WHERE client_id = ? AND public_id = ? LIMIT 1",
+        [input.clientId, salePublicId]
+      )) as any[];
+      saleOrderId = Number(idRows?.[0]?.id ?? 0);
+    }
+
+    if (saleOrderId > 0) {
+      for (const line of resolvedLines) {
+        await pool.execute(
+          `INSERT INTO erp_sale_order_items (
+            public_id, sale_order_id, product_id, inventory_item_id,
+            product_name_snapshot, sku_snapshot, quantity, unit_price_cents,
+            discount_cents, line_total_cents
+          ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 0, ?)`,
+          [
+            randomUUID(),
+            saleOrderId,
+            line.productId,
+            line.productName.slice(0, 180),
+            line.sku.slice(0, 80),
+            line.quantity.toFixed(3),
+            line.unitPriceCents,
+            line.lineTotalCents,
+          ]
+        );
+      }
+    }
+
+    await pool
+      .execute(
+        "UPDATE megadesk_delivery_orders SET erp_sale_public_id = ? WHERE client_id = ? AND ticket_id = ?",
+        [salePublicId, input.clientId, input.ticketId]
+      )
+      .catch(() => {});
+
+    try {
+      emitOperationalTenantEvent(input.clientId, "erp:sale.changed", {
+        publicId: salePublicId,
+        operation: "created",
+        occurredAt: new Date().toISOString(),
+      });
+    } catch {}
+
+    return { publicId: salePublicId, orderNumber };
+  } catch (err) {
+    console.warn("[DeliveryService] Falha ao sincronizar pedido com ERP > Vendas:", err);
+    return null;
+  }
+}
+
+/**
+ * Atualiza o status da venda vinculada em `ERP > Vendas` quando o delivery é concluído ou cancelado.
+ */
+export async function updateErpSaleStatusForDelivery(
+  input: {
+    clientId: string;
+    erpSalePublicId: string | null | undefined;
+    targetStatus: "completed" | "cancelled";
+    actorUserId?: string | null;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<void> {
+  if (!input.erpSalePublicId) return;
+  const actorId = String(input.actorUserId || "delivery-auto").slice(0, 80);
+  try {
+    if (input.targetStatus === "completed") {
+      await pool.execute(
+        `UPDATE erp_sale_orders
+         SET status = 'fulfilled',
+             commercial_status = 'completed',
+             current_stage = 'completed',
+             fulfilled_by = ?,
+             fulfilled_at = COALESCE(fulfilled_at, NOW())
+         WHERE client_id = ? AND public_id = ? AND status <> 'cancelled'`,
+        [actorId, input.clientId, input.erpSalePublicId]
+      );
+    } else {
+      await pool.execute(
+        `UPDATE erp_sale_orders
+         SET status = 'cancelled',
+             commercial_status = 'cancelled',
+             cancelled_by = ?,
+             cancelled_at = COALESCE(cancelled_at, NOW()),
+             cancellation_reason = 'Pedido de delivery cancelado'
+         WHERE client_id = ? AND public_id = ?`,
+        [actorId, input.clientId, input.erpSalePublicId]
+      );
+    }
+
+    try {
+      emitOperationalTenantEvent(input.clientId, "erp:sale.changed", {
+        publicId: input.erpSalePublicId,
+        operation: input.targetStatus === "completed" ? "stage_changed" : "cancelled",
+        occurredAt: new Date().toISOString(),
+      });
+    } catch {}
+  } catch (err) {
+    console.warn("[DeliveryService] Falha ao atualizar venda no ERP > Vendas:", err);
+  }
+}
+
 export async function createDeliveryOrderForTicket(
   input: {
     clientId: string;
     ticketId: string;
+    ticketNumber?: number | null;
+    customerId?: string | null;
     orderSource?: DeliveryOrderSource;
+    items?: Array<{
+      productPublicId?: string | null;
+      name: string;
+      quantity: number;
+      unitPrice: number;
+    }>;
     itemsSummary?: string;
     orderTotal?: number;
     deliveryFee?: number;
@@ -313,6 +755,8 @@ export async function createDeliveryOrderForTicket(
     destinationLng?: number | null;
     motoboyUserId?: string | null;
     routeSequence?: number;
+    actorUserId?: string | null;
+    actorUserName?: string | null;
   },
   deps: DeliveryDependencies = {}
 ): Promise<DeliveryOrderRecord> {
@@ -320,28 +764,40 @@ export async function createDeliveryOrderForTicket(
   await assertTenantNiche(input.clientId, ["restaurante"], pool);
   await ensureDeliveryOrdersTable(pool);
 
+  const normalizedItems = normalizeDeliveryItems(input.items);
+  const formattedSummary = formatDeliveryItemsSummary(normalizedItems);
+  const finalItemsSummary = (input.itemsSummary ?? "").trim() || formattedSummary;
+  const itemsSubtotal = normalizedItems.reduce((acc, it) => acc + it.subtotal, 0);
+  const deliveryFee = Math.max(0, Number(input.deliveryFee ?? 0));
+  const computedOrderTotal =
+    input.orderTotal !== undefined && Number(input.orderTotal) > 0
+      ? Number(input.orderTotal)
+      : Number((itemsSubtotal + deliveryFee).toFixed(2));
+
   const id = `dlv-${randomUUID()}`;
   const deliveryCode = generateDeliveryCode();
   const trackingToken = generateTrackingToken();
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const orderSource: DeliveryOrderSource = input.orderSource ?? "manual";
   const deliveryStatus: DeliveryOrderStatus = input.motoboyUserId ? "assigned" : "pending";
   const stageLabel: RestaurantStageLabel = input.motoboyUserId ? "Pronto p/ Motoboy" : "Novo Pedido";
 
   await pool.execute(
     `INSERT INTO megadesk_delivery_orders (
-      id, client_id, ticket_id, order_source, items_summary, order_total, delivery_fee,
+      id, client_id, ticket_id, order_source, items_json, items_summary, order_total, delivery_fee,
       payment_method, customer_name, customer_phone, delivery_address, address_type,
       address_complement, destination_lat, destination_lng, motoboy_user_id, route_sequence,
       delivery_code, tracking_token, tracking_expires_at, delivery_status, stage_label
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.clientId,
       input.ticketId,
-      input.orderSource ?? "manual",
-      (input.itemsSummary ?? "").trim(),
-      Number(input.orderTotal ?? 0),
-      Number(input.deliveryFee ?? 0),
+      orderSource,
+      normalizedItems.length > 0 ? JSON.stringify(normalizedItems) : null,
+      finalItemsSummary,
+      computedOrderTotal,
+      deliveryFee,
       (input.paymentMethod ?? "A combinar").trim(),
       input.customerName.trim(),
       input.customerPhone.trim(),
@@ -359,6 +815,63 @@ export async function createDeliveryOrderForTicket(
       stageLabel,
     ]
   );
+
+  // Resolve customerId do ticket caso não tenha sido passado diretamente
+  let resolvedCustomerId = input.customerId ?? null;
+  let resolvedTicketNumber = input.ticketNumber ?? null;
+  if (!resolvedCustomerId || resolvedTicketNumber == null) {
+    try {
+      const [tRows] = (await pool.execute(
+        "SELECT customerId, chamadoNumber FROM megadesk_domain_chamados WHERE clientId = ? AND chamadoId = ? LIMIT 1",
+        [input.clientId, input.ticketId]
+      )) as any[];
+      if (tRows?.[0]) {
+        if (!resolvedCustomerId && tRows[0].customerId) resolvedCustomerId = String(tRows[0].customerId);
+        if (resolvedTicketNumber == null && tRows[0].chamadoNumber != null) {
+          resolvedTicketNumber = Number(tRows[0].chamadoNumber);
+        }
+      }
+    } catch {}
+  }
+
+  // Sincronização 100% automática com ERP > Vendas quando há itens do catálogo
+  const syncedSale = await syncDeliveryOrderToErpSale(
+    {
+      clientId: input.clientId,
+      ticketId: input.ticketId,
+      ticketNumber: resolvedTicketNumber,
+      customerId: resolvedCustomerId,
+      customerName: input.customerName,
+      deliveryAddress: input.deliveryAddress,
+      addressComplement: input.addressComplement,
+      orderSource,
+      paymentMethod: input.paymentMethod ?? "A combinar",
+      deliveryFee,
+      items: normalizedItems,
+      actorUserId: input.actorUserId,
+      actorUserName: input.actorUserName,
+    },
+    pool
+  );
+
+  // Registro automático no Histórico do Ticket
+  const totalFormatted = `R$ ${computedOrderTotal.toFixed(2).replace(".", ",")}`;
+  const saleNote = syncedSale ? ` • Venda ${syncedSale.orderNumber} criada em ERP > Vendas.` : "";
+  await recordDeliveryTicketActivity(pool, {
+    clientId: input.clientId,
+    ticketId: input.ticketId,
+    actorUserId: input.actorUserId || "system",
+    actorUserName: input.actorUserName || ORDER_SOURCE_LABEL[orderSource],
+    actionType: "ticket_created",
+    description: `Pedido de delivery criado (origem: ${ORDER_SOURCE_LABEL[orderSource]}) • Status: ${stageLabel} • Total: ${totalFormatted}${finalItemsSummary ? ` • Itens: ${finalItemsSummary}` : ""}.${saleNote}`,
+    metadata: {
+      eventType: "delivery_order_created",
+      orderSource,
+      stageLabel,
+      orderTotal: computedOrderTotal,
+      erpSalePublicId: syncedSale?.publicId ?? null,
+    },
+  });
 
   const [rows] = (await pool.execute(
     "SELECT * FROM megadesk_delivery_orders WHERE id = ? AND client_id = ? LIMIT 1",
@@ -380,8 +893,14 @@ export async function createRestaurantOrderWithTicket(
     priority?: "baixa" | "media" | "alta" | "critica";
     actor: CanonicalTicketActor;
     orderSource: DeliveryOrderSource;
-    itemsSummary: string;
-    orderTotal: number;
+    items?: Array<{
+      productPublicId?: string | null;
+      name: string;
+      quantity: number;
+      unitPrice: number;
+    }>;
+    itemsSummary?: string;
+    orderTotal?: number;
     deliveryFee: number;
     paymentMethod: string;
     deliveryAddress: string;
@@ -400,13 +919,15 @@ export async function createRestaurantOrderWithTicket(
   await ensureDeliveryOrdersTable(pool);
   await ensureRestaurantTicketStatuses(input.clientId, pool).catch(() => {});
 
+  const normalizedItems = normalizeDeliveryItems(input.items);
+  const summary = (input.itemsSummary ?? "").trim() || formatDeliveryItemsSummary(normalizedItems);
   const createTicketFn = deps.createTicket ?? createChamadoWithActivity;
   const ticketTitle =
     input.title?.trim() ||
-    `Pedido Delivery — ${input.customerName.trim()} (${input.orderSource})`;
+    `Pedido Delivery — ${input.customerName.trim()} (${ORDER_SOURCE_LABEL[input.orderSource]})`;
   const obsParts = [
     input.observations?.trim(),
-    input.itemsSummary ? `Itens: ${input.itemsSummary.trim()}` : "",
+    summary ? `Itens: ${summary}` : "",
     `Endereço: ${input.deliveryAddress.trim()}${input.addressComplement ? ` (${input.addressComplement.trim()})` : ""}`,
     `Pagamento: ${input.paymentMethod.trim()}`,
   ].filter(Boolean);
@@ -430,8 +951,11 @@ export async function createRestaurantOrderWithTicket(
     {
       clientId: input.clientId,
       ticketId: ticket.id,
+      ticketNumber: ticket.number,
+      customerId: input.customerId,
       orderSource: input.orderSource,
-      itemsSummary: input.itemsSummary,
+      items: normalizedItems,
+      itemsSummary: summary,
       orderTotal: input.orderTotal,
       deliveryFee: input.deliveryFee,
       paymentMethod: input.paymentMethod,
@@ -442,6 +966,8 @@ export async function createRestaurantOrderWithTicket(
       addressComplement: input.addressComplement,
       destinationLat: input.destinationLat,
       destinationLng: input.destinationLng,
+      actorUserId: input.actor.userId,
+      actorUserName: input.actor.userName,
     },
     { pool }
   );
@@ -471,6 +997,8 @@ export async function assignMotoboyToOrder(
     motoboyUserId: string | null;
     routeSequence?: number;
     deliveryFee?: number;
+    actorUserId?: string | null;
+    actorUserName?: string | null;
   },
   pool: NicheQueryExecutor = getPool()
 ): Promise<DeliveryOrderRecord> {
@@ -495,6 +1023,9 @@ export async function assignMotoboyToOrder(
         ? "Pronto p/ Motoboy"
         : "Novo Pedido";
 
+  const nextSeq = Math.max(1, Number(input.routeSequence ?? existing.routeSequence));
+  const nextFee = input.deliveryFee !== undefined ? Number(input.deliveryFee) : existing.deliveryFee;
+
   await pool.execute(
     `UPDATE megadesk_delivery_orders
      SET motoboy_user_id = ?,
@@ -505,8 +1036,8 @@ export async function assignMotoboyToOrder(
      WHERE client_id = ? AND ticket_id = ?`,
     [
       input.motoboyUserId,
-      Math.max(1, Number(input.routeSequence ?? existing.routeSequence)),
-      input.deliveryFee !== undefined ? Number(input.deliveryFee) : existing.deliveryFee,
+      nextSeq,
+      nextFee,
       nextStatus,
       nextStage,
       input.clientId,
@@ -521,6 +1052,109 @@ export async function assignMotoboyToOrder(
     ).catch(() => {});
   }
 
+  let motoboyName: string | null = null;
+  if (input.motoboyUserId) {
+    try {
+      const [uRows] = (await pool.execute(
+        "SELECT name FROM megadesk_domain_client_users WHERE client_id = ? AND user_id = ? LIMIT 1",
+        [input.clientId, input.motoboyUserId]
+      )) as any[];
+      motoboyName = uRows?.[0]?.name ? String(uRows[0].name) : null;
+    } catch {}
+  }
+
+  const feeStr = `R$ ${nextFee.toFixed(2).replace(".", ",")}`;
+  await recordDeliveryTicketActivity(pool, {
+    clientId: input.clientId,
+    ticketId: input.ticketId,
+    actorUserId: input.actorUserId || "system",
+    actorUserName: input.actorUserName || "Operador",
+    actionType: "status_changed",
+    description: input.motoboyUserId
+      ? `Motoboy ${motoboyName || input.motoboyUserId} atribuído à entrega (Fila #${nextSeq}, taxa ${feeStr}) • Status atualizado para ${nextStage}.`
+      : `Atribuição de motoboy removida • Status atualizado para ${nextStage}.`,
+    metadata: {
+      eventType: "delivery_motoboy_assigned",
+      motoboyUserId: input.motoboyUserId,
+      motoboyName,
+      routeSequence: nextSeq,
+      deliveryFee: nextFee,
+      stageLabel: nextStage,
+    },
+  });
+
+  const updated = await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool);
+  return updated!;
+}
+
+/**
+ * Motoboy aceita a corrida na fila mobile -> atualiza status automaticamente para `Pronto p/ Motoboy`
+ * e grava evento no Histórico do Ticket.
+ */
+export async function acceptDeliveryOrder(
+  input: {
+    clientId: string;
+    ticketId: string;
+    motoboyUserId: string;
+    actorUserName?: string | null;
+    isAdmin?: boolean;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<DeliveryOrderRecord> {
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const existing = await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool);
+  if (!existing) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Pedido de delivery não encontrado para este ticket." });
+  }
+  if (existing.deliveryStatus === "delivered" || existing.deliveryStatus === "canceled") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Este pedido já foi finalizado ou cancelado." });
+  }
+  if (!input.isAdmin && existing.motoboyUserId && existing.motoboyUserId !== input.motoboyUserId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Esta corrida já está atribuída a outro motoboy.",
+    });
+  }
+
+  const nextStatus: DeliveryOrderStatus =
+    existing.deliveryStatus === "in_route" ? "in_route" : "assigned";
+  const nextStage =
+    existing.deliveryStatus === "in_route" ? "Em Rota com Motoboy" : "Pronto p/ Motoboy";
+
+  await pool.execute(
+    `UPDATE megadesk_delivery_orders
+     SET motoboy_user_id = ?,
+         delivery_status = ?,
+         stage_label = ?,
+         accepted_at = COALESCE(accepted_at, NOW())
+     WHERE client_id = ? AND ticket_id = ?`,
+    [input.motoboyUserId, nextStatus, nextStage, input.clientId, input.ticketId]
+  );
+
+  if (nextStatus === "assigned") {
+    await pool.execute(
+      "UPDATE megadesk_domain_chamados SET status = 'waiting', updatedAt = NOW() WHERE clientId = ? AND chamadoId = ?",
+      [input.clientId, input.ticketId]
+    ).catch(() => {});
+  }
+
+  const motoboyLabel = input.actorUserName || "Motoboy";
+  await recordDeliveryTicketActivity(pool, {
+    clientId: input.clientId,
+    ticketId: input.ticketId,
+    actorUserId: input.motoboyUserId,
+    actorUserName: motoboyLabel,
+    actionType: "status_changed",
+    description: `${motoboyLabel} aceitou a corrida de entrega • Status atualizado automaticamente para ${nextStage}.`,
+    metadata: {
+      eventType: "delivery_accepted",
+      motoboyUserId: input.motoboyUserId,
+      stageLabel: nextStage,
+    },
+  });
+
   const updated = await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool);
   return updated!;
 }
@@ -530,6 +1164,8 @@ export async function updateDeliveryStage(
     clientId: string;
     ticketId: string;
     stageLabel: RestaurantStageLabel;
+    actorUserId?: string | null;
+    actorUserName?: string | null;
   },
   pool: NicheQueryExecutor = getPool()
 ): Promise<DeliveryOrderRecord> {
@@ -580,6 +1216,33 @@ export async function updateDeliveryStage(
     "UPDATE megadesk_domain_chamados SET status = ?, updatedAt = NOW() WHERE clientId = ? AND chamadoId = ?",
     [ticketStatus, input.clientId, input.ticketId]
   ).catch(() => {});
+
+  if (deliveryStatus === "delivered") {
+    await updateErpSaleStatusForDelivery(
+      {
+        clientId: input.clientId,
+        erpSalePublicId: existing.erpSalePublicId,
+        targetStatus: "completed",
+        actorUserId: input.actorUserId,
+      },
+      pool
+    );
+  }
+
+  await recordDeliveryTicketActivity(pool, {
+    clientId: input.clientId,
+    ticketId: input.ticketId,
+    actorUserId: input.actorUserId || "system",
+    actorUserName: input.actorUserName || "Operador",
+    actionType: "status_changed",
+    description: `Etapa do delivery alterada de "${existing.stageLabel}" para "${input.stageLabel}".`,
+    metadata: {
+      eventType: "delivery_stage_changed",
+      fromStage: existing.stageLabel,
+      toStage: input.stageLabel,
+      toTicketStatus: ticketStatus,
+    },
+  });
 
   const updated = await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool);
   return updated!;
@@ -651,21 +1314,6 @@ export async function startDeliveryRoute(
     [input.clientId, input.ticketId]
   );
 
-  await pool.execute(
-    `INSERT INTO megadesk_domain_chamado_activities
-     (activity_id, chamado_id, client_id, user_id, user_name, action_type, description, metadata_json, created_at)
-     VALUES (?, ?, ?, ?, ?, 'status_changed', ?, ?, NOW())`,
-    [
-      `act-${randomUUID()}`,
-      input.ticketId,
-      input.clientId,
-      input.actorUserId || order.motoboyUserId || "system",
-      input.actorUserName || "Motoboy",
-      "Status alterado para Em Rota com Motoboy — notificação de rastreio enviada ao cliente.",
-      JSON.stringify({ eventType: "delivery_route_started", stageLabel: "Em Rota com Motoboy" }),
-    ]
-  ).catch(() => {});
-
   const updated = (await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool))!;
   const trackingUrl = updated.trackingUrl;
   const whatsappMessage = buildStartRouteWhatsAppMessage(trackingUrl, updated.deliveryCode);
@@ -691,6 +1339,23 @@ export async function startDeliveryRoute(
     whatsappError = err?.message || "Falha ao enviar notificação via WhatsApp.";
     console.warn("[DeliveryService] Falha no disparo WhatsApp de início de rota:", whatsappError);
   }
+
+  const actorLabel = input.actorUserName || "Motoboy";
+  await recordDeliveryTicketActivity(pool, {
+    clientId: input.clientId,
+    ticketId: input.ticketId,
+    actorUserId: input.actorUserId || order.motoboyUserId || "system",
+    actorUserName: actorLabel,
+    actionType: "status_changed",
+    description: whatsappSent
+      ? `${actorLabel} iniciou a rota (Em Rota com Motoboy) • Link de rastreio e código de 4 dígitos enviados com sucesso no WhatsApp do cliente.`
+      : `${actorLabel} iniciou a rota (Em Rota com Motoboy) • Aviso: disparo no WhatsApp não concluído (${whatsappError || "instância desconectada"}).`,
+    metadata: {
+      eventType: "delivery_route_started",
+      stageLabel: "Em Rota com Motoboy",
+      whatsappSent,
+    },
+  });
 
   return {
     ok: true,
@@ -953,20 +1618,30 @@ export async function completeDeliveryOrder(
     [input.clientId, input.ticketId]
   );
 
-  await pool.execute(
-    `INSERT INTO megadesk_domain_chamado_activities
-     (activity_id, chamado_id, client_id, user_id, user_name, action_type, description, metadata_json, created_at)
-     VALUES (?, ?, ?, ?, ?, 'status_changed', ?, ?, NOW())`,
-    [
-      `act-${randomUUID()}`,
-      input.ticketId,
-      input.clientId,
-      input.motoboyUserId,
-      input.actorUserName || "Motoboy",
-      "Entrega concluída (Entregue) com código de 4 dígitos validado.",
-      JSON.stringify({ eventType: "delivery_completed", stageLabel: "Entregue" }),
-    ]
-  ).catch(() => {});
+  await updateErpSaleStatusForDelivery(
+    {
+      clientId: input.clientId,
+      erpSalePublicId: order.erpSalePublicId,
+      targetStatus: "completed",
+      actorUserId: input.motoboyUserId,
+    },
+    pool
+  );
+
+  const actorLabel = input.actorUserName || "Motoboy";
+  await recordDeliveryTicketActivity(pool, {
+    clientId: input.clientId,
+    ticketId: input.ticketId,
+    actorUserId: input.motoboyUserId,
+    actorUserName: actorLabel,
+    actionType: "status_changed",
+    description: `${actorLabel} finalizou a entrega (Entregue) com código de 4 dígitos validado • Ticket encerrado${order.erpSalePublicId ? " e venda concluída no ERP > Vendas" : ""}.`,
+    metadata: {
+      eventType: "delivery_completed",
+      stageLabel: "Entregue",
+      erpSalePublicId: order.erpSalePublicId,
+    },
+  });
 
   await pool.execute(
     `UPDATE megadesk_motoboy_locations
@@ -1572,4 +2247,388 @@ export async function getPublicDeliveryTrackByToken(
       deliveredAt: null,
     },
   };
+}
+
+/**
+ * Cancela um pedido de delivery, sincronizando ticket (`closed`), ERP > Vendas (`cancelled`)
+ * e Histórico do Ticket.
+ */
+export async function cancelDeliveryOrder(
+  input: {
+    clientId: string;
+    ticketId: string;
+    reason?: string;
+    actorUserId?: string | null;
+    actorUserName?: string | null;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<DeliveryOrderRecord> {
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const existing = await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool);
+  if (!existing) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Pedido de delivery não encontrado." });
+  }
+
+  await pool.execute(
+    `UPDATE megadesk_delivery_orders
+     SET delivery_status = 'canceled',
+         stage_label = 'Cancelado',
+         tracking_expires_at = NOW()
+     WHERE client_id = ? AND ticket_id = ?`,
+    [input.clientId, input.ticketId]
+  );
+
+  await pool
+    .execute(
+      "UPDATE megadesk_domain_chamados SET status = 'closed', updatedAt = NOW() WHERE clientId = ? AND chamadoId = ?",
+      [input.clientId, input.ticketId]
+    )
+    .catch(() => {});
+
+  await updateErpSaleStatusForDelivery(
+    {
+      clientId: input.clientId,
+      erpSalePublicId: existing.erpSalePublicId,
+      targetStatus: "cancelled",
+      actorUserId: input.actorUserId,
+    },
+    pool
+  );
+
+  await recordDeliveryTicketActivity(pool, {
+    clientId: input.clientId,
+    ticketId: input.ticketId,
+    actorUserId: input.actorUserId || "system",
+    actorUserName: input.actorUserName || "Operador",
+    actionType: "status_changed",
+    description: `Pedido de delivery cancelado${input.reason ? `: ${input.reason}` : ""}${existing.erpSalePublicId ? " • Venda cancelada em ERP > Vendas." : "."}`,
+    metadata: { eventType: "delivery_canceled", reason: input.reason ?? null },
+  });
+
+  return (await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool))!;
+}
+
+/**
+ * Busca ou cria cliente no CRM (`megadesk_crm_clients`) a partir de telefone, e-mail ou CPF/CNPJ,
+ * reaproveitando nome e endereço salvos na conta quando não informados no pedido.
+ */
+export async function resolveOrCreateDeliveryCustomer(
+  input: {
+    clientId: string;
+    customerName?: string | null;
+    customerPhone?: string | null;
+    customerEmail?: string | null;
+    customerCpf?: string | null;
+    deliveryAddress?: string | null;
+    origin: "site" | "whatsapp" | "outro";
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{
+  crmClientId: string;
+  customerName: string;
+  customerPhone: string;
+  resolvedAddress: string;
+  reusedExisting: boolean;
+}> {
+  const digitsPhone = String(input.customerPhone || "").replace(/\D/g, "");
+  const cleanEmail = String(input.customerEmail || "").trim().toLowerCase();
+  const digitsCpf = String(input.customerCpf || "").replace(/\D/g, "");
+
+  let matched: any = null;
+  if (digitsPhone.length >= 8 || cleanEmail || digitsCpf.length >= 11) {
+    const clauses: string[] = [];
+    const params: unknown[] = [input.clientId];
+    if (digitsPhone.length >= 8) {
+      const tail = digitsPhone.slice(-8);
+      clauses.push(
+        "REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), '-', ''), ' ', ''), '(', ''), ')', '') LIKE ?",
+        "REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(whatsapp, ''), '-', ''), ' ', ''), '(', ''), ')', '') LIKE ?"
+      );
+      params.push(`%${tail}`, `%${tail}`);
+    }
+    if (cleanEmail) {
+      clauses.push("LOWER(COALESCE(email, '')) = ?");
+      params.push(cleanEmail);
+    }
+    if (digitsCpf.length >= 11) {
+      clauses.push(
+        "REPLACE(REPLACE(REPLACE(COALESCE(cpf_cnpj, ''), '.', ''), '-', ''), '/', '') = ?"
+      );
+      params.push(digitsCpf);
+    }
+
+    const [rows] = (await pool.execute(
+      `SELECT crm_client_id, company_name, responsible_name, phone, whatsapp, email, address, city, state, cep
+       FROM megadesk_crm_clients
+       WHERE client_id = ? AND lifecycle_state = 'active' AND (${clauses.join(" OR ")})
+       LIMIT 1`,
+      params
+    )) as any[];
+    matched = rows?.[0] ?? null;
+  }
+
+  if (matched) {
+    const savedName =
+      String(matched.company_name || "").trim() ||
+      String(matched.responsible_name || "").trim() ||
+      "Cliente";
+    const savedPhone =
+      String(matched.whatsapp || "").trim() || String(matched.phone || "").trim();
+    const savedAddressParts = [
+      String(matched.address || "").trim(),
+      String(matched.city || "").trim(),
+      String(matched.state || "").trim(),
+      String(matched.cep || "").trim(),
+    ].filter(Boolean);
+    const savedAddress = savedAddressParts.join(", ");
+
+    return {
+      crmClientId: String(matched.crm_client_id),
+      customerName: String(input.customerName || "").trim() || savedName,
+      customerPhone: String(input.customerPhone || "").trim() || savedPhone || "0000000000",
+      resolvedAddress: String(input.deliveryAddress || "").trim() || savedAddress,
+      reusedExisting: true,
+    };
+  }
+
+  const crmClientId = `crm-${randomUUID()}`;
+  const finalName = String(input.customerName || "").trim() || "Cliente Delivery";
+  const finalPhone = String(input.customerPhone || "").trim() || digitsPhone || "0000000000";
+  const finalAddress = String(input.deliveryAddress || "").trim();
+
+  await pool.execute(
+    `INSERT INTO megadesk_crm_clients (
+      crm_client_id, client_id, customer_type, company_name, responsible_name,
+      cpf_cnpj, phone, whatsapp, email, address, status, lifecycle_state, origin,
+      internal_responsible, tags, observations
+    ) VALUES (?, ?, 'person', ?, ?, ?, ?, ?, ?, ?, 'ativo', 'active', ?, '', 'delivery', '')`,
+    [
+      crmClientId,
+      input.clientId,
+      finalName,
+      finalName,
+      digitsCpf || null,
+      finalPhone,
+      finalPhone,
+      cleanEmail || null,
+      finalAddress.slice(0, 255),
+      input.origin,
+    ]
+  );
+
+  return {
+    crmClientId,
+    customerName: finalName,
+    customerPhone: finalPhone,
+    resolvedAddress: finalAddress,
+    reusedExisting: false,
+  };
+}
+
+/**
+ * Ingestão de pedido vindo do Site ou Bot IA com:
+ * 1) Auto-preenchimento de cliente existente no CRM/ERP (por telefone, e-mail ou CPF)
+ * 2) Resolução de itens contra o catálogo ERP > Produtos
+ * 3) Criação automática de Ticket + Pedido Delivery (código 4D + token /r/:token) + Venda em ERP > Vendas.
+ */
+export async function ingestExternalDeliveryOrder(
+  input: {
+    clientId: string;
+    orderSource: "site" | "whatsapp";
+    customerName?: string | null;
+    customerPhone?: string | null;
+    customerEmail?: string | null;
+    customerCpf?: string | null;
+    deliveryAddress?: string | null;
+    addressType?: DeliveryAddressType;
+    addressComplement?: string | null;
+    destinationLat?: number | null;
+    destinationLng?: number | null;
+    paymentMethod?: string;
+    deliveryFee?: number;
+    observations?: string;
+    items: Array<{
+      productPublicId?: string | null;
+      sku?: string | null;
+      name: string;
+      quantity: number;
+      unitPrice?: number;
+    }>;
+    actor?: CanonicalTicketActor;
+  },
+  deps: DeliveryDependencies = {}
+): Promise<{
+  ticket: { id: string; number: number };
+  deliveryOrder: DeliveryOrderRecord;
+  customer: { crmClientId: string; customerName: string; reusedExisting: boolean };
+}> {
+  const pool = deps.pool ?? getPool();
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const customer = await resolveOrCreateDeliveryCustomer(
+    {
+      clientId: input.clientId,
+      customerName: input.customerName,
+      customerPhone: input.customerPhone,
+      customerEmail: input.customerEmail,
+      customerCpf: input.customerCpf,
+      deliveryAddress: input.deliveryAddress,
+      origin: input.orderSource === "site" ? "site" : "whatsapp",
+    },
+    pool
+  );
+
+  if (!customer.resolvedAddress || customer.resolvedAddress.length < 3) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Endereço de entrega não informado e não encontrado no cadastro do cliente.",
+    });
+  }
+
+  // Resolve preços e productPublicId a partir do catálogo ERP > Produtos
+  const catalog = await getRestaurantMenuCatalog(input.clientId, undefined, pool).catch(() => []);
+  const resolvedItems: DeliveryOrderItem[] = [];
+  for (const raw of input.items || []) {
+    const matchedProd = catalog.find(
+      (p) =>
+        (raw.productPublicId && p.id === raw.productPublicId) ||
+        (raw.sku && p.sku.toLowerCase() === raw.sku.trim().toLowerCase()) ||
+        p.name.toLowerCase() === raw.name.trim().toLowerCase()
+    );
+    const qty = Math.max(1, Number(raw.quantity || 1));
+    const unitPrice =
+      raw.unitPrice !== undefined && Number(raw.unitPrice) > 0
+        ? Number(raw.unitPrice)
+        : matchedProd?.price ?? 0;
+    resolvedItems.push({
+      productPublicId: matchedProd?.id ?? raw.productPublicId ?? null,
+      name: matchedProd?.name ?? raw.name.trim(),
+      quantity: qty,
+      unitPrice,
+      subtotal: Number((qty * unitPrice).toFixed(2)),
+    });
+  }
+
+  const deliveryFee = Math.max(0, Number(input.deliveryFee ?? 0));
+  const itemsSubtotal = resolvedItems.reduce((acc, i) => acc + i.subtotal, 0);
+  const orderTotal = Number((itemsSubtotal + deliveryFee).toFixed(2));
+  const itemsSummary = formatDeliveryItemsSummary(resolvedItems);
+
+  const actor: CanonicalTicketActor = input.actor ?? {
+    userId: input.orderSource === "site" ? "site-integration" : "whatsapp-bot-ai",
+    userName: input.orderSource === "site" ? "Pedido Site" : "Bot IA WhatsApp",
+  };
+
+  const created = await createRestaurantOrderWithTicket(
+    {
+      clientId: input.clientId,
+      customerId: customer.crmClientId,
+      customerName: customer.customerName,
+      customerPhone: customer.customerPhone,
+      orderSource: input.orderSource,
+      items: resolvedItems,
+      itemsSummary,
+      orderTotal,
+      deliveryFee,
+      paymentMethod: (input.paymentMethod || "A combinar").trim(),
+      deliveryAddress: customer.resolvedAddress,
+      addressType: input.addressType ?? "casa",
+      addressComplement: input.addressComplement ?? null,
+      destinationLat: input.destinationLat ?? null,
+      destinationLng: input.destinationLng ?? null,
+      observations: input.observations,
+      actor,
+    },
+    deps
+  );
+
+  return {
+    ...created,
+    customer: {
+      crmClientId: customer.crmClientId,
+      customerName: customer.customerName,
+      reusedExisting: customer.reusedExisting,
+    },
+  };
+}
+
+/**
+ * Cadastro rápido em 1 clique de novo login de Motoboy (nicho restaurante).
+ */
+export async function quickCreateTenantMotoboy(
+  input: {
+    clientId: string;
+    name: string;
+    email: string;
+    password: string;
+    phone?: string;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{ ok: true; userId: string; name: string; email: string }> {
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+
+  const cleanEmail = input.email.trim().toLowerCase();
+  const cleanName = input.name.trim();
+
+  const [clientRows] = (await pool.execute(
+    "SELECT max_users FROM megadesk_domain_clients WHERE client_id = ?",
+    [input.clientId]
+  )) as any[];
+  const maxUsers = Number(clientRows?.[0]?.max_users ?? 20);
+
+  const [countRows] = (await pool.execute(
+    "SELECT COUNT(*) AS total FROM megadesk_domain_client_users WHERE client_id = ? AND status = 'active'",
+    [input.clientId]
+  )) as any[];
+  const activeCount = Number(countRows?.[0]?.total ?? 0);
+  if (activeCount >= maxUsers) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Limite de usuários ativos atingido (${maxUsers}). Aumente o limite no plano contratado.`,
+    });
+  }
+
+  const [dupRows] = (await pool.execute(
+    "SELECT user_id FROM megadesk_domain_client_users WHERE email = ? AND client_id = ? LIMIT 1",
+    [cleanEmail, input.clientId]
+  )) as any[];
+  if ((dupRows || []).length > 0) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "Este e-mail já está cadastrado na equipe.",
+    });
+  }
+
+  const userId = `user-${randomUUID()}`;
+  const passwordHash = await bcrypt.hash(input.password, 10);
+  const permissions = ["motoboy"];
+
+  await pool.execute(
+    `INSERT INTO megadesk_domain_client_users
+      (user_id, client_id, name, email, role, status, permissions_json, password_hash)
+     VALUES (?, ?, ?, ?, 'agent', 'active', ?, ?)`,
+    [userId, input.clientId, cleanName, cleanEmail, JSON.stringify(permissions), passwordHash]
+  );
+
+  try {
+    const { syncMegaDeskUserToMemory } = await import("../../routers");
+    await syncMegaDeskUserToMemory(
+      input.clientId,
+      {
+        id: userId,
+        name: cleanName,
+        email: cleanEmail,
+        role: "agent",
+        status: "active",
+        permissions,
+        passwordHash,
+      },
+      "upsert"
+    );
+  } catch {}
+
+  return { ok: true, userId, name: cleanName, email: cleanEmail };
 }
