@@ -4,15 +4,20 @@ import { router, megadeskProcedure } from "../../_core/trpc";
 import { getActiveClientUser } from "../../db-chamados";
 import { isTenantAdminRole } from "../ai-memory/tenant-ai-memory";
 import {
+  assertMotoboyOrAdmin,
   assignMotoboyToOrder,
+  completeDeliveryOrder,
   createDeliveryOrderForTicket,
   createRestaurantOrderWithTicket,
   ensureRestaurantTicketStatuses,
   getDeliveryOrderByTicket,
+  getMotoboyHistory,
+  getMotoboyQueue,
   listTenantMotoboys,
   startDeliveryRoute,
   toggleUserMotoboyTag,
   updateDeliveryStage,
+  updateMotoboyLocation,
 } from "./delivery.service";
 
 const orderSourceSchema = z.enum(["site", "whatsapp", "manual"]);
@@ -24,6 +29,7 @@ const stageLabelSchema = z.enum([
   "Em Rota com Motoboy",
   "Entregue",
 ]);
+const historyPeriodSchema = z.enum(["today", "week", "month", "custom"]);
 
 export const deliveryRouter = router({
   getStatuses: megadeskProcedure.query(async ({ ctx }) => {
@@ -152,10 +158,105 @@ export const deliveryRouter = router({
     .input(z.object({ ticketId: z.string().min(1) }))
     .mutation(async ({ input, ctx }) => {
       const actor = await getActiveClientUser(ctx.tenantId, ctx.operationalUserId ?? "");
+      const isAdmin = isTenantAdminRole(ctx.operationalUserRole) || isTenantAdminRole(ctx.user?.role);
       return startDeliveryRoute({
         clientId: ctx.tenantId,
         ticketId: input.ticketId,
         actorUserId: actor?.userId || ctx.operationalUserId,
+        actorUserName: actor?.userName || ctx.userEmail || "Motoboy",
+        isAdmin,
+      });
+    }),
+
+  myQueue: megadeskProcedure.query(async ({ ctx }) => {
+    const auth = await assertMotoboyOrAdmin({
+      clientId: ctx.tenantId,
+      userId: ctx.operationalUserId,
+      role: ctx.operationalUserRole || ctx.user?.role,
+      permissions: ctx.operationalPermissions,
+    });
+    const orders = await getMotoboyQueue({
+      clientId: ctx.tenantId,
+      motoboyUserId: auth.userId,
+    });
+    return { orders };
+  }),
+
+  myHistory: megadeskProcedure
+    .input(
+      z
+        .object({
+          period: historyPeriodSchema.default("today"),
+          startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        })
+        .default({ period: "today" })
+    )
+    .query(async ({ input, ctx }) => {
+      const auth = await assertMotoboyOrAdmin({
+        clientId: ctx.tenantId,
+        userId: ctx.operationalUserId,
+        role: ctx.operationalUserRole || ctx.user?.role,
+        permissions: ctx.operationalPermissions,
+      });
+      return getMotoboyHistory({
+        clientId: ctx.tenantId,
+        motoboyUserId: auth.userId,
+        period: input.period,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      });
+    }),
+
+  updateMotoboyLocation: megadeskProcedure
+    .input(
+      z.object({
+        lat: z.number().min(-90).max(90),
+        lng: z.number().min(-180).max(180),
+        speed: z.number().nullable().optional(),
+        heading: z.number().nullable().optional(),
+        activeOrderId: z.string().max(64).nullable().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const auth = await assertMotoboyOrAdmin({
+        clientId: ctx.tenantId,
+        userId: ctx.operationalUserId,
+        role: ctx.operationalUserRole || ctx.user?.role,
+        permissions: ctx.operationalPermissions,
+      });
+      return updateMotoboyLocation({
+        clientId: ctx.tenantId,
+        motoboyUserId: auth.userId,
+        lat: input.lat,
+        lng: input.lng,
+        speed: input.speed ?? null,
+        heading: input.heading ?? null,
+        activeOrderId: input.activeOrderId ?? null,
+      });
+    }),
+
+  completeDelivery: megadeskProcedure
+    .input(
+      z.object({
+        ticketId: z.string().min(1),
+        deliveryCode: z.string().min(4).max(8),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const auth = await assertMotoboyOrAdmin({
+        clientId: ctx.tenantId,
+        userId: ctx.operationalUserId,
+        role: ctx.operationalUserRole || ctx.user?.role,
+        permissions: ctx.operationalPermissions,
+      });
+      const actor = await getActiveClientUser(ctx.tenantId, auth.userId);
+      return completeDeliveryOrder({
+        clientId: ctx.tenantId,
+        ticketId: input.ticketId,
+        deliveryCode: input.deliveryCode,
+        motoboyUserId: auth.userId,
+        isAdmin: auth.isAdmin,
         actorUserName: actor?.userName || ctx.userEmail || "Motoboy",
       });
     }),
@@ -185,4 +286,3 @@ export const deliveryRouter = router({
       });
     }),
 });
-

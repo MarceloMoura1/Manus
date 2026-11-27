@@ -466,7 +466,7 @@ export function resolveUserPermissions(user: MegaClient["users"][number], client
     // Filtra permissões para apenas as que correspondem a módulos ativados
     const filteredPerms = finalPerms.filter(perm => {
       // Base permissions sempre incluídas
-      if (base.includes(perm)) return true;
+      if (base.includes(perm) || perm === "motoboy") return true;
       // Permissões que correspondem a módulos ativados
       return normalizedModules.includes(perm) || (perm === "clients" && normalizedModules.includes("erp"));
     });

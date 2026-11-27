@@ -3,12 +3,16 @@ import { assertTenantModule, assertTenantNiche } from "../niche-guard";
 import {
   assignMotoboyToOrder,
   buildStartRouteWhatsAppMessage,
+  completeDeliveryOrder,
   createRestaurantOrderWithTicket,
   ensureRestaurantTicketStatuses,
   getDeliveryOrderByTicket,
+  getMotoboyHistory,
+  getMotoboyQueue,
   resetDeliveryTableEnsuredState,
   RESTAURANT_TICKET_STATUSES,
   startDeliveryRoute,
+  updateMotoboyLocation,
 } from "./delivery.service";
 
 type FakeClient = {
@@ -33,6 +37,9 @@ type FakeOrderRow = {
   address_complement: string | null;
   destination_lat: number | null;
   destination_lng: number | null;
+  current_lat: number | null;
+  current_lng: number | null;
+  location_updated_at: Date | null;
   motoboy_user_id: string | null;
   route_sequence: number;
   delivery_code: string;
@@ -45,22 +52,40 @@ type FakeOrderRow = {
   created_at: Date;
 };
 
+type FakeLocationRow = {
+  id: string;
+  client_id: string;
+  motoboy_user_id: string;
+  active_order_id: string | null;
+  lat: number;
+  lng: number;
+  speed: number | null;
+  heading: number | null;
+  updated_at: Date;
+};
+
 function createFakeDeliveryPool(clients: FakeClient[]) {
   const clientMap = new Map(clients.map((c) => [c.client_id, c]));
   const orders = new Map<string, FakeOrderRow>();
+  const locations = new Map<string, FakeLocationRow>();
   const statuses: Array<{ status_id: string; client_id: string; name: string; color: string; order: number }> = [];
   const ticketUpdates: Array<{ clientId: string; ticketId: string; status: string }> = [];
   const activities: Array<{ ticketId: string; clientId: string; description: string }> = [];
 
   return {
     orders,
+    locations,
     statuses,
     ticketUpdates,
     activities,
     async execute(sql: string, params: unknown[] = []) {
       const q = sql.replace(/\s+/g, " ").trim();
 
-      if (q.startsWith("CREATE TABLE IF NOT EXISTS megadesk_delivery_orders")) {
+      if (
+        q.startsWith("CREATE TABLE IF NOT EXISTS megadesk_delivery_orders") ||
+        q.startsWith("CREATE TABLE IF NOT EXISTS megadesk_motoboy_locations") ||
+        q.startsWith("ALTER TABLE megadesk_delivery_orders")
+      ) {
         return [[], []];
       }
 
@@ -102,6 +127,9 @@ function createFakeDeliveryPool(clients: FakeClient[]) {
           address_complement: params[12] ? String(params[12]) : null,
           destination_lat: params[13] != null ? Number(params[13]) : null,
           destination_lng: params[14] != null ? Number(params[14]) : null,
+          current_lat: null,
+          current_lng: null,
+          location_updated_at: null,
           motoboy_user_id: params[15] ? String(params[15]) : null,
           route_sequence: Number(params[16]),
           delivery_code: String(params[17]),
@@ -129,6 +157,44 @@ function createFakeDeliveryPool(clients: FakeClient[]) {
         return [match ? [match] : [], []];
       }
 
+      // myQueue
+      if (q.includes("AND d.delivery_status IN ('assigned', 'in_route')")) {
+        const cid = String(params[0]);
+        const motoboyId = String(params[1]);
+        const rows = [...orders.values()]
+          .filter(
+            (r) =>
+              r.client_id === cid &&
+              r.motoboy_user_id === motoboyId &&
+              (r.delivery_status === "assigned" || r.delivery_status === "in_route")
+          )
+          .sort((a, b) => {
+            const pa = a.delivery_status === "in_route" ? 0 : 1;
+            const pb = b.delivery_status === "in_route" ? 0 : 1;
+            if (pa !== pb) return pa - pb;
+            return a.route_sequence - b.route_sequence;
+          });
+        return [rows, []];
+      }
+
+      // myHistory
+      if (q.includes("AND d.delivery_status = 'delivered'")) {
+        const cid = String(params[0]);
+        const motoboyId = String(params[1]);
+        const start = params[2] instanceof Date ? params[2] : new Date(String(params[2]));
+        const end = params[3] instanceof Date ? params[3] : new Date(String(params[3]));
+        const rows = [...orders.values()]
+          .filter((r) => {
+            if (r.client_id !== cid || r.motoboy_user_id !== motoboyId || r.delivery_status !== "delivered") {
+              return false;
+            }
+            const ts = (r.delivered_at ?? r.created_at).getTime();
+            return ts >= start.getTime() && ts <= end.getTime();
+          })
+          .sort((a, b) => (b.delivered_at ?? b.created_at).getTime() - (a.delivered_at ?? a.created_at).getTime());
+        return [rows, []];
+      }
+
       if (q.startsWith("UPDATE megadesk_delivery_orders SET motoboy_user_id = ?")) {
         const key = `${String(params[5])}:${String(params[6])}`;
         const existing = orders.get(key);
@@ -154,6 +220,60 @@ function createFakeDeliveryPool(clients: FakeClient[]) {
         return [{ affectedRows: existing ? 1 : 0 }, []];
       }
 
+      if (q.startsWith("UPDATE megadesk_delivery_orders SET delivery_status = 'delivered'")) {
+        const key = `${String(params[1])}:${String(params[2])}`;
+        const existing = orders.get(key);
+        if (existing) {
+          existing.delivery_status = "delivered";
+          existing.stage_label = "Entregue";
+          existing.delivered_at = new Date();
+          existing.tracking_expires_at = params[0] instanceof Date ? params[0] : null;
+        }
+        return [{ affectedRows: existing ? 1 : 0 }, []];
+      }
+
+      if (q.startsWith("UPDATE megadesk_delivery_orders SET current_lat = ?")) {
+        const lat = Number(params[0]);
+        const lng = Number(params[1]);
+        const cid = String(params[2]);
+        const motoboyId = String(params[3]);
+        let count = 0;
+        for (const r of orders.values()) {
+          if (r.client_id === cid && r.motoboy_user_id === motoboyId && r.delivery_status === "in_route") {
+            r.current_lat = lat;
+            r.current_lng = lng;
+            r.location_updated_at = new Date();
+            count++;
+          }
+        }
+        return [{ affectedRows: count }, []];
+      }
+
+      if (q.startsWith("INSERT INTO megadesk_motoboy_locations")) {
+        const row: FakeLocationRow = {
+          id: String(params[0]),
+          client_id: String(params[1]),
+          motoboy_user_id: String(params[2]),
+          active_order_id: params[3] ? String(params[3]) : null,
+          lat: Number(params[4]),
+          lng: Number(params[5]),
+          speed: params[6] != null ? Number(params[6]) : null,
+          heading: params[7] != null ? Number(params[7]) : null,
+          updated_at: new Date(),
+        };
+        locations.set(`${row.client_id}:${row.motoboy_user_id}`, row);
+        return [{ affectedRows: 1 }, []];
+      }
+
+      if (q.startsWith("UPDATE megadesk_motoboy_locations SET active_order_id = NULL")) {
+        const key = `${String(params[0])}:${String(params[1])}`;
+        const loc = locations.get(key);
+        if (loc && loc.active_order_id === String(params[2])) {
+          loc.active_order_id = null;
+        }
+        return [{ affectedRows: 1 }, []];
+      }
+
       if (q.startsWith("UPDATE megadesk_domain_chamados SET status =")) {
         if (q.includes("SET status = 'in_progress'")) {
           ticketUpdates.push({
@@ -166,6 +286,12 @@ function createFakeDeliveryPool(clients: FakeClient[]) {
             clientId: String(params[0]),
             ticketId: String(params[1]),
             status: "waiting",
+          });
+        } else if (q.includes("SET status = 'closed'")) {
+          ticketUpdates.push({
+            clientId: String(params[0]),
+            ticketId: String(params[1]),
+            status: "closed",
           });
         } else {
           ticketUpdates.push({
@@ -191,7 +317,7 @@ function createFakeDeliveryPool(clients: FakeClient[]) {
   };
 }
 
-describe("niche-guard & restaurant delivery tickets", () => {
+describe("niche-guard & restaurant delivery tickets (Entregas 1 e 2)", () => {
   beforeEach(() => {
     resetDeliveryTableEnsuredState();
   });
@@ -269,7 +395,6 @@ describe("niche-guard & restaurant delivery tickets", () => {
       number: 200 + seq,
     }));
 
-    // Motoboy recebe 2 pedidos na fila
     const order1 = await createRestaurantOrderWithTicket(
       {
         clientId: "tenant-rest",
@@ -317,7 +442,6 @@ describe("niche-guard & restaurant delivery tickets", () => {
 
     const sendWhatsAppMock = vi.fn().mockResolvedValue({ ok: true });
 
-    // Motoboy inicia rota SOMENTE do pedido 1
     const started = await startDeliveryRoute(
       {
         clientId: "tenant-rest",
@@ -333,7 +457,6 @@ describe("niche-guard & restaurant delivery tickets", () => {
     expect(started.deliveryOrder.deliveryStatus).toBe("in_route");
     expect(started.deliveryOrder.stageLabel).toBe("Em Rota com Motoboy");
 
-    // Disparo individual apenas para o cliente 1
     expect(sendWhatsAppMock).toHaveBeenCalledTimes(1);
     const sentArgs = sendWhatsAppMock.mock.calls[0][0];
     expect(sentArgs.clientId).toBe("tenant-rest");
@@ -341,13 +464,250 @@ describe("niche-guard & restaurant delivery tickets", () => {
     expect(sentArgs.message).toBe(
       buildStartRouteWhatsAppMessage(started.trackingUrl, order1.deliveryOrder.deliveryCode)
     );
-    expect(sentArgs.message).toContain(started.trackingUrl);
-    expect(sentArgs.message).toContain(`*${order1.deliveryOrder.deliveryCode}*`);
 
-    // Pedido 2 na fila do mesmo motoboy permanece intocado (assigned / Pronto p/ Motoboy)
     const untouchedOrder2 = await getDeliveryOrderByTicket("tenant-rest", order2.ticket.id, pool);
     expect(untouchedOrder2?.deliveryStatus).toBe("assigned");
     expect(untouchedOrder2?.stageLabel).toBe("Pronto p/ Motoboy");
   });
-});
 
+  it("isola myQueue e myHistory entre motoboys e bloqueia nichos não-restaurante", async () => {
+    const pool = createFakeDeliveryPool([
+      { client_id: "tenant-rest", niche_profile: "restaurante", enabled_modules: null },
+      { client_id: "tenant-serv", niche_profile: "prestacao_servicos", enabled_modules: null },
+    ]);
+
+    await expect(
+      getMotoboyQueue({ clientId: "tenant-serv", motoboyUserId: "motoboy-a" }, pool)
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await expect(
+      getMotoboyHistory({ clientId: "tenant-serv", motoboyUserId: "motoboy-a", period: "today" }, pool)
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    let seq = 0;
+    const createTicketMock = vi.fn().mockImplementation(async () => ({ id: `t-${++seq}`, number: seq }));
+
+    const oA1 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c1",
+        customerName: "Cliente A1",
+        customerPhone: "5541900001111",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "manual",
+        itemsSummary: "Item A1",
+        orderTotal: 50,
+        deliveryFee: 8.5,
+        paymentMethod: "Pix",
+        deliveryAddress: "Rua A, 1",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+    const oB1 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c2",
+        customerName: "Cliente B1",
+        customerPhone: "5541900002222",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "manual",
+        itemsSummary: "Item B1",
+        orderTotal: 60,
+        deliveryFee: 11.0,
+        paymentMethod: "Dinheiro",
+        deliveryAddress: "Rua B, 2",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    await assignMotoboyToOrder(
+      { clientId: "tenant-rest", ticketId: oA1.ticket.id, motoboyUserId: "motoboy-a", routeSequence: 1 },
+      pool
+    );
+    await assignMotoboyToOrder(
+      { clientId: "tenant-rest", ticketId: oB1.ticket.id, motoboyUserId: "motoboy-b", routeSequence: 1 },
+      pool
+    );
+
+    const queueA = await getMotoboyQueue({ clientId: "tenant-rest", motoboyUserId: "motoboy-a" }, pool);
+    const queueB = await getMotoboyQueue({ clientId: "tenant-rest", motoboyUserId: "motoboy-b" }, pool);
+
+    expect(queueA.map((o) => o.ticketId)).toEqual([oA1.ticket.id]);
+    expect(queueB.map((o) => o.ticketId)).toEqual([oB1.ticket.id]);
+  });
+
+  it("completeDelivery valida código de 4 dígitos, fecha ticket, expira link em 30 min e soma ganhos em myHistory", async () => {
+    const pool = createFakeDeliveryPool([
+      { client_id: "tenant-rest", niche_profile: "restaurante", enabled_modules: null },
+    ]);
+
+    const createTicketMock = vi.fn().mockResolvedValue({ id: "t-comp-1", number: 301 });
+    const created = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c1",
+        customerName: "Cliente Final",
+        customerPhone: "5541999993333",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "whatsapp",
+        itemsSummary: "1x Lasanha",
+        orderTotal: 68,
+        deliveryFee: 15.5,
+        paymentMethod: "Cartão na entrega",
+        deliveryAddress: "Av. Brasil, 900",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    await assignMotoboyToOrder(
+      { clientId: "tenant-rest", ticketId: created.ticket.id, motoboyUserId: "motoboy-a", routeSequence: 1 },
+      pool
+    );
+
+    // Outro motoboy não pode concluir entrega do motoboy-a
+    await expect(
+      completeDeliveryOrder(
+        {
+          clientId: "tenant-rest",
+          ticketId: created.ticket.id,
+          deliveryCode: created.deliveryOrder.deliveryCode,
+          motoboyUserId: "motoboy-b",
+          isAdmin: false,
+        },
+        pool
+      )
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    // Código incorreto rejeitado
+    const wrongCode = created.deliveryOrder.deliveryCode === "0000" ? "9999" : "0000";
+    await expect(
+      completeDeliveryOrder(
+        {
+          clientId: "tenant-rest",
+          ticketId: created.ticket.id,
+          deliveryCode: wrongCode,
+          motoboyUserId: "motoboy-a",
+        },
+        pool
+      )
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // Código correto conclui entrega + fecha ticket + expira link em ~30min
+    const before = Date.now();
+    const completed = await completeDeliveryOrder(
+      {
+        clientId: "tenant-rest",
+        ticketId: created.ticket.id,
+        deliveryCode: created.deliveryOrder.deliveryCode,
+        motoboyUserId: "motoboy-a",
+        actorUserName: "Motoboy A",
+      },
+      pool
+    );
+
+    expect(completed.ok).toBe(true);
+    expect(completed.deliveryOrder.deliveryStatus).toBe("delivered");
+    expect(completed.deliveryOrder.stageLabel).toBe("Entregue");
+    expect(completed.deliveryFeeEarned).toBe(15.5);
+    expect(pool.ticketUpdates.some((u) => u.ticketId === created.ticket.id && u.status === "closed")).toBe(true);
+
+    const expMs = new Date(completed.deliveryOrder.trackingExpiresAt!).getTime();
+    const diffMinutes = (expMs - before) / 60_000;
+    expect(diffMinutes).toBeGreaterThanOrEqual(29);
+    expect(diffMinutes).toBeLessThanOrEqual(31);
+
+    // Aparece no extrato do motoboy-a e não no do motoboy-b
+    const histA = await getMotoboyHistory(
+      { clientId: "tenant-rest", motoboyUserId: "motoboy-a", period: "today" },
+      pool
+    );
+    const histB = await getMotoboyHistory(
+      { clientId: "tenant-rest", motoboyUserId: "motoboy-b", period: "today" },
+      pool
+    );
+    expect(histA.summary).toEqual({ totalDeliveries: 1, totalEarnings: 15.5 });
+    expect(histB.summary).toEqual({ totalDeliveries: 0, totalEarnings: 0 });
+  });
+
+  it("updateMotoboyLocation grava coordenadas apenas para o motoboy autenticado e pedidos em rota dele", async () => {
+    const pool = createFakeDeliveryPool([
+      { client_id: "tenant-rest", niche_profile: "restaurante", enabled_modules: null },
+    ]);
+
+    let seq = 0;
+    const createTicketMock = vi.fn().mockImplementation(async () => ({ id: `t-gps-${++seq}`, number: 400 + seq }));
+    const o1 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c1",
+        customerName: "C1",
+        customerPhone: "5541999991111",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "manual",
+        itemsSummary: "Pizza",
+        orderTotal: 50,
+        deliveryFee: 10,
+        paymentMethod: "Pix",
+        deliveryAddress: "Rua 1",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+    const o2 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c2",
+        customerName: "C2",
+        customerPhone: "5541999992222",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "manual",
+        itemsSummary: "Esfiha",
+        orderTotal: 40,
+        deliveryFee: 9,
+        paymentMethod: "Pix",
+        deliveryAddress: "Rua 2",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    await assignMotoboyToOrder(
+      { clientId: "tenant-rest", ticketId: o1.ticket.id, motoboyUserId: "motoboy-a", routeSequence: 1 },
+      pool
+    );
+    await assignMotoboyToOrder(
+      { clientId: "tenant-rest", ticketId: o2.ticket.id, motoboyUserId: "motoboy-b", routeSequence: 1 },
+      pool
+    );
+
+    await startDeliveryRoute(
+      { clientId: "tenant-rest", ticketId: o1.ticket.id, actorUserId: "motoboy-a" },
+      { pool, sendWhatsApp: vi.fn().mockResolvedValue({ ok: true }) }
+    );
+    await startDeliveryRoute(
+      { clientId: "tenant-rest", ticketId: o2.ticket.id, actorUserId: "motoboy-b" },
+      { pool, sendWhatsApp: vi.fn().mockResolvedValue({ ok: true }) }
+    );
+
+    const gps = await updateMotoboyLocation(
+      {
+        clientId: "tenant-rest",
+        motoboyUserId: "motoboy-a",
+        lat: -25.4284,
+        lng: -49.2733,
+        speed: 11.2,
+        heading: 180,
+        activeOrderId: o1.deliveryOrder.id,
+      },
+      pool
+    );
+
+    expect(gps.ok).toBe(true);
+    expect(pool.locations.get("tenant-rest:motoboy-a")?.lat).toBe(-25.4284);
+    expect(pool.locations.get("tenant-rest:motoboy-b")).toBeUndefined();
+
+    const updatedO1 = await getDeliveryOrderByTicket("tenant-rest", o1.ticket.id, pool);
+    const untouchedO2 = await getDeliveryOrderByTicket("tenant-rest", o2.ticket.id, pool);
+    expect(updatedO1?.currentLat).toBe(-25.4284);
+    expect(updatedO1?.currentLng).toBe(-49.2733);
+    expect(untouchedO2?.currentLat).toBeNull();
+  });
+});

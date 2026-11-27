@@ -5,11 +5,13 @@ import { getPool } from "../../db";
 import { createChamadoWithActivity, type CanonicalTicketActor } from "../../chamados-domain";
 import { evoSendText } from "../../evolution/client";
 import { instanceNameFor } from "../../evolution/session-store";
+import { isTenantAdminRole } from "../ai-memory/tenant-ai-memory";
 import { assertTenantNiche, type NicheQueryExecutor } from "../niche-guard";
 
 export type DeliveryOrderSource = "site" | "whatsapp" | "manual";
 export type DeliveryAddressType = "casa" | "apartamento" | "comercial" | "outro";
 export type DeliveryOrderStatus = "pending" | "assigned" | "in_route" | "delivered" | "canceled";
+export type MotoboyHistoryPeriod = "today" | "week" | "month" | "custom";
 
 export const RESTAURANT_TICKET_STATUSES = [
   { name: "Novo Pedido", color: "#ef4444", order: 1 },
@@ -25,6 +27,7 @@ export interface DeliveryOrderRecord {
   id: string;
   clientId: string;
   ticketId: string;
+  ticketNumber?: number | null;
   orderSource: DeliveryOrderSource;
   itemsSummary: string;
   orderTotal: number;
@@ -37,6 +40,9 @@ export interface DeliveryOrderRecord {
   addressComplement: string | null;
   destinationLat: number | null;
   destinationLng: number | null;
+  currentLat: number | null;
+  currentLng: number | null;
+  locationUpdatedAt: string | null;
   motoboyUserId: string | null;
   routeSequence: number;
   deliveryCode: string;
@@ -83,6 +89,9 @@ export async function ensureDeliveryOrdersTable(
       address_complement VARCHAR(255) NULL,
       destination_lat DOUBLE NULL,
       destination_lng DOUBLE NULL,
+      current_lat DOUBLE NULL,
+      current_lng DOUBLE NULL,
+      location_updated_at DATETIME NULL,
       motoboy_user_id VARCHAR(128) NULL,
       route_sequence INT NOT NULL DEFAULT 1,
       delivery_code VARCHAR(4) NOT NULL,
@@ -99,6 +108,39 @@ export async function ensureDeliveryOrdersTable(
       INDEX idx_mdo_client_motoboy (client_id, motoboy_user_id, route_sequence)
     )
   `);
+
+  const alterMigrations = [
+    "ALTER TABLE megadesk_delivery_orders ADD COLUMN current_lat DOUBLE NULL",
+    "ALTER TABLE megadesk_delivery_orders ADD COLUMN current_lng DOUBLE NULL",
+    "ALTER TABLE megadesk_delivery_orders ADD COLUMN location_updated_at DATETIME NULL",
+  ];
+  for (const sql of alterMigrations) {
+    try {
+      await pool.execute(sql);
+    } catch (err: any) {
+      if (err?.code !== "ER_DUP_FIELDNAME") {
+        // Ignora apenas erro de coluna já existente; falhas em fakes sem suporte a ALTER também são seguras
+        if (err?.code) throw err;
+      }
+    }
+  }
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS megadesk_motoboy_locations (
+      id VARCHAR(64) PRIMARY KEY,
+      client_id VARCHAR(80) NOT NULL,
+      motoboy_user_id VARCHAR(128) NOT NULL,
+      active_order_id VARCHAR(64) NULL,
+      lat DOUBLE NOT NULL,
+      lng DOUBLE NOT NULL,
+      speed DOUBLE NULL,
+      heading DOUBLE NULL,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_mml_client_motoboy (client_id, motoboy_user_id),
+      INDEX idx_mml_client_updated (client_id, updated_at)
+    )
+  `);
+
   deliveryTableEnsured = true;
 }
 
@@ -127,6 +169,7 @@ function mapRowToDeliveryOrder(row: any): DeliveryOrderRecord {
     id: String(row.id),
     clientId: String(row.client_id),
     ticketId: String(row.ticket_id),
+    ticketNumber: row.ticket_number != null ? Number(row.ticket_number) : null,
     orderSource: (row.order_source || "manual") as DeliveryOrderSource,
     itemsSummary: String(row.items_summary ?? ""),
     orderTotal: Number(row.order_total ?? 0),
@@ -139,6 +182,9 @@ function mapRowToDeliveryOrder(row: any): DeliveryOrderRecord {
     addressComplement: row.address_complement ? String(row.address_complement) : null,
     destinationLat: row.destination_lat != null ? Number(row.destination_lat) : null,
     destinationLng: row.destination_lng != null ? Number(row.destination_lng) : null,
+    currentLat: row.current_lat != null ? Number(row.current_lat) : null,
+    currentLng: row.current_lng != null ? Number(row.current_lng) : null,
+    locationUpdatedAt: row.location_updated_at ? new Date(row.location_updated_at).toISOString() : null,
     motoboyUserId: row.motoboy_user_id ? String(row.motoboy_user_id) : null,
     routeSequence: Number(row.route_sequence ?? 1),
     deliveryCode: String(row.delivery_code),
@@ -151,6 +197,61 @@ function mapRowToDeliveryOrder(row: any): DeliveryOrderRecord {
     deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
   };
+}
+
+/**
+ * Verifica se o usuário autenticado é motoboy ou administrador do tenant.
+ */
+export async function assertMotoboyOrAdmin(
+  input: {
+    clientId: string;
+    userId?: string | null;
+    role?: string | null;
+    permissions?: readonly string[] | null;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{ isAdmin: boolean; isMotoboy: boolean; userId: string }> {
+  const isAdmin = isTenantAdminRole(input.role);
+  const perms = Array.isArray(input.permissions) ? input.permissions : [];
+  let isMotoboy =
+    String(input.role || "").trim().toLowerCase() === "motoboy" ||
+    perms.some((p) => String(p).trim().toLowerCase() === "motoboy");
+
+  const userId = String(input.userId || "").trim();
+  if (!isAdmin && !isMotoboy && userId) {
+    try {
+      const [rows] = (await pool.execute(
+        "SELECT role, permissions_json FROM megadesk_domain_client_users WHERE client_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+        [input.clientId, userId]
+      )) as any[];
+      const row = rows?.[0];
+      if (row) {
+        if (String(row.role || "").toLowerCase() === "motoboy") isMotoboy = true;
+        try {
+          const dbPerms = JSON.parse(row.permissions_json || "[]");
+          if (Array.isArray(dbPerms) && dbPerms.some((p) => String(p).toLowerCase() === "motoboy")) {
+            isMotoboy = true;
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
+  if (!isAdmin && !isMotoboy) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Acesso restrito a motoboys ou administradores deste restaurante.",
+    });
+  }
+
+  if (!userId) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "Identificador do usuário não encontrado na sessão.",
+    });
+  }
+
+  return { isAdmin, isMotoboy, userId };
 }
 
 /**
@@ -267,10 +368,6 @@ export async function createDeliveryOrderForTicket(
   return mapRowToDeliveryOrder(rows[0]);
 }
 
-/**
- * Cria automaticamente Ticket + Pedido de Delivery para tenants `restaurante`
- * (origem: site, whatsapp/Bot IA ou criação manual).
- */
 export async function createRestaurantOrderWithTicket(
   input: {
     clientId: string;
@@ -488,18 +585,13 @@ export async function updateDeliveryStage(
   return updated!;
 }
 
-/**
- * Inicia a rota de UM ÚNICO ticket específico:
- * 1. Valida isolamento de nicho (`restaurante`).
- * 2. Atualiza apenas aquele pedido para `in_route` / `Em Rota com Motoboy` e o ticket correspondente.
- * 3. Dispara mensagem automática no WhatsApp do cliente contendo o link temporário e código de 4 dígitos.
- */
 export async function startDeliveryRoute(
   input: {
     clientId: string;
     ticketId: string;
     actorUserId?: string;
     actorUserName?: string;
+    isAdmin?: boolean;
   },
   deps: DeliveryDependencies = {}
 ): Promise<{
@@ -519,6 +611,18 @@ export async function startDeliveryRoute(
     throw new TRPCError({
       code: "NOT_FOUND",
       message: "Pedido de delivery não encontrado para este ticket.",
+    });
+  }
+
+  if (
+    input.isAdmin === false &&
+    order.motoboyUserId &&
+    input.actorUserId &&
+    order.motoboyUserId !== input.actorUserId
+  ) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Esta entrega está atribuída a outro motoboy.",
     });
   }
 
@@ -595,6 +699,287 @@ export async function startDeliveryRoute(
     whatsappSent,
     whatsappMessage,
     ...(whatsappError ? { whatsappError } : {}),
+  };
+}
+
+/**
+ * Fila ativa do motoboy logado (`assigned` e `in_route`), estritamente isolada por
+ * tenant (`restaurante`) e por `motoboy_user_id`.
+ */
+export async function getMotoboyQueue(
+  input: { clientId: string; motoboyUserId: string },
+  pool: NicheQueryExecutor = getPool()
+): Promise<DeliveryOrderRecord[]> {
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const [rows] = (await pool.execute(
+    `SELECT d.*, c.chamadoNumber AS ticket_number
+     FROM megadesk_delivery_orders d
+     LEFT JOIN megadesk_domain_chamados c
+       ON c.chamadoId = d.ticket_id AND c.clientId = d.client_id
+     WHERE d.client_id = ?
+       AND d.motoboy_user_id = ?
+       AND d.delivery_status IN ('assigned', 'in_route')
+     ORDER BY CASE WHEN d.delivery_status = 'in_route' THEN 0 ELSE 1 END ASC,
+              d.route_sequence ASC,
+              d.created_at ASC`,
+    [input.clientId, input.motoboyUserId]
+  )) as any[];
+
+  return (rows || []).map(mapRowToDeliveryOrder);
+}
+
+export function resolveMotoboyHistoryRange(
+  period: MotoboyHistoryPeriod,
+  startDate?: string,
+  endDate?: string,
+  now: Date = new Date()
+): { start: Date; end: Date } {
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+
+  if (period === "custom" && startDate) {
+    const parsedStart = new Date(`${startDate}T00:00:00.000`);
+    const parsedEnd = endDate ? new Date(`${endDate}T23:59:59.999`) : new Date(end);
+    if (!Number.isNaN(parsedStart.getTime()) && !Number.isNaN(parsedEnd.getTime())) {
+      return { start: parsedStart, end: parsedEnd };
+    }
+  }
+
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+
+  if (period === "week") {
+    const day = start.getDay(); // 0=Sun..6=Sat
+    const diff = day === 0 ? 6 : day - 1; // Monday as start of week
+    start.setDate(start.getDate() - diff);
+  } else if (period === "month") {
+    start.setDate(1);
+  }
+
+  return { start, end };
+}
+
+/**
+ * Extrato de entregas concluídas e soma das taxas (`delivery_fee`) do motoboy logado.
+ */
+export async function getMotoboyHistory(
+  input: {
+    clientId: string;
+    motoboyUserId: string;
+    period: MotoboyHistoryPeriod;
+    startDate?: string;
+    endDate?: string;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{
+  items: DeliveryOrderRecord[];
+  summary: { totalDeliveries: number; totalEarnings: number };
+  period: MotoboyHistoryPeriod;
+  rangeStart: string;
+  rangeEnd: string;
+}> {
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const { start, end } = resolveMotoboyHistoryRange(input.period, input.startDate, input.endDate);
+
+  const [rows] = (await pool.execute(
+    `SELECT d.*, c.chamadoNumber AS ticket_number
+     FROM megadesk_delivery_orders d
+     LEFT JOIN megadesk_domain_chamados c
+       ON c.chamadoId = d.ticket_id AND c.clientId = d.client_id
+     WHERE d.client_id = ?
+       AND d.motoboy_user_id = ?
+       AND d.delivery_status = 'delivered'
+       AND COALESCE(d.delivered_at, d.created_at) >= ?
+       AND COALESCE(d.delivered_at, d.created_at) <= ?
+     ORDER BY COALESCE(d.delivered_at, d.created_at) DESC`,
+    [input.clientId, input.motoboyUserId, start, end]
+  )) as any[];
+
+  const items = (rows || []).map(mapRowToDeliveryOrder);
+  const totalEarnings = Number(
+    items.reduce((acc: number, item: DeliveryOrderRecord) => acc + Number(item.deliveryFee || 0), 0).toFixed(2)
+  );
+
+  return {
+    items,
+    summary: {
+      totalDeliveries: items.length,
+      totalEarnings,
+    },
+    period: input.period,
+    rangeStart: start.toISOString(),
+    rangeEnd: end.toISOString(),
+  };
+}
+
+/**
+ * Persiste telemetria GPS ao vivo do motoboy autenticado em `megadesk_motoboy_locations`
+ * e reflete a última posição nos pedidos `in_route` atribuídos a ele.
+ */
+export async function updateMotoboyLocation(
+  input: {
+    clientId: string;
+    motoboyUserId: string;
+    lat: number;
+    lng: number;
+    speed?: number | null;
+    heading?: number | null;
+    activeOrderId?: string | null;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{ ok: true; motoboyUserId: string; lat: number; lng: number; updatedAt: string }> {
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const nowIso = new Date().toISOString();
+  const locId = `loc-${randomUUID()}`;
+
+  await pool.execute(
+    `INSERT INTO megadesk_motoboy_locations (
+      id, client_id, motoboy_user_id, active_order_id, lat, lng, speed, heading
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      active_order_id = VALUES(active_order_id),
+      lat = VALUES(lat),
+      lng = VALUES(lng),
+      speed = VALUES(speed),
+      heading = VALUES(heading),
+      updated_at = CURRENT_TIMESTAMP`,
+    [
+      locId,
+      input.clientId,
+      input.motoboyUserId,
+      input.activeOrderId ?? null,
+      input.lat,
+      input.lng,
+      input.speed ?? null,
+      input.heading ?? null,
+    ]
+  );
+
+  await pool.execute(
+    `UPDATE megadesk_delivery_orders
+     SET current_lat = ?,
+         current_lng = ?,
+         location_updated_at = NOW()
+     WHERE client_id = ?
+       AND motoboy_user_id = ?
+       AND delivery_status = 'in_route'`,
+    [input.lat, input.lng, input.clientId, input.motoboyUserId]
+  );
+
+  return {
+    ok: true,
+    motoboyUserId: input.motoboyUserId,
+    lat: input.lat,
+    lng: input.lng,
+    updatedAt: nowIso,
+  };
+}
+
+/**
+ * Conclui a entrega validando o código de 4 dígitos informado pelo cliente.
+ * - Código incorreto → BAD_REQUEST.
+ * - Código correto → `delivery_status = 'delivered'`, ticket fechado (`Entregue`),
+ *   `tracking_expires_at = NOW() + 30 min`, e taxa contabilizada nos ganhos.
+ */
+export async function completeDeliveryOrder(
+  input: {
+    clientId: string;
+    ticketId: string;
+    deliveryCode: string;
+    motoboyUserId: string;
+    isAdmin?: boolean;
+    actorUserName?: string;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{
+  ok: true;
+  deliveryOrder: DeliveryOrderRecord;
+  deliveryFeeEarned: number;
+}> {
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const order = await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool);
+  if (!order) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Pedido de delivery não encontrado para este ticket.",
+    });
+  }
+
+  if (!input.isAdmin && order.motoboyUserId && order.motoboyUserId !== input.motoboyUserId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Você não pode finalizar uma entrega atribuída a outro motoboy.",
+    });
+  }
+
+  if (order.deliveryStatus === "delivered" || order.deliveryStatus === "canceled") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Esta entrega já foi finalizada ou cancelada.",
+    });
+  }
+
+  const submittedCode = String(input.deliveryCode || "").replace(/\D/g, "");
+  if (submittedCode.length !== 4 || submittedCode !== order.deliveryCode) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Código de confirmação incorreto. Confira os 4 dígitos com o cliente.",
+    });
+  }
+
+  const expiresIn30Min = new Date(Date.now() + 30 * 60 * 1000);
+  await pool.execute(
+    `UPDATE megadesk_delivery_orders
+     SET delivery_status = 'delivered',
+         stage_label = 'Entregue',
+         delivered_at = NOW(),
+         tracking_expires_at = ?
+     WHERE client_id = ? AND ticket_id = ?`,
+    [expiresIn30Min, input.clientId, input.ticketId]
+  );
+
+  await pool.execute(
+    `UPDATE megadesk_domain_chamados
+     SET status = 'closed', updatedAt = NOW()
+     WHERE clientId = ? AND chamadoId = ?`,
+    [input.clientId, input.ticketId]
+  );
+
+  await pool.execute(
+    `INSERT INTO megadesk_domain_chamado_activities
+     (activity_id, chamado_id, client_id, user_id, user_name, action_type, description, metadata_json, created_at)
+     VALUES (?, ?, ?, ?, ?, 'status_changed', ?, ?, NOW())`,
+    [
+      `act-${randomUUID()}`,
+      input.ticketId,
+      input.clientId,
+      input.motoboyUserId,
+      input.actorUserName || "Motoboy",
+      "Entrega concluída (Entregue) com código de 4 dígitos validado.",
+      JSON.stringify({ eventType: "delivery_completed", stageLabel: "Entregue" }),
+    ]
+  ).catch(() => {});
+
+  await pool.execute(
+    `UPDATE megadesk_motoboy_locations
+     SET active_order_id = NULL
+     WHERE client_id = ? AND motoboy_user_id = ? AND active_order_id = ?`,
+    [input.clientId, input.motoboyUserId, order.id]
+  ).catch(() => {});
+
+  const updated = (await getDeliveryOrderByTicket(input.clientId, input.ticketId, pool))!;
+  return {
+    ok: true,
+    deliveryOrder: updated,
+    deliveryFeeEarned: updated.deliveryFee,
   };
 }
 

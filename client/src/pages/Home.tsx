@@ -15,6 +15,7 @@ import { AIAssistant } from "./AIAssistant";
 import { AITokenUsagePage } from "./AITokenUsagePage";
 import { AdminUnifiedHub, type AdminHubSubTab } from "@/components/AdminUnifiedHub";
 import { DeliveryTicketCard } from "@/components/DeliveryTicketCard";
+import { MotoboyWorkspace } from "./MotoboyWorkspace";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
 import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorkspace";
 import { Users } from "lucide-react";
@@ -68,6 +69,7 @@ import {
   ArrowDownUp,
   ArrowUpRight,
   Bell,
+  Bike,
   Bot,
   Building2,
   Check,
@@ -102,6 +104,7 @@ import {
   Trash2,
   User,
   UserCheck,
+  Wallet,
   Zap,
   AlertCircle,
   X,
@@ -218,7 +221,19 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-services" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "crm-summary" | "crm-pipeline" | "crm-leads" | "crm-clients" | "crm-activities" | "crm-proposals" | "crm-automations" | "crm-reports" | "settings" | "bot-config" | "ai-assistant" | "ai-token-usage" | "notifications" | "whatsapp-config" | "admin-settings";
+export function isRestaurantMotoboySession(session: MegaDeskSession | null | undefined): boolean {
+  if (!session || session.nicheProfile !== "restaurante") return false;
+  const isAdmin = session.role === "admin" || session.userRole === "admin";
+  if (isAdmin) return false;
+  const perms = Array.isArray(session.permissions) ? session.permissions : [];
+  return (
+    String(session.role || "").toLowerCase() === "motoboy" ||
+    String(session.userRole || "").toLowerCase() === "motoboy" ||
+    perms.some((p) => String(p).toLowerCase() === "motoboy")
+  );
+}
+
+export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "motoboy-deliveries" | "motoboy-earnings" | "erp-summary" | "erp-clients" | "erp-products" | "erp-services" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "crm-summary" | "crm-pipeline" | "crm-leads" | "crm-clients" | "crm-activities" | "crm-proposals" | "crm-automations" | "crm-reports" | "settings" | "bot-config" | "ai-assistant" | "ai-token-usage" | "notifications" | "whatsapp-config" | "admin-settings";
 
 export function getShellWorkspaceLayout(active: RouteId) {
   if (active === "conversations") {
@@ -6017,6 +6032,8 @@ function NotificationsPage() {
 function getActiveModuleName(active: RouteId): string {
   if (active === "conversations" || active === "active-attendance") return "Atendimento";
   if (active === "tickets") return "Tickets";
+  if (active === "motoboy-deliveries") return "Minhas Entregas";
+  if (active === "motoboy-earnings") return "Minhas Corridas & Ganhos";
   if (active === "tracking") return "Rastreamento";
   if (active.startsWith("crm-")) return "CRM";
   if (active.startsWith("erp-")) return "ERP";
@@ -6266,6 +6283,19 @@ export function AuthenticatedShell({
   }, [navigateToRoute]);
 
   const enabledModules = session.enabledModules;
+  const isMotoboyMode = isRestaurantMotoboySession(session);
+
+  React.useEffect(() => {
+    if (isMotoboyMode) {
+      if (active !== "motoboy-deliveries" && active !== "motoboy-earnings") {
+        navigateToRoute("motoboy-deliveries", { replace: true });
+      }
+      return;
+    }
+    if (active === "motoboy-deliveries" || active === "motoboy-earnings") {
+      navigateToRoute("home", { replace: true });
+    }
+  }, [isMotoboyMode, active, navigateToRoute]);
 
   // Proteção e redirecionamento de rotas desabilitadas
   React.useEffect(() => {
@@ -6337,10 +6367,17 @@ export function AuthenticatedShell({
     { id: "notifications" as RouteId, label: "Notificações", icon: Bell },
   ];
 
+  const motoboyNavItems = [
+    { id: "motoboy-deliveries" as RouteId, label: "Minhas Entregas", icon: Bike },
+    { id: "motoboy-earnings" as RouteId, label: "Minhas Corridas & Ganhos", icon: Wallet },
+  ];
+
   // Itens que são sempre visíveis independente de permissões
   const alwaysVisibleItems = ["home", "settings", "help", "notifications"];
 
-  const filteredNavItems = navItems.filter(item => {
+  const filteredNavItems = isMotoboyMode
+    ? motoboyNavItems
+    : navItems.filter(item => {
     // Itens sempre visíveis
     if (alwaysVisibleItems.includes(item.id)) return true;
 
@@ -6368,8 +6405,12 @@ export function AuthenticatedShell({
   });
 
   // Separar itens em seções (Assistente IA permanece no bloco superior de módulos, logo abaixo de ERP; Configurar Bot removido da sidebar)
-  const mainNavItems = filteredNavItems.filter(item => !["settings", "admin-settings", "help", "notifications"].includes(item.id));
-  const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "help", "notifications", "whatsapp-config"].includes(item.id));
+  const mainNavItems = isMotoboyMode
+    ? motoboyNavItems
+    : filteredNavItems.filter(item => !["settings", "admin-settings", "help", "notifications"].includes(item.id));
+  const settingsNavItems = isMotoboyMode
+    ? []
+    : filteredNavItems.filter(item => ["settings", "admin-settings", "help", "notifications", "whatsapp-config"].includes(item.id));
   const canAccessClients = canAccessErpClients(session);
   const canAccessSales = session.permissions.includes("erp");
   const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-services" ? "services" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;
@@ -6620,7 +6661,17 @@ export function AuthenticatedShell({
             : shellLayout.mainContentClassName,
         )}>
           <ErrorBoundary key={active}>
-            {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} session={session} homeNavigationIntent={homeNavIntent} />}
+            {isMotoboyMode && (active === "motoboy-deliveries" || active === "motoboy-earnings") && (
+              <MotoboyWorkspace
+                activeView={active === "motoboy-earnings" ? "earnings" : "deliveries"}
+                onSwitchView={(view) =>
+                  navigateToRoute(view === "earnings" ? "motoboy-earnings" : "motoboy-deliveries")
+                }
+                userName={session.userName}
+                companyName={session.company}
+              />
+            )}
+            {!isMotoboyMode && active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} session={session} homeNavigationIntent={homeNavIntent} />}
             {active === "conversations" && <ConversationsPage
               attendanceLaunch={attendanceIntent.activeToken}
               attendancePhone={attendanceIntent.phone}
@@ -6752,13 +6803,19 @@ export function AuthenticatedShell({
         data-testid="mobile-bottom-navigation"
         className="fixed bottom-0 left-0 right-0 h-16 bg-slate-950/95 border-t border-slate-800/80 flex items-center justify-around z-40 px-2 pb-[env(safe-area-inset-bottom)] md:hidden backdrop-blur"
       >
-        {[
-          { id: "conversations" as RouteId, testId: "bottom-nav-conversations", label: "Atendimento", icon: MessageCircle, match: (r: string) => r === "conversations" || r === "active-attendance" },
-          { id: "tickets" as RouteId, testId: "bottom-nav-tickets", label: "Tickets", icon: ClipboardList, match: (r: string) => r === "tickets" },
-          { id: "crm-summary" as RouteId, testId: "bottom-nav-crm-summary", label: "CRM", icon: Users, match: (r: string) => r.startsWith("crm-") },
-          { id: "erp-summary" as RouteId, testId: "bottom-nav-erp-summary", label: "ERP", icon: PackageSearch, match: (r: string) => r.startsWith("erp-") },
-          { id: "ai-assistant" as RouteId, testId: "bottom-nav-ai-assistant", label: "IA Copilot", icon: Sparkles, match: (r: string) => r === "ai-assistant" },
-        ].map((item) => {
+        {(isMotoboyMode
+          ? [
+              { id: "motoboy-deliveries" as RouteId, testId: "bottom-nav-motoboy-deliveries", label: "Entregas", icon: Bike, match: (r: string) => r === "motoboy-deliveries" },
+              { id: "motoboy-earnings" as RouteId, testId: "bottom-nav-motoboy-earnings", label: "Ganhos", icon: Wallet, match: (r: string) => r === "motoboy-earnings" },
+            ]
+          : [
+              { id: "conversations" as RouteId, testId: "bottom-nav-conversations", label: "Atendimento", icon: MessageCircle, match: (r: string) => r === "conversations" || r === "active-attendance" },
+              { id: "tickets" as RouteId, testId: "bottom-nav-tickets", label: "Tickets", icon: ClipboardList, match: (r: string) => r === "tickets" },
+              { id: "crm-summary" as RouteId, testId: "bottom-nav-crm-summary", label: "CRM", icon: Users, match: (r: string) => r.startsWith("crm-") },
+              { id: "erp-summary" as RouteId, testId: "bottom-nav-erp-summary", label: "ERP", icon: PackageSearch, match: (r: string) => r.startsWith("erp-") },
+              { id: "ai-assistant" as RouteId, testId: "bottom-nav-ai-assistant", label: "IA Copilot", icon: Sparkles, match: (r: string) => r === "ai-assistant" },
+            ]
+        ).map((item) => {
           const isActive = item.match(active);
           const Icon = item.icon;
 
