@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assertTenantModule, assertTenantNiche } from "../niche-guard";
 import {
@@ -11,6 +13,7 @@ import {
   getDeliveryPayoutReport,
   getMotoboyHistory,
   getMotoboyQueue,
+  getPublicDeliveryTrackByToken,
   resetDeliveryTableEnsuredState,
   RESTAURANT_TICKET_STATUSES,
   startDeliveryRoute,
@@ -21,6 +24,9 @@ type FakeClient = {
   client_id: string;
   niche_profile: string;
   enabled_modules: string | null;
+  company?: string;
+  logo_url?: string | null;
+  whatsapp?: string | null;
 };
 
 type FakeOrderRow = {
@@ -97,6 +103,46 @@ function createFakeDeliveryPool(
       if (q.startsWith("SELECT niche_profile, enabled_modules FROM megadesk_domain_clients")) {
         const row = clientMap.get(String(params[0]));
         return [row ? [row] : [], []];
+      }
+
+      if (q.startsWith("SELECT company FROM megadesk_domain_clients WHERE client_id = ?")) {
+        const row = clientMap.get(String(params[0]));
+        return [row && row.company ? [{ company: row.company }] : [], []];
+      }
+
+      if (q.startsWith("SELECT company_name, logo_url, whatsapp, phone FROM megadesk_company_settings")) {
+        const row = clientMap.get(String(params[0]));
+        return [
+          row
+            ? [
+                {
+                  company_name: row.company ?? null,
+                  logo_url: row.logo_url ?? null,
+                  whatsapp: row.whatsapp ?? null,
+                  phone: null,
+                },
+              ]
+            : [],
+          [],
+        ];
+      }
+
+      if (q.startsWith("SELECT name FROM megadesk_domain_client_users WHERE client_id = ? AND user_id = ?")) {
+        const cid = String(params[0]);
+        const uid = String(params[1]);
+        const match = users.find((u) => u.client_id === cid && u.user_id === uid);
+        return [match ? [{ name: match.name }] : [], []];
+      }
+
+      if (q.startsWith("SELECT lat, lng, updated_at FROM megadesk_motoboy_locations WHERE client_id = ? AND motoboy_user_id = ?")) {
+        const loc = locations.get(`${String(params[0])}:${String(params[1])}`);
+        return [loc ? [{ lat: loc.lat, lng: loc.lng, updated_at: loc.updated_at }] : [], []];
+      }
+
+      if (q.includes("WHERE d.tracking_token = ?")) {
+        const token = String(params[0]);
+        const match = [...orders.values()].find((r) => r.tracking_token === token);
+        return [match ? [match] : [], []];
       }
 
       if (q.startsWith("SELECT user_id, name, email, role, permissions_json FROM megadesk_domain_client_users")) {
@@ -1006,5 +1052,154 @@ describe("niche-guard & restaurant delivery tickets (Entregas 1 e 2)", () => {
       averageFee: 12,
     });
     expect(mb1Report.deliveries).toHaveLength(2);
+  });
+
+  it("publicTrackByToken aplica whitelist estrita, exibe GPS apenas em in_route, oculta dados após entrega e expira após 30 min", async () => {
+    const pool = createFakeDeliveryPool(
+      [
+        {
+          client_id: "tenant-rest-secret-id",
+          niche_profile: "restaurante",
+          enabled_modules: null,
+          company: "Pizzaria Bella Napoli",
+          logo_url: "https://cdn.example.com/bella.png",
+          whatsapp: "5541999998888",
+        },
+        {
+          client_id: "tenant-ecom",
+          niche_profile: "ecommerce",
+          enabled_modules: null,
+          company: "Loja Virtual",
+        },
+      ],
+      [
+        {
+          client_id: "tenant-rest-secret-id",
+          user_id: "motoboy-secret-uid-42",
+          name: "Carlos Eduardo Sobrenome",
+          email: "carlos@bella.com",
+          role: "motoboy",
+          status: "active",
+          permissions_json: JSON.stringify(["motoboy"]),
+        },
+      ]
+    );
+
+    const createTicketMock = vi.fn().mockResolvedValue({ id: "ticket-pub-1", number: 777 });
+    const created = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest-secret-id",
+        customerId: "crm-secret-1",
+        customerName: "Cliente Privado",
+        customerPhone: "5541977776666",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "whatsapp",
+        itemsSummary: "1x Pizza Calabresa Grande, 1x Refrigerante 2L",
+        orderTotal: 89.9,
+        deliveryFee: 12.0,
+        paymentMethod: "Pix",
+        deliveryAddress: "Rua das Palmeiras, 450, Batel, CPF 123.456.789-00",
+        destinationLat: -25.441,
+        destinationLng: -49.285,
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    await assignMotoboyToOrder(
+      {
+        clientId: "tenant-rest-secret-id",
+        ticketId: created.ticket.id,
+        motoboyUserId: "motoboy-secret-uid-42",
+        routeSequence: 1,
+      },
+      pool
+    );
+
+    // 1) Antes de sair para rota (assigned): GPS deve ficar oculto, mas primeiro nome e código aparecem
+    const assignedTrack = await getPublicDeliveryTrackByToken(created.deliveryOrder.trackingToken, pool);
+    expect(assignedTrack.state).toBe("active");
+    expect(assignedTrack.restaurant?.name).toBe("Pizzaria Bella Napoli");
+    expect(assignedTrack.order?.deliveryStatus).toBe("assigned");
+    expect(assignedTrack.order?.motoboyFirstName).toBe("Carlos");
+    expect(assignedTrack.order?.motoboyLocation).toBeNull();
+    expect(assignedTrack.order?.deliveryCode).toBe(created.deliveryOrder.deliveryCode);
+
+    // 2) Em rota com GPS ativo: libera coordenadas, ETA, e ZERO vazamento de dados internos
+    await startDeliveryRoute(
+      {
+        clientId: "tenant-rest-secret-id",
+        ticketId: created.ticket.id,
+        actorUserId: "motoboy-secret-uid-42",
+      },
+      { pool, sendWhatsApp: vi.fn().mockResolvedValue({ ok: true }) }
+    );
+    await updateMotoboyLocation(
+      {
+        clientId: "tenant-rest-secret-id",
+        motoboyUserId: "motoboy-secret-uid-42",
+        lat: -25.432,
+        lng: -49.275,
+        speed: 9.5,
+        activeOrderId: created.deliveryOrder.id,
+      },
+      pool
+    );
+
+    const inRouteTrack = await getPublicDeliveryTrackByToken(created.deliveryOrder.trackingToken, pool);
+    expect(inRouteTrack.state).toBe("active");
+    expect(inRouteTrack.order?.deliveryStatus).toBe("in_route");
+    expect(inRouteTrack.order?.motoboyFirstName).toBe("Carlos");
+    expect(inRouteTrack.order?.motoboyLocation?.lat).toBe(-25.432);
+    expect(inRouteTrack.order?.motoboyLocation?.lng).toBe(-49.275);
+    expect(inRouteTrack.order?.estimatedMinutes).toBeGreaterThanOrEqual(2);
+
+    const serialized = JSON.stringify(inRouteTrack);
+    expect(serialized).not.toContain("tenant-rest-secret-id");
+    expect(serialized).not.toContain("motoboy-secret-uid-42");
+    expect(serialized).not.toContain("Sobrenome");
+    expect(serialized).not.toContain("5541977776666");
+    expect(serialized).not.toContain("123.456.789-00");
+    expect(serialized).not.toContain(created.deliveryOrder.trackingToken);
+
+    // 3) Concluída há poucos minutos: estado delivered_recent SEM GPS e SEM código de 4 dígitos
+    await completeDeliveryOrder(
+      {
+        clientId: "tenant-rest-secret-id",
+        ticketId: created.ticket.id,
+        deliveryCode: created.deliveryOrder.deliveryCode,
+        motoboyUserId: "motoboy-secret-uid-42",
+      },
+      pool
+    );
+
+    const recentDelivered = await getPublicDeliveryTrackByToken(
+      created.deliveryOrder.trackingToken,
+      pool,
+      Date.now() + 5 * 60 * 1000
+    );
+    expect(recentDelivered.state).toBe("delivered_recent");
+    expect(recentDelivered.order?.motoboyLocation).toBeNull();
+    expect(recentDelivered.order?.deliveryCode).toBeNull();
+
+    // 4) Após 31 minutos (expirado): state = expired e order = null
+    const expiredTrack = await getPublicDeliveryTrackByToken(
+      created.deliveryOrder.trackingToken,
+      pool,
+      Date.now() + 31 * 60 * 1000
+    );
+    expect(expiredTrack.state).toBe("expired");
+    expect(expiredTrack.order).toBeNull();
+
+    // 5) Token inválido/curto retorna not_found
+    const invalidTrack = await getPublicDeliveryTrackByToken("token-curto", pool);
+    expect(invalidTrack.state).toBe("not_found");
+    expect(invalidTrack.order).toBeNull();
+
+    // 6) Garantia estática: página pública /r/:token nunca menciona MegaDesk
+    const publicPageSource = readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/PublicDeliveryTrackingPage.tsx"),
+      "utf8"
+    );
+    expect(publicPageSource.toLowerCase()).not.toContain("megadesk");
   });
 });

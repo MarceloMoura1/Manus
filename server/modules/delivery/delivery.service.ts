@@ -6,7 +6,7 @@ import { createChamadoWithActivity, type CanonicalTicketActor } from "../../cham
 import { evoSendText } from "../../evolution/client";
 import { instanceNameFor } from "../../evolution/session-store";
 import { isTenantAdminRole } from "../ai-memory/tenant-ai-memory";
-import { assertTenantNiche, type NicheQueryExecutor } from "../niche-guard";
+import { assertTenantNiche, getTenantNicheContext, type NicheQueryExecutor } from "../niche-guard";
 
 export type DeliveryOrderSource = "site" | "whatsapp" | "manual";
 export type DeliveryAddressType = "casa" | "apartamento" | "comercial" | "outro";
@@ -1336,5 +1336,240 @@ export async function getDeliveryPayoutReport(
     preset: input.preset,
     rangeStart: start.toISOString(),
     rangeEnd: end.toISOString(),
+  };
+}
+
+export type PublicTrackingState = "active" | "delivered_recent" | "expired" | "not_found";
+
+export interface PublicDeliveryTrackingResponse {
+  state: PublicTrackingState;
+  restaurant: {
+    name: string;
+    logoUrl: string | null;
+    primaryColor: string;
+    whatsappPhone: string | null;
+  } | null;
+  order: {
+    ticketNumber: number | null;
+    stageLabel: string;
+    deliveryStatus: "pending" | "assigned" | "in_route" | "delivered";
+    itemsSummary: string;
+    orderTotal: number;
+    paymentMethod: string;
+    deliveryAddressMasked: string;
+    deliveryCode: string | null;
+    motoboyFirstName: string | null;
+    motoboyLocation: { lat: number; lng: number; updatedAt: string | null } | null;
+    destinationLocation: { lat: number; lng: number } | null;
+    estimatedMinutes: number | null;
+    startedAt: string | null;
+    deliveredAt: string | null;
+  } | null;
+}
+
+export function extractFirstName(fullName?: string | null): string | null {
+  const cleaned = String(fullName || "").trim();
+  if (!cleaned) return null;
+  return cleaned.split(/\s+/)[0] || null;
+}
+
+export function maskDeliveryAddress(rawAddress?: string | null): string {
+  const cleaned = String(rawAddress || "")
+    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, "") // remove eventual CPF
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "Endereço informado no pedido";
+  // Mantém apenas logradouro/número/bairro (até 2 primeiros segmentos separados por vírgula ou 90 chars)
+  const parts = cleaned.split(",").map((p) => p.trim()).filter(Boolean);
+  const compact = parts.length >= 2 ? parts.slice(0, 3).join(", ") : cleaned;
+  return compact.length > 90 ? `${compact.slice(0, 87)}...` : compact;
+}
+
+function estimateEtaMinutes(
+  from: { lat: number; lng: number } | null,
+  to: { lat: number; lng: number } | null
+): number | null {
+  if (!from || !to) return null;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(to.lat - from.lat);
+  const dLng = toRad(to.lng - from.lng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(from.lat)) * Math.cos(toRad(to.lat)) * Math.sin(dLng / 2) ** 2;
+  const km = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  if (!Number.isFinite(km)) return null;
+  // Velocidade média urbana de motoboy (~24 km/h), mínimo 2 minutos
+  return Math.max(2, Math.min(90, Math.round((km / 24) * 60)));
+}
+
+/**
+ * Endpoint público (/r/:token) com whitelist estrita de campos.
+ * NUNCA retorna client_id, motoboy_user_id, telefones de clientes, tokens ou notas internas.
+ */
+export async function getPublicDeliveryTrackByToken(
+  token: string,
+  pool: NicheQueryExecutor = getPool(),
+  nowMs: number = Date.now()
+): Promise<PublicDeliveryTrackingResponse> {
+  const normalizedToken = String(token || "").trim();
+  if (normalizedToken.length < 16 || normalizedToken.length > 64) {
+    return { state: "not_found", restaurant: null, order: null };
+  }
+
+  await ensureDeliveryOrdersTable(pool);
+
+  const [rows] = (await pool.execute(
+    `SELECT d.*, c.chamadoNumber AS ticket_number
+     FROM megadesk_delivery_orders d
+     LEFT JOIN megadesk_domain_chamados c
+       ON c.chamadoId = d.ticket_id AND c.clientId = d.client_id
+     WHERE d.tracking_token = ?
+     LIMIT 1`,
+    [normalizedToken]
+  )) as any[];
+
+  const row = rows?.[0];
+  if (!row) {
+    return { state: "not_found", restaurant: null, order: null };
+  }
+
+  const clientId = String(row.client_id);
+  const nicheCtx = await getTenantNicheContext(clientId, pool);
+  if (!nicheCtx || nicheCtx.nicheProfile !== "restaurante") {
+    return { state: "not_found", restaurant: null, order: null };
+  }
+
+  // Carrega identidade pública do Restaurante (nome, logo, WhatsApp)
+  let restaurantName = "Restaurante";
+  let logoUrl: string | null = null;
+  let whatsappPhone: string | null = null;
+  try {
+    const [clientRows] = (await pool.execute(
+      "SELECT company FROM megadesk_domain_clients WHERE client_id = ? LIMIT 1",
+      [clientId]
+    )) as any[];
+    if (clientRows?.[0]?.company?.trim()) {
+      restaurantName = String(clientRows[0].company).trim();
+    }
+  } catch {}
+  try {
+    const [settingsRows] = (await pool.execute(
+      "SELECT company_name, logo_url, whatsapp, phone FROM megadesk_company_settings WHERE client_id = ? LIMIT 1",
+      [clientId]
+    )) as any[];
+    const st = settingsRows?.[0];
+    if (st?.company_name?.trim()) restaurantName = String(st.company_name).trim();
+    if (st?.logo_url?.trim()) logoUrl = String(st.logo_url).trim();
+    if (st?.whatsapp?.trim()) whatsappPhone = String(st.whatsapp).trim();
+    else if (st?.phone?.trim()) whatsappPhone = String(st.phone).trim();
+  } catch {}
+
+  const restaurant = {
+    name: restaurantName,
+    logoUrl,
+    primaryColor: "#10b981",
+    whatsappPhone,
+  };
+
+  const deliveryStatus = String(row.delivery_status || "pending") as DeliveryOrderStatus;
+  if (deliveryStatus === "canceled") {
+    return { state: "expired", restaurant, order: null };
+  }
+
+  const expiresAtMs = row.tracking_expires_at ? new Date(row.tracking_expires_at).getTime() : null;
+  if (expiresAtMs != null && Number.isFinite(expiresAtMs) && nowMs > expiresAtMs) {
+    return { state: "expired", restaurant, order: null };
+  }
+
+  // Primeiro nome do entregador (nunca ID nem sobrenome completo)
+  let motoboyFirstName: string | null = null;
+  if (row.motoboy_user_id) {
+    try {
+      const [uRows] = (await pool.execute(
+        "SELECT name FROM megadesk_domain_client_users WHERE client_id = ? AND user_id = ? LIMIT 1",
+        [clientId, String(row.motoboy_user_id)]
+      )) as any[];
+      motoboyFirstName = extractFirstName(uRows?.[0]?.name);
+    } catch {}
+  }
+
+  // Entregue recentemente (dentro da janela de 30 min): sem GPS e sem código
+  if (deliveryStatus === "delivered") {
+    return {
+      state: "delivered_recent",
+      restaurant,
+      order: {
+        ticketNumber: row.ticket_number != null ? Number(row.ticket_number) : null,
+        stageLabel: "Entregue",
+        deliveryStatus: "delivered",
+        itemsSummary: String(row.items_summary ?? ""),
+        orderTotal: Number(row.order_total ?? 0),
+        paymentMethod: String(row.payment_method ?? ""),
+        deliveryAddressMasked: maskDeliveryAddress(row.delivery_address),
+        deliveryCode: null,
+        motoboyFirstName,
+        motoboyLocation: null,
+        destinationLocation: null,
+        estimatedMinutes: null,
+        startedAt: row.started_at ? new Date(row.started_at).toISOString() : null,
+        deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
+      },
+    };
+  }
+
+  // Pedido ativo: GPS apenas quando deliveryStatus === 'in_route'
+  let motoboyLocation: { lat: number; lng: number; updatedAt: string | null } | null = null;
+  if (deliveryStatus === "in_route") {
+    if (row.motoboy_user_id) {
+      try {
+        const [locRows] = (await pool.execute(
+          "SELECT lat, lng, updated_at FROM megadesk_motoboy_locations WHERE client_id = ? AND motoboy_user_id = ? LIMIT 1",
+          [clientId, String(row.motoboy_user_id)]
+        )) as any[];
+        const loc = locRows?.[0];
+        if (loc && loc.lat != null && loc.lng != null) {
+          motoboyLocation = {
+            lat: Number(loc.lat),
+            lng: Number(loc.lng),
+            updatedAt: loc.updated_at ? new Date(loc.updated_at).toISOString() : null,
+          };
+        }
+      } catch {}
+    }
+    if (!motoboyLocation && row.current_lat != null && row.current_lng != null) {
+      motoboyLocation = {
+        lat: Number(row.current_lat),
+        lng: Number(row.current_lng),
+        updatedAt: row.location_updated_at ? new Date(row.location_updated_at).toISOString() : null,
+      };
+    }
+  }
+
+  const destinationLocation =
+    row.destination_lat != null && row.destination_lng != null
+      ? { lat: Number(row.destination_lat), lng: Number(row.destination_lng) }
+      : null;
+
+  return {
+    state: "active",
+    restaurant,
+    order: {
+      ticketNumber: row.ticket_number != null ? Number(row.ticket_number) : null,
+      stageLabel: String(row.stage_label || "Novo Pedido"),
+      deliveryStatus: deliveryStatus as "pending" | "assigned" | "in_route",
+      itemsSummary: String(row.items_summary ?? ""),
+      orderTotal: Number(row.order_total ?? 0),
+      paymentMethod: String(row.payment_method ?? ""),
+      deliveryAddressMasked: maskDeliveryAddress(row.delivery_address),
+      deliveryCode: String(row.delivery_code),
+      motoboyFirstName,
+      motoboyLocation,
+      destinationLocation,
+      estimatedMinutes:
+        deliveryStatus === "in_route" ? estimateEtaMinutes(motoboyLocation, destinationLocation) : null,
+      startedAt: row.started_at ? new Date(row.started_at).toISOString() : null,
+      deliveredAt: null,
+    },
   };
 }

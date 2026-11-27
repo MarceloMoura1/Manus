@@ -8,6 +8,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { BotConfigPage } from "./pages/BotConfigPage";
 import { NotificationsModernPage } from "./pages/NotificationsModernPage";
 import { WhatsAppBaileysPage } from "./pages/WhatsAppBaileysPage";
+import { PublicDeliveryTrackingPage } from "./pages/PublicDeliveryTrackingPage";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -43,6 +44,15 @@ function isNotificationsRoute() {
   return pathname === "/notifications" || pathname.startsWith("/notifications/");
 }
 
+function getPublicTrackingToken(): string | null {
+  const match = window.location.pathname.match(/^\/r\/([^/?#]+)\/?$/i);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function isPublicTrackingRoute(): boolean {
+  return window.location.pathname === "/r" || window.location.pathname.startsWith("/r/");
+}
+
 function isWhatsAppBaileysRoute() {
   const pathname = window.location.pathname.toLowerCase();
   return pathname === "/whatsapp" || pathname.startsWith("/whatsapp/");
@@ -71,16 +81,35 @@ export default function App() {
     }),
   );
 
+  const publicRoute = isPublicTrackingRoute();
+  const publicToken = getPublicTrackingToken() ?? "";
+
   useEffect(() => {
-    document.title = browserBrand.title;
-  }, []);
+    if (!publicRoute) {
+      document.title = browserBrand.title;
+    }
+  }, [publicRoute]);
 
   return (
     <ThemeProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
           <ErrorBoundary>
-            {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsModernPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
+            {publicRoute ? (
+              <PublicDeliveryTrackingPage token={publicToken} />
+            ) : isAdminRoute() ? (
+              <AdminPanel />
+            ) : isBotConfigRoute() ? (
+              <BotConfigPage />
+            ) : isNotificationsRoute() ? (
+              <NotificationsModernPage />
+            ) : isWhatsAppBaileysRoute() ? (
+              <WhatsAppBaileysPage />
+            ) : isSettingsRoute() ? (
+              <SettingsPage />
+            ) : (
+              <Home />
+            )}
           </ErrorBoundary>
         </QueryClientProvider>
       </trpc.Provider>

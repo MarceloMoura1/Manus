@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { router, megadeskProcedure } from "../../_core/trpc";
+import { router, megadeskProcedure, publicProcedure } from "../../_core/trpc";
 import { getActiveClientUser } from "../../db-chamados";
 import { isTenantAdminRole } from "../ai-memory/tenant-ai-memory";
 import {
@@ -15,6 +15,7 @@ import {
   getDeliveryPayoutReport,
   getMotoboyHistory,
   getMotoboyQueue,
+  getPublicDeliveryTrackByToken,
   listTenantMotoboys,
   startDeliveryRoute,
   toggleUserMotoboyTag,
@@ -290,6 +291,12 @@ export const deliveryRouter = router({
         startDate: input.startDate,
         endDate: input.endDate,
       });
+    }),
+
+  publicTrackByToken: publicProcedure
+    .input(z.object({ token: z.string().trim().min(16).max(64) }))
+    .query(async ({ input }) => {
+      return getPublicDeliveryTrackByToken(input.token);
     }),
 
   toggleMotoboyTag: megadeskProcedure
