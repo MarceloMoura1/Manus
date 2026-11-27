@@ -1871,7 +1871,7 @@ function ConversationMessageItem({
       return (
         <div className="space-y-2">
           <ConversationMedia conversationId={selectedConvId} message={msg} fallback={<Image className="w-5 h-5" />} />
-          {msgText && !/^\[imagem\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
+          {msgText && !/^\[imagem\]$/i.test(msgText) && <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">{msgText}</p>}
         </div>
       );
     }
@@ -1884,7 +1884,7 @@ function ConversationMessageItem({
       return (
         <div className="space-y-2">
           <ConversationMedia conversationId={selectedConvId} message={msg} fallback={<Video className="w-5 h-5" />} />
-          {msgText && !/^\[vídeo\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
+          {msgText && !/^\[vídeo\]$/i.test(msgText) && <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">{msgText}</p>}
         </div>
       );
     }
@@ -1892,7 +1892,7 @@ function ConversationMessageItem({
       return (
         <div className="space-y-2">
           <ConversationMedia conversationId={selectedConvId} message={msg} caption={msgText} fallback={<div className="flex items-center gap-2"><FileText className="w-4 h-4 flex-shrink-0" /><span className="text-sm">Documento indisponível</span></div>} />
-          {msgText && !/^\[documento\]$/i.test(msgText) && <p className="whitespace-pre-wrap break-words text-sm">{msgText}</p>}
+          {msgText && !/^\[documento\]$/i.test(msgText) && <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">{msgText}</p>}
         </div>
       );
     }
@@ -1921,7 +1921,7 @@ function ConversationMessageItem({
         </div>
       );
     }
-    return <p className="text-sm">{msgText}</p>;
+    return <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">{msgText}</p>;
   };
 
   return (
@@ -1948,7 +1948,7 @@ function ConversationMessageItem({
         <div
           data-testid="conversation-message-bubble"
           style={style || conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)}
-          className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${isAgent
+          className={`max-w-full overflow-hidden break-words [overflow-wrap:anywhere] rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${isAgent
             ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
             : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'
             }`}

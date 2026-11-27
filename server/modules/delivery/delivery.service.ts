@@ -275,7 +275,7 @@ export function generateDeliveryCode(): string {
 }
 
 export function generateTrackingToken(): string {
-  return randomBytes(24).toString("hex");
+  return randomBytes(15).toString("base64url");
 }
 
 export function buildDeliveryTrackingUrl(trackingToken: string): string {

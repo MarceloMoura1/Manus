@@ -857,7 +857,7 @@ describe("niche-guard & restaurant delivery tickets (Entregas 1 e 2)", () => {
     expect(createTicketMock).toHaveBeenCalledTimes(1);
     expect(created.ticket).toEqual({ id: "ticket-uuid-001", number: 101 });
     expect(created.deliveryOrder.deliveryCode).toMatch(/^\d{4}$/);
-    expect(created.deliveryOrder.trackingToken.length).toBeGreaterThanOrEqual(32);
+    expect(created.deliveryOrder.trackingToken).toMatch(/^[A-Za-z0-9_-]{20}$/);
     expect(created.deliveryOrder.trackingUrl).toContain(`/r/${created.deliveryOrder.trackingToken}`);
     expect(created.deliveryOrder.addressType).toBe("apartamento");
     expect(created.deliveryOrder.addressComplement).toBe("Bloco B, Apto 402");
