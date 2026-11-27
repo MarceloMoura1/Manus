@@ -5,6 +5,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { randomUUID } from "crypto";
 import { megadeskTicketStatuses } from "../drizzle/schema";
+import { getTenantNicheContext } from "./modules/niche-guard";
+import { RESTAURANT_TICKET_STATUSES } from "./modules/delivery/delivery.service";
 
 export interface TicketStatus {
   statusId: string;
@@ -90,13 +92,23 @@ export async function getOrCreateDefaultStatuses(clientId: string): Promise<Tick
   const existing = await getTicketStatuses(clientId);
   if (existing.length > 0) return existing;
 
-  // Criar status padrão
-  const defaultStatuses = [
-    { name: "Aberto", color: "#ef4444", order: 1 },
-    { name: "Em Progresso", color: "#f59e0b", order: 2 },
-    { name: "Aguardando", color: "#3b82f6", order: 3 },
-    { name: "Fechado", color: "#10b981", order: 4 },
-  ];
+  // Status padrão por nicho: restaurante recebe o fluxo completo de delivery
+  let isRestaurant = false;
+  try {
+    const nicheCtx = await getTenantNicheContext(clientId);
+    isRestaurant = nicheCtx?.nicheProfile === "restaurante";
+  } catch {
+    isRestaurant = false;
+  }
+
+  const defaultStatuses = isRestaurant
+    ? RESTAURANT_TICKET_STATUSES.map((s) => ({ name: s.name, color: s.color, order: s.order }))
+    : [
+        { name: "Aberto", color: "#ef4444", order: 1 },
+        { name: "Em Progresso", color: "#f59e0b", order: 2 },
+        { name: "Aguardando", color: "#3b82f6", order: 3 },
+        { name: "Fechado", color: "#10b981", order: 4 },
+      ];
 
   const created: TicketStatus[] = [];
   for (const status of defaultStatuses) {

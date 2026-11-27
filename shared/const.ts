@@ -42,7 +42,7 @@ export const CONFIGURABLE_MODULES = [
 export const MODULE_LABELS = {
   "atendimento_ativo": "Atendimento Ativo",
   "conversas": "Atendimento",
-  "chamados": "Chamados",
+  "chamados": "Tickets",
   "rastreio": "Rastreamento",
   "erp": "ERP",
   "configurar_bot": "Configurar Bot",
@@ -52,7 +52,7 @@ export const MODULE_LABELS = {
   // Também suportar nomes em hífen (para backend)
   "active-attendance": "Atendimento",
   "conversations": "Atendimento",
-  "tickets": "Chamados",
+  "tickets": "Tickets",
   "tracking": "Rastreamento",
   "bot-config": "Configurar Bot",
   "ai-assistant": "Assistente IA",

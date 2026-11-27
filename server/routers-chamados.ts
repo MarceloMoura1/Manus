@@ -38,6 +38,7 @@ import {
   type TicketSortKey,
 } from "./db-chamados";
 import { getCrmClientById, listCrmClients } from "./db-crm";
+import { createDeliveryOrderForTicket } from "./modules/delivery/delivery.service";
 
 // Schemas Zod com validações rigorosas
 const ChamadoIdSchema = z.string().uuid('ID de chamado inválido');
@@ -294,6 +295,20 @@ export const chamadosRouter = router({
         observations: ObservationsSchema.optional().default(""),
         priority: PrioritySchema.default("media"),
         assignedToUserId: z.string().max(80).optional(),
+        delivery: z
+          .object({
+            orderSource: z.enum(["site", "whatsapp", "manual"]).default("manual"),
+            itemsSummary: z.string().max(4000).default(""),
+            orderTotal: z.number().min(0).default(0),
+            deliveryFee: z.number().min(0).default(0),
+            paymentMethod: z.string().min(1).max(80).default("A combinar"),
+            deliveryAddress: z.string().min(3).max(1000),
+            addressType: z.enum(["casa", "apartamento", "comercial", "outro"]).default("casa"),
+            addressComplement: z.string().max(255).nullable().optional(),
+            destinationLat: z.number().nullable().optional(),
+            destinationLng: z.number().nullable().optional(),
+          })
+          .optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -352,11 +367,32 @@ export const chamadosRouter = router({
           actor: creator,
         });
         
+        let deliveryOrder = null;
+        if (input.delivery) {
+          deliveryOrder = await createDeliveryOrderForTicket({
+            clientId,
+            ticketId: chamado.id,
+            orderSource: input.delivery.orderSource,
+            itemsSummary: input.delivery.itemsSummary,
+            orderTotal: input.delivery.orderTotal,
+            deliveryFee: input.delivery.deliveryFee,
+            paymentMethod: input.delivery.paymentMethod,
+            customerName,
+            customerPhone: customer.phone ?? "",
+            deliveryAddress: input.delivery.deliveryAddress,
+            addressType: input.delivery.addressType,
+            addressComplement: input.delivery.addressComplement ?? null,
+            destinationLat: input.delivery.destinationLat ?? null,
+            destinationLng: input.delivery.destinationLng ?? null,
+          });
+        }
+
         console.log('[SUCCESS] Chamado created:', chamado.id, 'number:', chamado.number);
-        
-        return { 
+
+        return {
           chamado,
-          message: `Chamado #${chamado.number} criado com sucesso`,
+          deliveryOrder,
+          message: `Ticket #${chamado.number} criado com sucesso`,
         };
       } catch (error) {
         console.error('[ERROR] Failed to create chamado:', error);

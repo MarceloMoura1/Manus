@@ -49,6 +49,7 @@ import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
 import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whatsapp.socket";
 import { classifyAssistantFailure } from "./assistant-error";
 import { hermesRouter } from "./modules/admin/hermes";
+import { deliveryRouter } from "./modules/delivery/delivery.router";
 import { assistantThreadsRouter, assistantRoutinesRouter } from "./modules/assistant";
 import { aiUsageRouter } from "./modules/ai-usage/ai-usage.router";
 import { botTrpcRouter } from "./modules/bot/bot.router";
@@ -553,6 +554,7 @@ export const appRouter = router({
   conversations: conversationsRouter,
   erp: erpRouter,
   chamados: chamadosRouter,
+  delivery: deliveryRouter,
   crm: crmRouter,
   whatsapp: whatsappRouter,
   evolution: evolutionRouter,

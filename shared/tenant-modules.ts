@@ -35,7 +35,7 @@ export interface ModuleDefinition {
 export const MODULE_CATALOG: ModuleDefinition[] = [
   // Operação & Atendimento
   { key: 'atendimento', label: 'Atendimento Omnichannel', description: 'Painel de conversas e chat WhatsApp', group: 'operacao' },
-  { key: 'chamados', label: 'Gestão de Chamados', description: 'Tickets e suporte interno/externo', group: 'operacao' },
+  { key: 'chamados', label: 'Gestão de Tickets', description: 'Tickets e suporte interno/externo', group: 'operacao' },
   { key: 'rastreamento', label: 'Rastreamento de Pedidos', description: 'Acompanhamento logístico de entregas', group: 'operacao' },
   { key: 'assistente_ia', label: 'Assistente & Bot de IA', description: 'Roteamento e automação inteligente', group: 'operacao' },
 

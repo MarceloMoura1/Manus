@@ -14,6 +14,7 @@ import { BotConfigPage } from "./BotConfigPage";
 import { AIAssistant } from "./AIAssistant";
 import { AITokenUsagePage } from "./AITokenUsagePage";
 import { AdminUnifiedHub, type AdminHubSubTab } from "@/components/AdminUnifiedHub";
+import { DeliveryTicketCard } from "@/components/DeliveryTicketCard";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
 import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorkspace";
 import { Users } from "lucide-react";
@@ -621,7 +622,7 @@ function DashboardPage({
     }
     if (chamadosAtivos > 0) {
       return {
-        label: "Ver Chamados",
+        label: "Ver Tickets",
         route: "tickets" as RouteId,
         className: "bg-indigo-500 hover:bg-indigo-600 text-white shadow-indigo-500/30",
         icon: ClipboardList,
@@ -1231,13 +1232,13 @@ function DashboardPage({
                       </span>
                     </div>
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      Chamados & Rastreio
+                      Tickets & Rastreio
                     </h4>
                     <div className="mt-1 flex items-baseline gap-2">
                       <span className="text-3xl font-black text-slate-900 dark:text-white">
                         {chamadosAtivos}
                       </span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">chamados abertos</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">tickets abertos</span>
                     </div>
 
                     <div className="flex flex-wrap gap-1.5 mt-3">
@@ -1280,7 +1281,7 @@ function DashboardPage({
                     onClick={() => setActive("tickets")}
                     className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center justify-between cursor-pointer group"
                   >
-                    <span>Acessar Chamados</span>
+                    <span>Acessar Tickets</span>
                     <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                   </button>
                 </div>
@@ -1693,7 +1694,7 @@ function DashboardPage({
                   },
                   {
                     key: "cardChamados" as const,
-                    title: "Chamados & Rastreamento",
+                    title: "Tickets & Rastreamento",
                     desc: "Tickets em aberto, prioridades urgentes e rastreios.",
                     icon: ClipboardList,
                     color: "text-blue-500",
@@ -3394,12 +3395,15 @@ type TicketActivity = {
 
 // Tipo Ticket já definido acima
 
-export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => void }) {
+export function TicketsPage({ onOpenMobileMenu, nicheProfile }: { onOpenMobileMenu?: () => void; nicheProfile?: string }) {
   // Sessão MegaDesk para obter clientId
   const sessionData = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
   }, []);
   const clientId: string = sessionData?.clientId ?? '';
+  const resolvedNiche = nicheProfile ?? sessionData?.nicheProfile ?? 'personalizado';
+  const isRestaurantNiche = resolvedNiche === 'restaurante';
+  const isAdminUser = sessionData?.role === 'admin' || sessionData?.userRole === 'admin';
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<string>('total');
   const [chamadoFilter, setChamadoFilter] = React.useState<'all' | 'mine'>('all');
@@ -3444,6 +3448,25 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     title: '',
     observations: '',
     priority: 'media',
+  });
+  const [newDeliveryForm, setNewDeliveryForm] = React.useState<{
+    orderSource: 'site' | 'whatsapp' | 'manual';
+    itemsSummary: string;
+    orderTotal: string;
+    deliveryFee: string;
+    paymentMethod: string;
+    deliveryAddress: string;
+    addressType: 'casa' | 'apartamento' | 'comercial' | 'outro';
+    addressComplement: string;
+  }>({
+    orderSource: 'manual',
+    itemsSummary: '',
+    orderTotal: '0',
+    deliveryFee: '0',
+    paymentMethod: 'Pix',
+    deliveryAddress: '',
+    addressType: 'casa',
+    addressComplement: '',
   });
   const [validationErrors, setValidationErrors] = React.useState<ValidationError[]>([]);
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -3894,12 +3917,27 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
         title: newChamadoForm.title,
         observations: newChamadoForm.observations,
         priority: newChamadoForm.priority,
+        ...(isRestaurantNiche && newDeliveryForm.deliveryAddress.trim().length >= 3
+          ? {
+              delivery: {
+                orderSource: newDeliveryForm.orderSource,
+                itemsSummary: newDeliveryForm.itemsSummary.trim(),
+                orderTotal: Number(newDeliveryForm.orderTotal || 0),
+                deliveryFee: Number(newDeliveryForm.deliveryFee || 0),
+                paymentMethod: newDeliveryForm.paymentMethod.trim() || "A combinar",
+                deliveryAddress: newDeliveryForm.deliveryAddress.trim(),
+                addressType: newDeliveryForm.addressType,
+                addressComplement: newDeliveryForm.addressComplement.trim() || null,
+              },
+            }
+          : {}),
       });
 
       if (result.chamado) {
-        showToast(`Chamado #${result.chamado.number} criado com sucesso!`, 'success');
+        showToast(`Ticket #${result.chamado.number} criado com sucesso!`, 'success');
         setShowNewChamadoModal(false);
         setNewChamadoForm({ customerId: '', title: '', observations: '', priority: 'media' });
+        setNewDeliveryForm({ orderSource: 'manual', itemsSummary: '', orderTotal: '0', deliveryFee: '0', paymentMethod: 'Pix', deliveryAddress: '', addressType: 'casa', addressComplement: '' });
         setCustomerSearch('');
         setDebouncedCustomerSearch('');
         setSelectedCrmCustomer(null);
@@ -4238,7 +4276,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       {/* Filtro de Pesquisa e Botao Novo Chamado */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         {onOpenMobileMenu && <button type="button" onClick={onOpenMobileMenu} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
-        <div className="inline-flex h-11 shrink-0 rounded-[10px] border border-slate-200 bg-slate-50 p-1" role="group" aria-label="Escopo dos chamados" data-testid="ticket-scope-control">
+        <div className="inline-flex h-11 shrink-0 rounded-[10px] border border-slate-200 bg-slate-50 p-1" role="group" aria-label="Escopo dos tickets" data-testid="ticket-scope-control">
           <button
             type="button"
             onClick={() => setChamadoFilter('all')}
@@ -4270,7 +4308,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           className="h-11 rounded-[10px] bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
         >
           <Plus className="w-4 h-4" />
-          Novo Chamado
+          Novo Ticket
         </Button>
       </div>
 
@@ -4313,7 +4351,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               {filteredChamados.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-500">
-                    Nenhum chamado encontrado
+                    Nenhum ticket encontrado
                   </td>
                 </tr>
               ) : (
@@ -4552,13 +4590,81 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 </Select>
               </div>
 
+              {isRestaurantNiche && (
+                <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5">
+                  <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
+                    🛵 Dados de Pedido &amp; Delivery (Restaurante)
+                  </p>
+                  <textarea
+                    rows={2}
+                    placeholder="Itens do pedido (ex: 2x Hambúrguer Artesanal, 1x Refrigerante)"
+                    value={newDeliveryForm.itemsSummary}
+                    onChange={(e) => setNewDeliveryForm((d) => ({ ...d, itemsSummary: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900"
+                  />
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Total (R$)"
+                      value={newDeliveryForm.orderTotal}
+                      onChange={(e) => setNewDeliveryForm((d) => ({ ...d, orderTotal: e.target.value }))}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+                    />
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Taxa rota (R$)"
+                      value={newDeliveryForm.deliveryFee}
+                      onChange={(e) => setNewDeliveryForm((d) => ({ ...d, deliveryFee: e.target.value }))}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Pagamento"
+                      value={newDeliveryForm.paymentMethod}
+                      onChange={(e) => setNewDeliveryForm((d) => ({ ...d, paymentMethod: e.target.value }))}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      placeholder="Endereço completo de entrega"
+                      value={newDeliveryForm.deliveryAddress}
+                      onChange={(e) => setNewDeliveryForm((d) => ({ ...d, deliveryAddress: e.target.value }))}
+                      className="col-span-2 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+                    />
+                    <select
+                      value={newDeliveryForm.addressType}
+                      onChange={(e) => setNewDeliveryForm((d) => ({ ...d, addressType: e.target.value as any }))}
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                    >
+                      <option value="casa">Casa</option>
+                      <option value="apartamento">Apartamento</option>
+                      <option value="comercial">Comercial</option>
+                      <option value="outro">Outro</option>
+                    </select>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Complemento / Referência (bloco, apto, portão)"
+                    value={newDeliveryForm.addressComplement}
+                    onChange={(e) => setNewDeliveryForm((d) => ({ ...d, addressComplement: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+                  />
+                </div>
+              )}
+
               <div className="flex gap-3 pt-4 border-t border-slate-300 mt-4">
                 <Button
                   onClick={handleCreateChamado}
                   disabled={createChamadoMutation.isPending || !newChamadoForm.customerId}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
                 >
-                  {createChamadoMutation.isPending ? '⏳ Criando...' : '✅ Criar Chamado'}
+                  {createChamadoMutation.isPending ? '⏳ Criando...' : '✅ Criar Ticket'}
                 </Button>
                 <Button
                   onClick={() => setShowNewChamadoModal(false)}
@@ -4620,7 +4726,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 onClick={() => setShowCloseModal(true)}
                 className="h-9 bg-red-500 px-4 font-semibold text-white hover:bg-red-600"
               >
-                Encerrar Chamado
+                Encerrar Ticket
               </Button>
             </div>
           </div>
@@ -4663,6 +4769,21 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               </div>
             </div>
           </section>
+
+          {/* Dados da Entrega & Motoboy — estritamente isolado para o nicho Restaurante */}
+          {isRestaurantNiche && (
+            <DeliveryTicketCard
+              ticketId={selectedChamado.id}
+              customerName={detailCustomer.name || ""}
+              customerPhone={detailCustomer.phone || ""}
+              isAdmin={isAdminUser}
+              onStatusChanged={() => {
+                void utils.chamados.list.invalidate();
+                void utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id });
+                void utils.chamados.getStatusCounts.invalidate();
+              }}
+            />
+          )}
 
           {/* Barra de ações do detalhe: mantém os handlers existentes na ordem canônica */}
           <div data-testid="ticket-action-bar" className="mx-4 mt-3 flex min-h-[72px] items-stretch justify-start overflow-x-auto rounded-xl border border-slate-200 bg-white px-2 py-1.5 shadow-sm sm:mx-6 lg:mx-8 lg:justify-center">
@@ -4745,7 +4866,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           {/* Primeira camada: historico principal e detalhes laterais */}
           <div className="mx-4 mt-6 grid gap-6 sm:mx-6 lg:mx-8 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
             <section data-testid="ticket-history-panel" aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 id="ticket-history-heading" className="flex items-center gap-2 text-lg font-semibold text-slate-900"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><MessageSquare className="h-4 w-4" /></span>Histórico do Chamado</h2>
+              <h2 id="ticket-history-heading" className="flex items-center gap-2 text-lg font-semibold text-slate-900"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><MessageSquare className="h-4 w-4" /></span>Histórico do Ticket</h2>
               <div className="mt-6">
                 {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
                   <TimelineActivity activities={selectedChamado.activities} chamadoId={selectedChamado.id} />
@@ -5895,7 +6016,7 @@ function NotificationsPage() {
 
 function getActiveModuleName(active: RouteId): string {
   if (active === "conversations" || active === "active-attendance") return "Atendimento";
-  if (active === "tickets") return "Chamados";
+  if (active === "tickets") return "Tickets";
   if (active === "tracking") return "Rastreamento";
   if (active.startsWith("crm-")) return "CRM";
   if (active.startsWith("erp-")) return "ERP";
@@ -6204,7 +6325,7 @@ export function AuthenticatedShell({
   const navItems = [
     { id: "home" as RouteId, label: "Home", icon: HomeIcon },
     { id: "conversations" as RouteId, label: "Atendimento", icon: MessageCircle },
-    { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
+    { id: "tickets" as RouteId, label: "Tickets", icon: ClipboardList },
     { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
     { id: "crm-summary" as RouteId, label: "CRM", icon: Users },
     { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
@@ -6507,7 +6628,7 @@ export function AuthenticatedShell({
                 setAttendanceIntent(current => consumeAttendanceLaunchIntent(current, launch));
               }}
             />}
-            {active === "tickets" && <TicketsPage onOpenMobileMenu={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} />}
+            {active === "tickets" && <TicketsPage nicheProfile={session.nicheProfile} onOpenMobileMenu={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} />}
             {active === "tracking" && <TrackingPage />}
             {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} enabledModules={enabledModules} />}
             {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} enabledModules={enabledModules} />}
@@ -6633,7 +6754,7 @@ export function AuthenticatedShell({
       >
         {[
           { id: "conversations" as RouteId, testId: "bottom-nav-conversations", label: "Atendimento", icon: MessageCircle, match: (r: string) => r === "conversations" || r === "active-attendance" },
-          { id: "tickets" as RouteId, testId: "bottom-nav-tickets", label: "Chamados", icon: ClipboardList, match: (r: string) => r === "tickets" },
+          { id: "tickets" as RouteId, testId: "bottom-nav-tickets", label: "Tickets", icon: ClipboardList, match: (r: string) => r === "tickets" },
           { id: "crm-summary" as RouteId, testId: "bottom-nav-crm-summary", label: "CRM", icon: Users, match: (r: string) => r.startsWith("crm-") },
           { id: "erp-summary" as RouteId, testId: "bottom-nav-erp-summary", label: "ERP", icon: PackageSearch, match: (r: string) => r.startsWith("erp-") },
           { id: "ai-assistant" as RouteId, testId: "bottom-nav-ai-assistant", label: "IA Copilot", icon: Sparkles, match: (r: string) => r === "ai-assistant" },

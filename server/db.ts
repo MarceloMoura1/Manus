@@ -7,6 +7,7 @@ import { sanitizeConversationMessagesForPersistence } from "./conversation-messa
 import { CONFIGURABLE_MODULES } from "@shared/const";
 import { resolveTenantEnabledModules } from "../shared/tenant-modules";
 import { ensureTenantAiMemoryTable } from "./modules/ai-memory/tenant-ai-memory";
+import { ensureDeliveryOrdersTable } from "./modules/delivery/delivery.service";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -348,6 +349,7 @@ export async function ensureTenantNicheColumns(pool: Pick<mysql.Pool, "execute">
 async function ensureStructuredTables() {
   await ensureTenantNicheColumns();
   await ensureTenantAiMemoryTable();
+  await ensureDeliveryOrdersTable();
   await verifyMainSchema();
   return;
   // Código histórico abaixo é deliberadamente inalcançável e será removido

@@ -113,11 +113,11 @@ describe("Chamados visual workspace", () => {
 
     expect(markup).not.toContain("Chamados:</label>");
     expect(markup).toContain('data-testid="ticket-scope-control"');
-    expect(markup).toContain('aria-label="Escopo dos chamados"');
+    expect(markup).toContain('aria-label="Escopo dos tickets"');
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain("Todos");
     expect(markup).toContain("Meus");
-    expect(markup).toContain("Novo Chamado");
+    expect(markup).toContain("Novo Ticket");
     expect(markup).toContain("Cliente Exemplo");
     expect(markup).toContain("Solicitação de suporte");
     expect(markup).toContain("Abertos");
@@ -201,7 +201,7 @@ describe("Chamados visual workspace", () => {
   it("keeps the original empty state in the light table", () => {
     const markup = renderTickets();
 
-    expect(markup).toContain("Nenhum chamado encontrado");
+    expect(markup).toContain("Nenhum ticket encontrado");
     expect(markup).toContain('colSpan="7"');
     expect(markup).toContain("px-5 py-10 text-center text-sm text-slate-500");
     expect(markup).not.toContain("Ajuste os filtros ou crie um novo chamado para começar.");
