@@ -16,6 +16,7 @@ import { AITokenUsagePage } from "./AITokenUsagePage";
 import { AdminUnifiedHub, type AdminHubSubTab } from "@/components/AdminUnifiedHub";
 import { DeliveryTicketCard } from "@/components/DeliveryTicketCard";
 import { MotoboyWorkspace } from "./MotoboyWorkspace";
+import { RestaurantTrackingWorkspace } from "./RestaurantTrackingWorkspace";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
 import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorkspace";
 import { Users } from "lucide-react";
@@ -6680,7 +6681,7 @@ export function AuthenticatedShell({
               }}
             />}
             {active === "tickets" && <TicketsPage nicheProfile={session.nicheProfile} onOpenMobileMenu={() => { setSidebarOpen(true); setMobileDrawerOpen(true); }} />}
-            {active === "tracking" && <TrackingPage />}
+            {active === "tracking" && (session.nicheProfile === "restaurante" ? <RestaurantTrackingWorkspace /> : <TrackingPage />)}
             {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} enabledModules={enabledModules} />}
             {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} enabledModules={enabledModules} />}
             {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}

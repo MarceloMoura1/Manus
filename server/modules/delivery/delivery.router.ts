@@ -10,7 +10,9 @@ import {
   createDeliveryOrderForTicket,
   createRestaurantOrderWithTicket,
   ensureRestaurantTicketStatuses,
+  getDeliveryLiveOverview,
   getDeliveryOrderByTicket,
+  getDeliveryPayoutReport,
   getMotoboyHistory,
   getMotoboyQueue,
   listTenantMotoboys,
@@ -264,6 +266,31 @@ export const deliveryRouter = router({
   listMotoboys: megadeskProcedure.query(async ({ ctx }) => {
     return listTenantMotoboys(ctx.tenantId);
   }),
+
+  liveOverview: megadeskProcedure.query(async ({ ctx }) => {
+    return getDeliveryLiveOverview(ctx.tenantId);
+  }),
+
+  payoutReport: megadeskProcedure
+    .input(
+      z
+        .object({
+          motoboyUserId: z.string().optional(),
+          preset: historyPeriodSchema.default("today"),
+          startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        })
+        .default({ preset: "today" })
+    )
+    .query(async ({ input, ctx }) => {
+      return getDeliveryPayoutReport({
+        clientId: ctx.tenantId,
+        motoboyUserId: input.motoboyUserId,
+        preset: input.preset,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      });
+    }),
 
   toggleMotoboyTag: megadeskProcedure
     .input(

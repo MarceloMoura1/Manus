@@ -6,7 +6,9 @@ import {
   completeDeliveryOrder,
   createRestaurantOrderWithTicket,
   ensureRestaurantTicketStatuses,
+  getDeliveryLiveOverview,
   getDeliveryOrderByTicket,
+  getDeliveryPayoutReport,
   getMotoboyHistory,
   getMotoboyQueue,
   resetDeliveryTableEnsuredState,
@@ -64,7 +66,10 @@ type FakeLocationRow = {
   updated_at: Date;
 };
 
-function createFakeDeliveryPool(clients: FakeClient[]) {
+function createFakeDeliveryPool(
+  clients: FakeClient[],
+  users: Array<{ client_id: string; user_id: string; name: string; email: string; role: string; status: string; permissions_json: string }> = []
+) {
   const clientMap = new Map(clients.map((c) => [c.client_id, c]));
   const orders = new Map<string, FakeOrderRow>();
   const locations = new Map<string, FakeLocationRow>();
@@ -92,6 +97,48 @@ function createFakeDeliveryPool(clients: FakeClient[]) {
       if (q.startsWith("SELECT niche_profile, enabled_modules FROM megadesk_domain_clients")) {
         const row = clientMap.get(String(params[0]));
         return [row ? [row] : [], []];
+      }
+
+      if (q.startsWith("SELECT user_id, name, email, role, permissions_json FROM megadesk_domain_client_users")) {
+        const cid = String(params[0]);
+        return [users.filter((u) => u.client_id === cid && u.status === "active"), []];
+      }
+
+      if (q.startsWith("SELECT user_id, name FROM megadesk_domain_client_users")) {
+        const cid = String(params[0]);
+        return [users.filter((u) => u.client_id === cid), []];
+      }
+
+      if (q.startsWith("SELECT * FROM megadesk_motoboy_locations WHERE client_id = ?")) {
+        const cid = String(params[0]);
+        return [[...locations.values()].filter((l) => l.client_id === cid), []];
+      }
+
+      if (q.includes("AND d.delivery_status IN ('pending', 'assigned', 'in_route')")) {
+        const cid = String(params[0]);
+        const rows = [...orders.values()].filter(
+          (r) =>
+            r.client_id === cid &&
+            (r.delivery_status === "pending" ||
+              r.delivery_status === "assigned" ||
+              r.delivery_status === "in_route")
+        );
+        return [rows, []];
+      }
+
+      // payoutReport (with or without motoboy filter)
+      if (q.includes("AND d.delivery_status = 'delivered'") && !q.includes("AND d.motoboy_user_id = ?")) {
+        const cid = String(params[0]);
+        const start = params[1] instanceof Date ? params[1] : new Date(String(params[1]));
+        const end = params[2] instanceof Date ? params[2] : new Date(String(params[2]));
+        const rows = [...orders.values()]
+          .filter((r) => {
+            if (r.client_id !== cid || r.delivery_status !== "delivered") return false;
+            const ts = (r.delivered_at ?? r.created_at).getTime();
+            return ts >= start.getTime() && ts <= end.getTime();
+          })
+          .sort((a, b) => (b.delivered_at ?? b.created_at).getTime() - (a.delivered_at ?? a.created_at).getTime());
+        return [rows, []];
       }
 
       if (q.startsWith("SELECT status_id, name, color, `order` FROM megadesk_ticket_statuses")) {
@@ -709,5 +756,255 @@ describe("niche-guard & restaurant delivery tickets (Entregas 1 e 2)", () => {
     expect(updatedO1?.currentLat).toBe(-25.4284);
     expect(updatedO1?.currentLng).toBe(-49.2733);
     expect(untouchedO2?.currentLat).toBeNull();
+  });
+
+  it("liveOverview retorna motoboys, GPS online, pedidos ativos e fila sem atribuição (bloqueando outros nichos)", async () => {
+    const pool = createFakeDeliveryPool(
+      [
+        { client_id: "tenant-rest", niche_profile: "restaurante", enabled_modules: null },
+        { client_id: "tenant-ecom", niche_profile: "ecommerce", enabled_modules: null },
+      ],
+      [
+        {
+          client_id: "tenant-rest",
+          user_id: "mb-1",
+          name: "Carlos Moto",
+          email: "carlos@rest.com",
+          role: "agent",
+          status: "active",
+          permissions_json: JSON.stringify(["motoboy"]),
+        },
+        {
+          client_id: "tenant-rest",
+          user_id: "mb-2",
+          name: "Lucas Moto",
+          email: "lucas@rest.com",
+          role: "agent",
+          status: "active",
+          permissions_json: JSON.stringify(["motoboy"]),
+        },
+      ]
+    );
+
+    await expect(getDeliveryLiveOverview("tenant-ecom", pool)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+
+    let seq = 0;
+    const createTicketMock = vi.fn().mockImplementation(async () => ({ id: `t-live-${++seq}`, number: 500 + seq }));
+    const o1 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c1",
+        customerName: "Ana",
+        customerPhone: "5541999990001",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "site",
+        itemsSummary: "1x Pizza",
+        orderTotal: 70,
+        deliveryFee: 10,
+        paymentMethod: "Pago online",
+        deliveryAddress: "Rua A, 10",
+        destinationLat: -25.43,
+        destinationLng: -49.27,
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+    const o2 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c2",
+        customerName: "Bruno",
+        customerPhone: "5541999990002",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "whatsapp",
+        itemsSummary: "1x Burger",
+        orderTotal: 45,
+        deliveryFee: 8,
+        paymentMethod: "Pix",
+        deliveryAddress: "Rua B, 20",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+    const oPending = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c3",
+        customerName: "Carla",
+        customerPhone: "5541999990003",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "manual",
+        itemsSummary: "2x Esfiha",
+        orderTotal: 35,
+        deliveryFee: 7,
+        paymentMethod: "Dinheiro",
+        deliveryAddress: "Rua C, 30",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    await assignMotoboyToOrder(
+      { clientId: "tenant-rest", ticketId: o1.ticket.id, motoboyUserId: "mb-1", routeSequence: 1 },
+      pool
+    );
+    await assignMotoboyToOrder(
+      { clientId: "tenant-rest", ticketId: o2.ticket.id, motoboyUserId: "mb-1", routeSequence: 2 },
+      pool
+    );
+    await startDeliveryRoute(
+      { clientId: "tenant-rest", ticketId: o1.ticket.id, actorUserId: "mb-1" },
+      { pool, sendWhatsApp: vi.fn().mockResolvedValue({ ok: true }) }
+    );
+    await updateMotoboyLocation(
+      {
+        clientId: "tenant-rest",
+        motoboyUserId: "mb-1",
+        lat: -25.429,
+        lng: -49.271,
+        speed: 10,
+        activeOrderId: o1.deliveryOrder.id,
+      },
+      pool
+    );
+
+    const overview = await getDeliveryLiveOverview("tenant-rest", pool);
+    expect(overview.motoboys).toHaveLength(2);
+    const mb1 = overview.motoboys.find((m) => m.userId === "mb-1");
+    const mb2 = overview.motoboys.find((m) => m.userId === "mb-2");
+
+    expect(mb1?.status).toBe("in_route");
+    expect(mb1?.isOnline).toBe(true);
+    expect(mb1?.location?.lat).toBe(-25.429);
+    expect(mb1?.activeOrder?.ticketId).toBe(o1.ticket.id);
+    expect(mb1?.queuedCount).toBe(1);
+
+    expect(mb2?.status).toBe("available");
+    expect(mb2?.isOnline).toBe(false);
+
+    expect(overview.activeOrders).toHaveLength(2);
+    expect(overview.unassignedOrders.map((u) => u.ticketId)).toEqual([oPending.ticket.id]);
+  });
+
+  it("payoutReport filtra por motoboy e período e calcula totalPayout, averageFee e byMotoboy", async () => {
+    const pool = createFakeDeliveryPool(
+      [
+        { client_id: "tenant-rest", niche_profile: "restaurante", enabled_modules: null },
+        { client_id: "tenant-serv", niche_profile: "prestacao_servicos", enabled_modules: null },
+      ],
+      [
+        {
+          client_id: "tenant-rest",
+          user_id: "mb-1",
+          name: "Carlos Moto",
+          email: "carlos@rest.com",
+          role: "agent",
+          status: "active",
+          permissions_json: JSON.stringify(["motoboy"]),
+        },
+        {
+          client_id: "tenant-rest",
+          user_id: "mb-2",
+          name: "Lucas Moto",
+          email: "lucas@rest.com",
+          role: "agent",
+          status: "active",
+          permissions_json: JSON.stringify(["motoboy"]),
+        },
+      ]
+    );
+
+    await expect(
+      getDeliveryPayoutReport({ clientId: "tenant-serv", preset: "today" }, pool)
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    let seq = 0;
+    const createTicketMock = vi.fn().mockImplementation(async () => ({ id: `t-pay-${++seq}`, number: 600 + seq }));
+    const d1 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c1",
+        customerName: "Cliente 1",
+        customerPhone: "5541999990001",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "site",
+        itemsSummary: "Combo 1",
+        orderTotal: 80,
+        deliveryFee: 10,
+        paymentMethod: "Pix",
+        deliveryAddress: "Rua 1",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+    const d2 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c2",
+        customerName: "Cliente 2",
+        customerPhone: "5541999990002",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "site",
+        itemsSummary: "Combo 2",
+        orderTotal: 100,
+        deliveryFee: 14,
+        paymentMethod: "Pago online",
+        deliveryAddress: "Rua 2",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+    const d3 = await createRestaurantOrderWithTicket(
+      {
+        clientId: "tenant-rest",
+        customerId: "c3",
+        customerName: "Cliente 3",
+        customerPhone: "5541999990003",
+        actor: { userId: "admin", userName: "Admin" },
+        orderSource: "whatsapp",
+        itemsSummary: "Combo 3",
+        orderTotal: 60,
+        deliveryFee: 12,
+        paymentMethod: "Cartão",
+        deliveryAddress: "Rua 3",
+      },
+      { pool, createTicket: createTicketMock as any }
+    );
+
+    await assignMotoboyToOrder({ clientId: "tenant-rest", ticketId: d1.ticket.id, motoboyUserId: "mb-1" }, pool);
+    await assignMotoboyToOrder({ clientId: "tenant-rest", ticketId: d2.ticket.id, motoboyUserId: "mb-1" }, pool);
+    await assignMotoboyToOrder({ clientId: "tenant-rest", ticketId: d3.ticket.id, motoboyUserId: "mb-2" }, pool);
+
+    await completeDeliveryOrder(
+      { clientId: "tenant-rest", ticketId: d1.ticket.id, deliveryCode: d1.deliveryOrder.deliveryCode, motoboyUserId: "mb-1" },
+      pool
+    );
+    await completeDeliveryOrder(
+      { clientId: "tenant-rest", ticketId: d2.ticket.id, deliveryCode: d2.deliveryOrder.deliveryCode, motoboyUserId: "mb-1" },
+      pool
+    );
+    await completeDeliveryOrder(
+      { clientId: "tenant-rest", ticketId: d3.ticket.id, deliveryCode: d3.deliveryOrder.deliveryCode, motoboyUserId: "mb-2" },
+      pool
+    );
+
+    const allReport = await getDeliveryPayoutReport({ clientId: "tenant-rest", preset: "today" }, pool);
+    expect(allReport.summary).toEqual({
+      totalDeliveries: 3,
+      totalPayout: 36,
+      averageFee: 12,
+    });
+    expect(allReport.byMotoboy).toEqual([
+      { motoboyUserId: "mb-1", motoboyName: "Carlos Moto", deliveriesCount: 2, totalAmount: 24 },
+      { motoboyUserId: "mb-2", motoboyName: "Lucas Moto", deliveriesCount: 1, totalAmount: 12 },
+    ]);
+
+    const mb1Report = await getDeliveryPayoutReport(
+      { clientId: "tenant-rest", motoboyUserId: "mb-1", preset: "today" },
+      pool
+    );
+    expect(mb1Report.summary).toEqual({
+      totalDeliveries: 2,
+      totalPayout: 24,
+      averageFee: 12,
+    });
+    expect(mb1Report.deliveries).toHaveLength(2);
   });
 });

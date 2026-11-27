@@ -1048,3 +1048,293 @@ export async function toggleUserMotoboyTag(
 
   return { ok: true, userId: input.userId, isMotoboy: input.enabled };
 }
+
+export interface LiveMotoboySnapshot {
+  userId: string;
+  name: string;
+  email: string;
+  status: "in_route" | "available";
+  isOnline: boolean;
+  location: {
+    lat: number;
+    lng: number;
+    speed: number | null;
+    heading: number | null;
+    updatedAt: string;
+  } | null;
+  activeOrder: DeliveryOrderRecord | null;
+  queuedCount: number;
+}
+
+export interface LiveOrderSnapshot extends DeliveryOrderRecord {
+  motoboyName: string | null;
+}
+
+/**
+ * Visão consolidada ao vivo para o Painel Master do Restaurante:
+ * motoboys + GPS em tempo real, entregas ativas e fila pendente sem atribuição.
+ */
+export async function getDeliveryLiveOverview(
+  clientId: string,
+  pool: NicheQueryExecutor = getPool(),
+  nowMs: number = Date.now()
+): Promise<{
+  motoboys: LiveMotoboySnapshot[];
+  activeOrders: LiveOrderSnapshot[];
+  unassignedOrders: DeliveryOrderRecord[];
+  generatedAt: string;
+}> {
+  await assertTenantNiche(clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const { motoboys: taggedMotoboys, allUsers } = await listTenantMotoboys(clientId, pool);
+  const userNameMap = new Map<string, { name: string; email: string }>(
+    allUsers.map((u) => [u.userId, { name: u.name, email: u.email }])
+  );
+
+  const [locRows] = (await pool.execute(
+    "SELECT * FROM megadesk_motoboy_locations WHERE client_id = ?",
+    [clientId]
+  )) as any[];
+
+  const locMap = new Map<
+    string,
+    { lat: number; lng: number; speed: number | null; heading: number | null; updatedAt: string; updatedMs: number }
+  >();
+  for (const r of locRows || []) {
+    const dt = r.updated_at ? new Date(r.updated_at) : new Date(nowMs);
+    locMap.set(String(r.motoboy_user_id), {
+      lat: Number(r.lat),
+      lng: Number(r.lng),
+      speed: r.speed != null ? Number(r.speed) : null,
+      heading: r.heading != null ? Number(r.heading) : null,
+      updatedAt: dt.toISOString(),
+      updatedMs: dt.getTime(),
+    });
+  }
+
+  const [orderRows] = (await pool.execute(
+    `SELECT d.*, c.chamadoNumber AS ticket_number
+     FROM megadesk_delivery_orders d
+     LEFT JOIN megadesk_domain_chamados c
+       ON c.chamadoId = d.ticket_id AND c.clientId = d.client_id
+     WHERE d.client_id = ?
+       AND d.delivery_status IN ('pending', 'assigned', 'in_route')
+     ORDER BY d.route_sequence ASC, d.created_at ASC`,
+    [clientId]
+  )) as any[];
+
+  const mappedOrders = (orderRows || []).map(mapRowToDeliveryOrder);
+
+  const activeOrders: LiveOrderSnapshot[] = [];
+  const unassignedOrders: DeliveryOrderRecord[] = [];
+  const inRouteByMotoboy = new Map<string, DeliveryOrderRecord>();
+  const queuedCountByMotoboy = new Map<string, number>();
+
+  for (const order of mappedOrders) {
+    if (order.deliveryStatus === "pending") {
+      unassignedOrders.push(order);
+    } else {
+      const mName = order.motoboyUserId ? userNameMap.get(order.motoboyUserId)?.name ?? "Motoboy" : null;
+      activeOrders.push({ ...order, motoboyName: mName });
+      if (order.motoboyUserId) {
+        if (order.deliveryStatus === "in_route") {
+          inRouteByMotoboy.set(order.motoboyUserId, order);
+        } else if (order.deliveryStatus === "assigned") {
+          queuedCountByMotoboy.set(
+            order.motoboyUserId,
+            (queuedCountByMotoboy.get(order.motoboyUserId) ?? 0) + 1
+          );
+        }
+      }
+    }
+  }
+
+  unassignedOrders.sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
+  // Garante inclusão de todos os motoboys marcados e de qualquer motoboy com localização ou pedido ativo
+  const motoboyIds = new Set<string>(taggedMotoboys.map((m) => m.userId));
+  for (const id of locMap.keys()) motoboyIds.add(id);
+  for (const id of inRouteByMotoboy.keys()) motoboyIds.add(id);
+  for (const id of queuedCountByMotoboy.keys()) motoboyIds.add(id);
+
+  const THREE_MIN_MS = 3 * 60 * 1000;
+  const motoboys: LiveMotoboySnapshot[] = [...motoboyIds].map((userId) => {
+    const info = userNameMap.get(userId);
+    const loc = locMap.get(userId) ?? null;
+    const activeOrder = inRouteByMotoboy.get(userId) ?? null;
+    const queuedCount = queuedCountByMotoboy.get(userId) ?? 0;
+    const isOnline = Boolean(loc && nowMs - loc.updatedMs <= THREE_MIN_MS);
+
+    return {
+      userId,
+      name: info?.name || "Motoboy",
+      email: info?.email || "",
+      status: activeOrder ? "in_route" : "available",
+      isOnline,
+      location: loc
+        ? {
+            lat: loc.lat,
+            lng: loc.lng,
+            speed: loc.speed,
+            heading: loc.heading,
+            updatedAt: loc.updatedAt,
+          }
+        : null,
+      activeOrder,
+      queuedCount,
+    };
+  });
+
+  motoboys.sort((a, b) => {
+    if (a.status !== b.status) return a.status === "in_route" ? -1 : 1;
+    if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return {
+    motoboys,
+    activeOrders,
+    unassignedOrders,
+    generatedAt: new Date(nowMs).toISOString(),
+  };
+}
+
+export interface PayoutDeliveryItem {
+  id: string;
+  ticketId: string;
+  ticketNumber: number | null;
+  motoboyUserId: string | null;
+  motoboyName: string;
+  customerName: string;
+  deliveryAddress: string;
+  paymentMethod: string;
+  orderSource: DeliveryOrderSource;
+  startedAt: string | null;
+  deliveredAt: string | null;
+  orderTotal: number;
+  deliveryFee: number;
+}
+
+export interface PayoutMotoboySummary {
+  motoboyUserId: string;
+  motoboyName: string;
+  deliveriesCount: number;
+  totalAmount: number;
+}
+
+/**
+ * Relatório financeiro de fechamento e repasses de motoboys (apenas nicho restaurante).
+ */
+export async function getDeliveryPayoutReport(
+  input: {
+    clientId: string;
+    motoboyUserId?: string;
+    preset: MotoboyHistoryPeriod;
+    startDate?: string;
+    endDate?: string;
+  },
+  pool: NicheQueryExecutor = getPool()
+): Promise<{
+  summary: { totalDeliveries: number; totalPayout: number; averageFee: number };
+  byMotoboy: PayoutMotoboySummary[];
+  deliveries: PayoutDeliveryItem[];
+  preset: MotoboyHistoryPeriod;
+  rangeStart: string;
+  rangeEnd: string;
+}> {
+  await assertTenantNiche(input.clientId, ["restaurante"], pool);
+  await ensureDeliveryOrdersTable(pool);
+
+  const { start, end } = resolveMotoboyHistoryRange(input.preset, input.startDate, input.endDate);
+
+  const [userRows] = (await pool.execute(
+    "SELECT user_id, name FROM megadesk_domain_client_users WHERE client_id = ?",
+    [input.clientId]
+  )) as any[];
+  const userNameMap = new Map<string, string>(
+    (userRows || []).map((u: any) => [String(u.user_id), String(u.name)])
+  );
+
+  const hasMotoboyFilter = Boolean(input.motoboyUserId && input.motoboyUserId !== "all");
+  const sql = hasMotoboyFilter
+    ? `SELECT d.*, c.chamadoNumber AS ticket_number
+       FROM megadesk_delivery_orders d
+       LEFT JOIN megadesk_domain_chamados c
+         ON c.chamadoId = d.ticket_id AND c.clientId = d.client_id
+       WHERE d.client_id = ?
+         AND d.delivery_status = 'delivered'
+         AND d.motoboy_user_id = ?
+         AND COALESCE(d.delivered_at, d.created_at) >= ?
+         AND COALESCE(d.delivered_at, d.created_at) <= ?
+       ORDER BY COALESCE(d.delivered_at, d.created_at) DESC`
+    : `SELECT d.*, c.chamadoNumber AS ticket_number
+       FROM megadesk_delivery_orders d
+       LEFT JOIN megadesk_domain_chamados c
+         ON c.chamadoId = d.ticket_id AND c.clientId = d.client_id
+       WHERE d.client_id = ?
+         AND d.delivery_status = 'delivered'
+         AND COALESCE(d.delivered_at, d.created_at) >= ?
+         AND COALESCE(d.delivered_at, d.created_at) <= ?
+       ORDER BY COALESCE(d.delivered_at, d.created_at) DESC`;
+
+  const params = hasMotoboyFilter
+    ? [input.clientId, input.motoboyUserId, start, end]
+    : [input.clientId, start, end];
+
+  const [rows] = (await pool.execute(sql, params)) as any[];
+  const mapped = (rows || []).map(mapRowToDeliveryOrder);
+
+  const deliveries: PayoutDeliveryItem[] = mapped.map((o: DeliveryOrderRecord) => ({
+    id: o.id,
+    ticketId: o.ticketId,
+    ticketNumber: o.ticketNumber ?? null,
+    motoboyUserId: o.motoboyUserId,
+    motoboyName: o.motoboyUserId ? userNameMap.get(o.motoboyUserId) || "Motoboy" : "Sem motoboy",
+    customerName: o.customerName,
+    deliveryAddress: o.deliveryAddress,
+    paymentMethod: o.paymentMethod,
+    orderSource: o.orderSource,
+    startedAt: o.startedAt,
+    deliveredAt: o.deliveredAt,
+    orderTotal: o.orderTotal,
+    deliveryFee: o.deliveryFee,
+  }));
+
+  const grouped = new Map<string, PayoutMotoboySummary>();
+  let totalPayoutRaw = 0;
+
+  for (const item of deliveries) {
+    totalPayoutRaw += item.deliveryFee;
+    const key = item.motoboyUserId || "unassigned";
+    const cur = grouped.get(key) ?? {
+      motoboyUserId: key,
+      motoboyName: item.motoboyName,
+      deliveriesCount: 0,
+      totalAmount: 0,
+    };
+    cur.deliveriesCount += 1;
+    cur.totalAmount = Number((cur.totalAmount + item.deliveryFee).toFixed(2));
+    grouped.set(key, cur);
+  }
+
+  const totalDeliveries = deliveries.length;
+  const totalPayout = Number(totalPayoutRaw.toFixed(2));
+  const averageFee = totalDeliveries > 0 ? Number((totalPayout / totalDeliveries).toFixed(2)) : 0;
+  const byMotoboy = [...grouped.values()].sort((a, b) => b.totalAmount - a.totalAmount);
+
+  return {
+    summary: {
+      totalDeliveries,
+      totalPayout,
+      averageFee,
+    },
+    byMotoboy,
+    deliveries,
+    preset: input.preset,
+    rangeStart: start.toISOString(),
+    rangeEnd: end.toISOString(),
+  };
+}
